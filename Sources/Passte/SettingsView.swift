@@ -8,7 +8,6 @@ struct SettingsView: View {
     @ObservedObject var state: AppState
     @ObservedObject var settings: AppSettings
     let pasteCoordinator: PasteCoordinator
-    let onMonitoringChange: () -> Void
     let onShortcutChange: () -> Void
     let onExport: () -> Void
     let onImport: () -> Void
@@ -33,7 +32,6 @@ struct SettingsView: View {
     private var general: some View {
         Form {
             Section("运行") {
-                Toggle("监控剪贴板", isOn: Binding(get: { settings.monitoringEnabled }, set: { settings.monitoringEnabled = $0; onMonitoringChange() }))
                 Toggle("登录时启动 Passte", isOn: Binding(get: { loginEnabled }, set: { enabled in updateLoginItem(enabled) }))
                 Toggle("Return 默认直接粘贴", isOn: $settings.defaultDirectPaste)
             }

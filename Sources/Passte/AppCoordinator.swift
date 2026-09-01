@@ -14,6 +14,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
     private var settingsWindow: NSWindow?
     private var onboardingWindow: NSWindow?
     private var workspaceObserver: NSObjectProtocol?
+    private var libraryKeyMonitor: Any?
     private var maintenanceTimer: Timer?
     private var lastExternalApplication: NSRunningApplication?
     private lazy var quickPanel = QuickPanelController(
@@ -45,6 +46,16 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
                 self?.lastExternalApplication = app
             }
         }
+        libraryKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self,
+                  event.keyCode == 13,
+                  event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+                  let window = self.libraryWindow,
+                  window.isKeyWindow,
+                  window.attachedSheet == nil else { return event }
+            window.performClose(nil)
+            return nil
+        }
     }
 
     func start() {
@@ -54,11 +65,9 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
         maintenanceTimer = Timer.scheduledTimer(withTimeInterval: 86_400, repeats: true) { [weak state] _ in
             Task { @MainActor in await state?.runArchive() }
         }
-        if settings.completedOnboarding {
-            applyMonitoringState()
-        } else {
-            settings.monitoringEnabled = true
-            applyMonitoringState()
+        settings.monitoringEnabled = true
+        monitor.start()
+        if !settings.completedOnboarding {
             openOnboarding()
         }
 #if DEBUG
@@ -120,8 +129,6 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
         menu.addItem(menuItem("打开快捷面板", action: #selector(toggleQuickPanel), key: ""))
         menu.addItem(menuItem("打开资料库", action: #selector(openLibraryAction), key: ""))
         menu.addItem(.separator())
-        menu.addItem(menuItem("暂停监控", action: #selector(toggleMonitoring), key: ""))
-        menu.addItem(.separator())
         menu.addItem(menuItem("设置…", action: #selector(openSettingsAction), key: ","))
         menu.addItem(menuItem("退出 Passte", action: #selector(quit), key: "q"))
         statusItem.menu = menu
@@ -129,8 +136,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) {
         menu.items.first?.title = "打开快捷面板（\(ShortcutFormatter.display(keyCode: settings.shortcutKeyCode, modifiers: settings.shortcutModifiers))）"
-        if menu.items.count > 3 { menu.items[3].title = settings.monitoringEnabled ? "暂停监控" : "恢复监控" }
-        statusItem.button?.image = NSImage(systemSymbolName: settings.monitoringEnabled ? "clipboard" : "clipboard.fill", accessibilityDescription: settings.monitoringEnabled ? "Passte 正在监控" : "Passte 监控已暂停")
+        statusItem.button?.image = NSImage(systemSymbolName: "clipboard", accessibilityDescription: "Passte")
     }
 
     private func menuItem(_ title: String, action: Selector, key: String) -> NSMenuItem {
@@ -140,17 +146,12 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
     @objc private func toggleQuickPanel() { quickPanel.toggle() }
     @objc private func openLibraryAction() { openLibrary() }
     @objc private func openSettingsAction() { openSettings() }
-    @objc private func toggleMonitoring() { settings.monitoringEnabled.toggle(); applyMonitoringState() }
     @objc private func quit() { NSApplication.shared.terminate(nil) }
 
     private func registerHotKey() {
         if !hotKeyManager.register(keyCode: settings.shortcutKeyCode, modifiers: settings.shortcutModifiers) {
             state.presentStatus(hotKeyManager.lastError ?? "快捷键注册失败", kind: .error, dismissAfter: 5)
         }
-    }
-
-    private func applyMonitoringState() {
-        if settings.monitoringEnabled { monitor.start() } else { monitor.stop() }
     }
 
     private func openOnboarding() {
@@ -185,7 +186,6 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
         if settingsWindow == nil {
             let view = SettingsView(
                 state: state, settings: settings, pasteCoordinator: pasteCoordinator,
-                onMonitoringChange: { [weak self] in self?.applyMonitoringState() },
                 onShortcutChange: { [weak self] in self?.registerHotKey() },
                 onExport: { [weak self] in self?.exportBackup() },
                 onImport: { [weak self] in self?.importBackup() }

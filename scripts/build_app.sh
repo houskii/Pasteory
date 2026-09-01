@@ -8,7 +8,21 @@ APP_DIR="$DIST_DIR/Passte.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
-SIGN_IDENTITY=${PASSTE_SIGN_IDENTITY:--}
+LOCAL_SIGNING_DIR="$HOME/Library/Application Support/Passte/Signing"
+LOCAL_SIGNING_KEYCHAIN="$LOCAL_SIGNING_DIR/PassteBuild.keychain-db"
+LOCAL_SIGNING_PASSWORD_FILE="$LOCAL_SIGNING_DIR/keychain-password"
+CODESIGN_KEYCHAIN_ARGS=()
+if [[ -n ${PASSTE_SIGN_IDENTITY:-} ]]; then
+  SIGN_IDENTITY=$PASSTE_SIGN_IDENTITY
+elif [[ -f "$LOCAL_SIGNING_KEYCHAIN" && -f "$LOCAL_SIGNING_PASSWORD_FILE" ]]; then
+  LOCAL_SIGNING_PASSWORD=$(<"$LOCAL_SIGNING_PASSWORD_FILE")
+  security unlock-keychain -p "$LOCAL_SIGNING_PASSWORD" "$LOCAL_SIGNING_KEYCHAIN"
+  SIGN_IDENTITY=$(security find-identity -v -p codesigning "$LOCAL_SIGNING_KEYCHAIN" | awk '/Passte Local Build/{print $2; exit}')
+  [[ -n "$SIGN_IDENTITY" ]] || { echo "Passte Local Build 签名身份不可用" >&2; exit 1; }
+  CODESIGN_KEYCHAIN_ARGS=(--keychain "$LOCAL_SIGNING_KEYCHAIN")
+else
+  SIGN_IDENTITY="-"
+fi
 
 arch -arm64 /usr/bin/swift build --package-path "$PROJECT_DIR" -c release --arch arm64
 BIN_DIR=$(arch -arm64 /usr/bin/swift build --package-path "$PROJECT_DIR" -c release --arch arm64 --show-bin-path)
@@ -29,5 +43,5 @@ for entry in "16 icon_16x16.png" "32 icon_16x16@2x.png" "32 icon_32x32.png" "64 
 done
 iconutil -c icns "$ICON_WORK/AppIcon.iconset" -o "$RESOURCES_DIR/AppIcon.icns"
 
-codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_DIR"
+codesign --force --deep --sign "$SIGN_IDENTITY" "${CODESIGN_KEYCHAIN_ARGS[@]}" "$APP_DIR"
 echo "$APP_DIR"

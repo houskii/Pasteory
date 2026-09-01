@@ -20,7 +20,7 @@ make install
 
 构建产物位于 `dist/Passte.app` 和 `dist/Passte-0.1.0-arm64.dmg`。默认使用 ad-hoc 签名，没有经过 Apple 公证。ad-hoc 签名的代码身份会随构建变化，重新安装后 macOS 可能要求再次授予辅助功能权限。
 
-本机已有稳定的代码签名证书时，可以通过环境变量指定身份：
+构建脚本会优先使用 `~/Library/Application Support/Passte/Signing/` 中隔离的 `Passte Local Build` 签名身份。钥匙串和随机密码文件仅对当前用户可读，不会进入仓库。本机已有其他稳定代码签名证书时，也可以通过环境变量指定身份：
 
 ```bash
 PASSTE_SIGN_IDENTITY="Apple Development: …" make install
