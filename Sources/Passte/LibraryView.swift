@@ -370,10 +370,26 @@ struct SmartCollectionEditor: View {
         (try? SmartRuleEngine().preview(candidates, ruleSet: SmartRuleSet(mode: mode, conditions: conditions))) ?? ([], 0)
     }
 
-    private var sourceOptions: [String] {
-        var values = Set(candidates.map(\.source.appName).filter { !$0.isEmpty })
-        for condition in conditions where condition.field == .sourceApp && !condition.value.isEmpty { values.insert(condition.value) }
-        return values.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    private var sourceOptions: [ApplicationReference] {
+        var values = [String: ApplicationReference]()
+        for clip in candidates {
+            guard let bundleIdentifier = clip.source.bundleIdentifier, !bundleIdentifier.isEmpty else { continue }
+            values[bundleIdentifier] = ApplicationReference(
+                bundleIdentifier: bundleIdentifier,
+                name: clip.source.appName,
+                url: nil
+            )
+        }
+        for condition in conditions where condition.field == .sourceApp && !condition.value.isEmpty {
+            if values[condition.value] == nil {
+                values[condition.value] = ApplicationReference(
+                    bundleIdentifier: condition.value,
+                    name: condition.value,
+                    url: nil
+                )
+            }
+        }
+        return values.values.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
     private static func normalized(_ condition: SmartCondition) -> SmartCondition {
@@ -387,7 +403,7 @@ struct SmartCollectionEditor: View {
 
 private struct SmartConditionRow: View {
     @Binding var condition: SmartCondition
-    let sourceOptions: [String]
+    let sourceOptions: [ApplicationReference]
     let onRemove: () -> Void
 
     var body: some View {
@@ -399,7 +415,7 @@ private struct SmartConditionRow: View {
             .frame(width: 112)
             .onChange(of: condition.field) { _, field in
                 condition.operation = field.supportedOperators[0]
-                condition.value = field == .sourceApp ? (sourceOptions.first ?? "") : field.defaultValue
+                condition.value = field == .sourceApp ? (sourceOptions.first?.bundleIdentifier ?? "") : field.defaultValue
             }
 
             Picker("条件", selection: $condition.operation) {
@@ -426,11 +442,7 @@ private struct SmartConditionRow: View {
             TextField(condition.operation == .matchesRegex ? "输入正则表达式" : "输入匹配文字", text: limitedValue(maxLength: 512))
                 .textFieldStyle(.roundedBorder)
         case .sourceApp:
-            Picker("来源 App", selection: $condition.value) {
-                if sourceOptions.isEmpty { Text("没有可选来源").tag("") }
-                ForEach(sourceOptions, id: \.self) { Text(String($0.prefix(50))).tag($0) }
-            }
-            .labelsHidden()
+            ApplicationSelectionControl(bundleIdentifier: $condition.value, additionalApplications: sourceOptions)
         case .sourceConfidence:
             Picker("来源可信度", selection: $condition.value) {
                 Text("高").tag(SourceConfidence.high.rawValue)

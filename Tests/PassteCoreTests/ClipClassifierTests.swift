@@ -48,5 +48,9 @@ import Testing
         items: []
     )
     #expect(try engine.matches(sourceClip, ruleSet: validSource))
+    let bundleSource = SmartRuleSet(conditions: [
+        SmartCondition(field: .sourceApp, operation: .equals, value: "com.apple.Safari")
+    ])
+    #expect(try engine.matches(sourceClip, ruleSet: bundleSource))
     #expect(try !engine.matches(sourceClip, ruleSet: SmartRuleSet()))
 }
