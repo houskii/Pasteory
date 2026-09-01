@@ -18,7 +18,15 @@ make verify
 make install
 ```
 
-构建产物位于 `dist/Passte.app` 和 `dist/Passte-0.1.0-arm64.dmg`。本地版本使用 ad-hoc 签名，没有经过 Apple 公证。
+构建产物位于 `dist/Passte.app` 和 `dist/Passte-0.1.0-arm64.dmg`。默认使用 ad-hoc 签名，没有经过 Apple 公证。ad-hoc 签名的代码身份会随构建变化，重新安装后 macOS 可能要求再次授予辅助功能权限。
+
+本机已有稳定的代码签名证书时，可以通过环境变量指定身份：
+
+```bash
+PASSTE_SIGN_IDENTITY="Apple Development: …" make install
+```
+
+后续构建持续使用同一证书和 Bundle ID，辅助功能授权才能稳定复用。不要把证书或私钥放进仓库。
 
 ## 首次使用
 

@@ -48,4 +48,5 @@ import Testing
         items: []
     )
     #expect(try engine.matches(sourceClip, ruleSet: validSource))
+    #expect(try !engine.matches(sourceClip, ruleSet: SmartRuleSet()))
 }

@@ -106,7 +106,7 @@ struct SettingsView: View {
                 Text("未授权时，Passte 仍会把内容复制到剪贴板，并提示手动粘贴。")
             }
             Section("搜索索引") {
-                Button("重建搜索索引") { Task { do { try await state.repository.rebuildSearchIndex(); state.statusMessage = "搜索索引已重建" } catch { state.show(error) } } }
+                Button("重建搜索索引") { Task { do { try await state.repository.rebuildSearchIndex(); state.presentStatus("搜索索引已重建") } catch { state.show(error) } } }
             }
         }.formStyle(.grouped)
     }

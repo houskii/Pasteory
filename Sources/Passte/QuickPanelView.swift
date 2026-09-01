@@ -20,8 +20,20 @@ struct QuickPanelView: View {
             Divider()
             if state.quickClips.isEmpty { emptyState } else { clipList }
             if let message = state.statusMessage {
-                Text(message).font(.caption).frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(8).background(.purple.opacity(0.1))
+                HStack(spacing: 8) {
+                    Image(systemName: statusSymbol)
+                    Text(message).font(.caption.weight(.medium)).lineLimit(2)
+                    Spacer(minLength: 4)
+                    Button { state.clearStatus() } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.plain)
+                        .help("关闭提示")
+                }
+                .foregroundStyle(statusColor)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(statusColor.opacity(0.13))
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             footer
         }
@@ -132,12 +144,55 @@ struct QuickPanelView: View {
     }
 
     private var emptyState: some View {
-        ContentUnavailableView(
-            state.quickQuery.isEmpty ? "还没有剪贴板内容" : "没有找到匹配内容",
-            systemImage: state.quickQuery.isEmpty ? "clipboard" : "magnifyingglass",
-            description: Text("复制一段文字、链接或图片后，它会出现在这里。")
+        let needsRules = selectedSmartCollection?.ruleSet?.conditions.isEmpty == true
+        let activeCollection = selectedCollection
+        let title: String
+        let description: String
+        let symbol: String
+        if needsRules {
+            title = "智能分组尚未设置规则"
+            description = "右键点击上方分组标签，选择“编辑名称和规则”。"
+            symbol = "sparkles"
+        } else if activeCollection != nil, state.quickQuery.isEmpty {
+            title = "分组中还没有内容"
+            description = activeCollection?.kind == .smart ? "当前没有内容符合这组规则。" : "右键点击剪辑，可以把内容加入这个分组。"
+            symbol = activeCollection?.kind == .smart ? "sparkles" : "folder"
+        } else {
+            title = state.quickQuery.isEmpty ? "还没有剪贴板内容" : "没有找到匹配内容"
+            description = "复制一段文字、链接或图片后，它会出现在这里。"
+            symbol = state.quickQuery.isEmpty ? "clipboard" : "magnifyingglass"
+        }
+        return ContentUnavailableView(
+            title,
+            systemImage: symbol,
+            description: Text(description)
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var selectedSmartCollection: ClipCollection? {
+        selectedCollection?.kind == .smart ? selectedCollection : nil
+    }
+
+    private var selectedCollection: ClipCollection? {
+        guard case .collection(let id) = state.quickScope else { return nil }
+        return state.collections.first { $0.id == id }
+    }
+
+    private var statusColor: Color {
+        switch state.statusKind {
+        case .info: .blue
+        case .warning: .orange
+        case .error: .red
+        }
+    }
+
+    private var statusSymbol: String {
+        switch state.statusKind {
+        case .info: "checkmark.circle.fill"
+        case .warning: "exclamationmark.triangle.fill"
+        case .error: "xmark.octagon.fill"
+        }
     }
 
     private var footer: some View {

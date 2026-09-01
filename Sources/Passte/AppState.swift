@@ -15,6 +15,10 @@ struct QuickTab: Identifiable, Hashable {
     var id: QuickScope { scope }
 }
 
+enum AppStatusKind {
+    case info, warning, error
+}
+
 @MainActor
 final class AppState: ObservableObject {
     @Published var clips: [Clip] = []
@@ -31,6 +35,7 @@ final class AppState: ObservableObject {
     @Published var selectedClipID: UUID?
     @Published var quickSelectionID: UUID?
     @Published var statusMessage: String?
+    @Published var statusKind: AppStatusKind = .info
     @Published var isBusy = false
 
     let settings: AppSettings
@@ -40,6 +45,7 @@ final class AppState: ObservableObject {
     let backup: BackupService
     private var quickSearchTask: Task<Void, Never>?
     private var librarySearchTask: Task<Void, Never>?
+    private var statusDismissTask: Task<Void, Never>?
 
     init(repository: any ClipRepository, attachments: AttachmentStore, archive: ArchiveService, backup: BackupService, settings: AppSettings) {
         self.repository = repository
@@ -255,7 +261,7 @@ final class AppState: ObservableObject {
 
     @discardableResult
     func addCollection(name: String, smart: Bool) async -> ClipCollection? {
-        if let message = collectionNameValidationMessage(name) { statusMessage = message; return nil }
+        if let message = collectionNameValidationMessage(name) { presentStatus(message, kind: .error); return nil }
         let rules = smart ? SmartRuleSet(mode: .all, conditions: []) : nil
         let collection = ClipCollection(name: name.trimmingCharacters(in: .whitespacesAndNewlines), kind: smart ? .smart : .normal, sortOrder: collections.count, ruleSet: rules)
         do { try await repository.saveCollection(collection); await refreshCollections(); return collection }
@@ -300,7 +306,7 @@ final class AppState: ObservableObject {
 
     @discardableResult
     func saveCollection(_ collection: ClipCollection) async -> Bool {
-        if let message = collectionNameValidationMessage(collection.name, excluding: collection.id) { statusMessage = message; return false }
+        if let message = collectionNameValidationMessage(collection.name, excluding: collection.id) { presentStatus(message, kind: .error); return false }
         var value = collection
         value.name = collection.name.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
@@ -385,23 +391,40 @@ final class AppState: ObservableObject {
 
     func runArchive() async {
         isBusy = true; defer { isBusy = false }
-        do { let count = try await archive.run(); statusMessage = count > 0 ? "已归档 \(count) 条内容" : "当前没有需要归档的内容"; await refreshLibrary(); await refreshQuick() }
+        do { let count = try await archive.run(); presentStatus(count > 0 ? "已归档 \(count) 条内容" : "当前没有需要归档的内容"); await refreshLibrary(); await refreshQuick() }
         catch { show(error) }
     }
 
     func exportBackup(to url: URL) async {
         isBusy = true; defer { isBusy = false }
-        do { try await backup.export(to: url); statusMessage = "备份已导出" }
+        do { try await backup.export(to: url); presentStatus("备份已导出") }
         catch { show(error) }
     }
 
     func importBackup(from url: URL) async {
         isBusy = true; defer { isBusy = false }
-        do { let count = try await backup.importBackup(from: url); statusMessage = "已导入 \(count) 条内容"; await refreshLibrary(); await refreshQuick() }
+        do { let count = try await backup.importBackup(from: url); presentStatus("已导入 \(count) 条内容"); await refreshLibrary(); await refreshQuick() }
         catch { show(error) }
     }
 
-    func show(_ error: Error) { statusMessage = error.localizedDescription }
+    func show(_ error: Error) { presentStatus(error.localizedDescription, kind: .error, dismissAfter: 5) }
+
+    func presentStatus(_ message: String, kind: AppStatusKind = .info, dismissAfter seconds: Double = 3) {
+        statusDismissTask?.cancel()
+        statusMessage = message
+        statusKind = kind
+        guard seconds > 0 else { return }
+        statusDismissTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled, self?.statusMessage == message else { return }
+            self?.statusMessage = nil
+        }
+    }
+
+    func clearStatus() {
+        statusDismissTask?.cancel()
+        statusMessage = nil
+    }
 
     private func replaceLocal(_ clip: Clip) {
         if let index = clips.firstIndex(where: { $0.id == clip.id }) { clips[index] = clip }

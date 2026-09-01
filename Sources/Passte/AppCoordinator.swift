@@ -145,7 +145,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
 
     private func registerHotKey() {
         if !hotKeyManager.register(keyCode: settings.shortcutKeyCode, modifiers: settings.shortcutModifiers) {
-            state.statusMessage = hotKeyManager.lastError
+            state.presentStatus(hotKeyManager.lastError ?? "快捷键注册失败", kind: .error, dismissAfter: 5)
         }
     }
 
@@ -208,14 +208,24 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
     private func promptCreateCollection(smart: Bool) {
         let alert = NSAlert()
         alert.messageText = smart ? "创建智能列表" : "创建普通列表"
-        alert.informativeText = smart ? "先创建列表，之后可以在资料库中补充匹配规则。" : "列表会直接显示在快捷面板的横向标签中。"
+        alert.informativeText = smart ? "新列表默认不匹配任何内容，需要再配置规则。" : "列表会直接显示在快捷面板的横向标签中。"
         let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
         input.placeholderString = smart ? "智能列表名称" : "列表名称"
         alert.accessoryView = input
         alert.addButton(withTitle: "创建"); alert.addButton(withTitle: "取消")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         let name = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return }
+        if let message = state.collectionNameValidationMessage(name) {
+            state.presentStatus(message, kind: .error, dismissAfter: 4)
+            let errorAlert = NSAlert()
+            errorAlert.alertStyle = .warning
+            errorAlert.messageText = "无法创建分组"
+            errorAlert.informativeText = message == "分组名称已经存在" ? "“\(name)”已经存在，请换一个名称。" : message
+            errorAlert.addButton(withTitle: "知道了")
+            errorAlert.runModal()
+            quickPanel.show()
+            return
+        }
         Task {
             guard let collection = await state.addCollection(name: name, smart: smart) else {
                 quickPanel.show()
@@ -252,10 +262,10 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
                 let result = try await pasteCoordinator.perform(clip, plainText: plainText, paste: paste, target: target)
                 var updated = clip; updated.lastCopiedAt = Date(); updated.copyCount += 1; state.update(updated)
                 switch result {
-                case .pasted: state.statusMessage = "已粘贴"
-                case .copied: state.statusMessage = "已复制"
-                case .copiedFallback: state.statusMessage = "已复制，请手动粘贴"
-                case .copiedPermissionRequired: state.statusMessage = "已复制；请允许 Passte 使用辅助功能后重试"
+                case .pasted: state.presentStatus("已粘贴")
+                case .copied: state.presentStatus("已复制")
+                case .copiedFallback: state.presentStatus("已复制，请手动粘贴", kind: .warning, dismissAfter: 5)
+                case .copiedPermissionRequired: state.presentStatus("已复制；请允许 Passte 使用辅助功能后重试", kind: .warning, dismissAfter: 5)
                 }
             } catch { state.show(error) }
         }

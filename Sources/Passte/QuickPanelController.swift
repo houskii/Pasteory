@@ -112,10 +112,10 @@ final class QuickPanelController: NSObject {
                 let result = try await pasteCoordinator.perform(clip, plainText: plainText, paste: paste, target: target)
                 var updated = clip; updated.lastCopiedAt = Date(); updated.copyCount += 1; state.update(updated)
                 switch result {
-                case .pasted: state.statusMessage = "已粘贴"
-                case .copied: state.statusMessage = "已复制"
-                case .copiedFallback: state.statusMessage = "目标应用未能恢复，内容已复制，请手动粘贴"; showFallbackNotification()
-                case .copiedPermissionRequired: state.statusMessage = "已复制；请在系统设置中允许辅助功能后再次按 Return"; showFallbackNotification()
+                case .pasted: state.presentStatus("已粘贴")
+                case .copied: state.presentStatus("已复制")
+                case .copiedFallback: state.presentStatus("目标应用未能恢复，内容已复制，请手动粘贴", kind: .warning, dismissAfter: 5); showFallbackNotification()
+                case .copiedPermissionRequired: state.presentStatus("已复制；请在系统设置中允许辅助功能后再次按 Return", kind: .warning, dismissAfter: 5); showFallbackNotification()
                 }
             } catch { state.show(error); showFallbackNotification() }
         }

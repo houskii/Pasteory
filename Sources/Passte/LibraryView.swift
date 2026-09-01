@@ -280,6 +280,7 @@ private struct CollectionNameEditor: View {
         }
         .padding(24)
         .frame(width: 380)
+        .onChange(of: name) { _, _ in error = nil }
     }
 
     private func save() {
@@ -346,6 +347,9 @@ struct SmartCollectionEditor: View {
         .padding(24)
         .frame(minWidth: 680)
         .task { candidates = await state.smartRuleCandidates() }
+        .onChange(of: name) { _, _ in error = nil }
+        .onChange(of: mode) { _, _ in error = nil }
+        .onChange(of: conditions) { _, _ in error = nil }
     }
 
     private func save() {

@@ -49,7 +49,7 @@ public struct SmartRuleEngine: Sendable {
 
     public func matches(_ clip: Clip, ruleSet: SmartRuleSet, now: Date = Date()) throws -> Bool {
         try validate(ruleSet)
-        guard !ruleSet.conditions.isEmpty else { return true }
+        guard !ruleSet.conditions.isEmpty else { return false }
         let results = try ruleSet.conditions.map { try matches(clip, condition: $0, now: now) }
         return ruleSet.mode == .all ? results.allSatisfy { $0 } : results.contains(true)
     }
