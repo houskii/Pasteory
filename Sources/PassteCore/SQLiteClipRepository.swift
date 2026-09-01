@@ -144,7 +144,7 @@ public actor SQLiteClipRepository: ClipRepository {
             }
         }
         let whereSQL = clauses.isEmpty ? "1" : clauses.joined(separator: " AND ")
-        let ordering = "c.last_copied_at DESC"
+        let ordering = "c.pinned DESC, c.last_copied_at DESC"
         let sql = "SELECT c.payload_json FROM clips c \(join) WHERE \(whereSQL) ORDER BY \(ordering) LIMIT ?;"
         let statement = try prepare(sql)
         defer { sqlite3_finalize(statement) }

@@ -3,8 +3,13 @@ import Foundation
 public enum SearchRanker {
     public static func rank(_ clips: [Clip], query: String) -> [Clip] {
         let needle = normalize(query)
-        guard !needle.isEmpty else { return clips }
-        return clips.sorted { score($0, needle: needle) > score($1, needle: needle) }
+        return clips.sorted { lhs, rhs in
+            if lhs.isPinned != rhs.isPinned { return lhs.isPinned }
+            if needle.isEmpty { return lhs.lastCopiedAt > rhs.lastCopiedAt }
+            let lhsScore = score(lhs, needle: needle)
+            let rhsScore = score(rhs, needle: needle)
+            return lhsScore == rhsScore ? lhs.lastCopiedAt > rhs.lastCopiedAt : lhsScore > rhsScore
+        }
     }
 
     private static func score(_ clip: Clip, needle: String) -> Double {
@@ -17,7 +22,6 @@ public enum SearchRanker {
             else if field.contains(needle) { score += 5 * weight }
             else { score += max(0, 1 - normalizedDistance(field, needle)) * weight }
         }
-        score += clip.isPinned ? 8 : 0
         score += clip.isFavorite ? 5 : 0
         score += Double(clip.priority) * 2
         score += min(log2(Double(max(1, clip.copyCount))), 5)

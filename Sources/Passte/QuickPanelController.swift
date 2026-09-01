@@ -93,6 +93,7 @@ final class QuickPanelController: NSObject {
 
     func close() {
         state.quickCommandKeyDown = false
+        state.quickHoveredClipID = nil
         panel.saveFrame(usingName: frameAutosaveName)
         panel.orderOut(nil)
         if let eventMonitor { NSEvent.removeMonitor(eventMonitor); self.eventMonitor = nil }
@@ -127,9 +128,13 @@ final class QuickPanelController: NSObject {
 
     private func installKeyMonitor() {
         if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
-        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged, .rightMouseDown]) { [weak self] event in
             guard let self, self.panel.isVisible else { return event }
             let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if event.type == .rightMouseDown {
+                if let hovered = state.quickHoveredClipID { state.quickSelectionID = hovered }
+                return event
+            }
             if event.type == .flagsChanged {
                 state.quickCommandKeyDown = modifiers.contains(.command)
                 return event
@@ -141,6 +146,9 @@ final class QuickPanelController: NSObject {
                 return nil
             }
             switch event.keyCode {
+            case 13 where modifiers.contains(.command): self.close(); return nil
+            case 43 where modifiers.contains(.command): self.close(); self.onOpenSettings(); return nil
+            case 37 where modifiers.contains(.command): self.close(); self.onOpenLibrary(); return nil
             case 36, 76:
                 let paste = modifiers.contains(.command) ? !self.state.settings.defaultDirectPaste : self.state.settings.defaultDirectPaste
                 self.performSelected(plainText: modifiers.contains(.option), paste: paste); return nil

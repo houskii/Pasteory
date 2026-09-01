@@ -34,6 +34,7 @@ final class AppState: ObservableObject {
     @Published var requestedCollectionEditorID: UUID?
     @Published var selectedClipID: UUID?
     @Published var quickSelectionID: UUID?
+    @Published var quickHoveredClipID: UUID?
     @Published var statusMessage: String?
     @Published var statusKind: AppStatusKind = .info
     @Published var isBusy = false
@@ -78,6 +79,7 @@ final class AppState: ObservableObject {
             quickClips.removeAll { $0.id == stored.id }
             quickClips.insert(stored, at: 0)
             if quickClips.count > 500 { quickClips.removeLast(quickClips.count - 500) }
+            quickClips = SearchRanker.rank(quickClips, query: quickQuery)
             await refreshLibrary()
             if try await repository.activeClipCount() > RetentionPolicy.default.maximumHotClips {
                 Task.detached(priority: .utility) { [archive] in _ = try? await archive.run() }
@@ -227,6 +229,7 @@ final class AppState: ObservableObject {
 
     func togglePinned(_ clip: Clip) {
         mutate(clip) { $0.isPinned.toggle() }
+        Task { await refreshQuick(); await refreshLibrary() }
     }
 
     func toggleCollection(_ collection: ClipCollection, for clip: Clip) {

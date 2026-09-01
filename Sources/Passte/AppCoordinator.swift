@@ -101,6 +101,18 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
             )
             await state.accept(capture)
         }
+        if var metadataSample = state.quickClips.first {
+            metadataSample.title = String(repeating: "这是一个很长的用户标题，用来验证标题会在卡片边界内截断。", count: 5)
+            metadataSample.note = String(repeating: "这是一条很长的备注，用于确认标题、正文、备注、复制次数和图钉同时存在时仍然清晰。", count: 10)
+            metadataSample.isPinned = true
+            metadataSample.copyCount = 128
+            state.update(metadataSample)
+        }
+        if let longSampleIndex = state.quickClips.firstIndex(where: { $0.source.appName.contains("名称同样非常长") }) {
+            var longSample = state.quickClips[longSampleIndex]
+            longSample.copyCount = 9_999
+            state.update(longSample)
+        }
         let colorCapture = PasteboardCapture(
             items: [CapturedItem(order: 0, representations: [CapturedRepresentation(uti: "public.utf8-plain-text", data: Data("#7C3AED".utf8))])],
             source: ClipSource(appName: "设计工具", bundleIdentifier: "com.apple.Preview", confidence: .high)

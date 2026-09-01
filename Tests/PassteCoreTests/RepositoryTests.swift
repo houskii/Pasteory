@@ -108,3 +108,16 @@ private func textClip(_ value: String, date: Date = Date(), source: String = "ap
     let result = try await repository.list(filter: .all, query: "", limit: 10)
     #expect(result.map(\.id) == [newer.id, older.id])
 }
+
+@Test func pinnedClipsStayAboveNewerUnpinnedClips() async throws {
+    let directories = try temporaryDirectories()
+    defer { try? FileManager.default.removeItem(at: directories.root) }
+    let repository = try SQLiteClipRepository(databaseURL: directories.databaseFile)
+    var pinned = textClip("已置顶", date: Date(timeIntervalSince1970: 10))
+    pinned.isPinned = true
+    let newer = textClip("较新的普通内容", date: Date(timeIntervalSince1970: 20))
+    try await repository.saveBatch([pinned, newer])
+    let result = try await repository.list(filter: .all, query: "", limit: 10)
+    #expect(result.map(\.id) == [pinned.id, newer.id])
+    #expect(SearchRanker.rank([newer, pinned], query: "").map(\.id) == [pinned.id, newer.id])
+}

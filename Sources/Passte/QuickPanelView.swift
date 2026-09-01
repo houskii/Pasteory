@@ -198,11 +198,11 @@ struct QuickPanelView: View {
     private var footer: some View {
         HStack {
             Button(action: onOpenLibrary) { Image(systemName: "list.star") }
-                .buttonStyle(.plain).help("打开资料库（⌘O）")
+                .buttonStyle(.plain).help("打开资料库（⌘L）")
             Spacer()
             Text("\(state.quickClips.count) 个项目")
             Spacer()
-            Text("↑↓ 选择　↩ 粘贴")
+            Text("↑↓ 选择　↩ 粘贴　⌘L 资料库")
         }
         .font(.caption2).foregroundStyle(.secondary).padding(10)
     }
@@ -225,10 +225,17 @@ private struct QuickClipCard: View {
             .padding(.horizontal, 12)
             .frame(height: 72)
             .clipped()
-            .background(Color(nsColor: .controlBackgroundColor).opacity(0.82), in: RoundedRectangle(cornerRadius: 14))
+            .background(
+                clip.isPinned ? Color.purple.opacity(0.10) : Color(nsColor: .controlBackgroundColor).opacity(0.82),
+                in: RoundedRectangle(cornerRadius: 14)
+            )
             .overlay { RoundedRectangle(cornerRadius: 14).stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2) }
             .contentShape(RoundedRectangle(cornerRadius: 14))
             .onTapGesture { state.quickSelectionID = clip.id }
+            .onHover { hovering in
+                if hovering { state.quickHoveredClipID = clip.id }
+                else if state.quickHoveredClipID == clip.id { state.quickHoveredClipID = nil }
+            }
             .simultaneousGesture(TapGesture(count: 2).onEnded { onCopy(clip, false, true) })
             .popover(isPresented: $showMetadataEditor, arrowEdge: .trailing) {
                 QuickMetadataEditor(clip: clip) { title, note in

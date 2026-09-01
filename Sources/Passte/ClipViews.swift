@@ -13,21 +13,8 @@ struct ClipRowView: View {
         HStack(alignment: .center, spacing: 10) {
             ClipLeadingVisual(clip: clip)
                 .frame(width: compact ? 38 : 46, height: compact ? 38 : 46)
-            VStack(alignment: .leading, spacing: 4) {
-                if hasImagePreview, let attachments {
-                    ClipInlineThumbnail(
-                        clip: clip,
-                        attachments: attachments,
-                        width: compact ? 52 : 60,
-                        height: compact ? 44 : 48
-                    )
-                } else {
-                    Text(displayTitle)
-                        .font(.system(size: compact ? 13 : 14, weight: .medium))
-                        .lineLimit(2)
-                        .truncationMode(.tail)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+            VStack(alignment: .leading, spacing: 3) {
+                mainContent
                 HStack(spacing: 7) {
                     Text(String(clip.source.appName.prefix(40)))
                         .lineLimit(1)
@@ -38,7 +25,10 @@ struct ClipRowView: View {
                         .fixedSize()
                         .layoutPriority(2)
                     if clip.items.count > 1 { Text("\(clip.items.count) 项") }
-                    if clip.copyCount > 1 { Text("复制 \(clip.copyCount) 次") }
+                    Text("复制 \(clip.copyCount) 次")
+                        .fixedSize()
+                        .layoutPriority(2)
+                    if clip.isPinned { Image(systemName: "pin.fill").foregroundStyle(.purple).help("已置顶") }
                     if clip.isFavorite { Image(systemName: "star.fill").foregroundStyle(.yellow) }
                     if clip.priority > 0 { Text("P\(clip.priority)").font(.caption2.bold()).foregroundStyle(.purple) }
                 }
@@ -65,7 +55,7 @@ struct ClipRowView: View {
         .frame(height: compact ? 72 : 72)
         .clipped()
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(clip.primaryKind.displayName)，\(clip.previewText)，来自 \(clip.source.appName)")
+        .accessibilityLabel(accessibilitySummary)
     }
 
     private var timestamp: String {
@@ -73,8 +63,73 @@ struct ClipRowView: View {
         return String(format: "%02d-%02d %02d:%02d", parts.month ?? 0, parts.day ?? 0, parts.hour ?? 0, parts.minute ?? 0)
     }
 
-    private var displayTitle: String {
-        String((clip.title.isEmpty ? clip.previewText : clip.title).prefix(240))
+    @ViewBuilder
+    private var mainContent: some View {
+        if hasImagePreview, let attachments {
+            HStack(spacing: 8) {
+                ClipInlineThumbnail(
+                    clip: clip,
+                    attachments: attachments,
+                    width: compact ? 52 : 60,
+                    height: compact ? 42 : 46
+                )
+                if !clip.title.isEmpty || !clip.note.isEmpty {
+                    VStack(alignment: .leading, spacing: 3) {
+                        if !clip.title.isEmpty { titleText }
+                        if !clip.note.isEmpty { noteText }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .frame(height: compact ? 42 : 46, alignment: .leading)
+        } else {
+            VStack(alignment: .leading, spacing: 2) {
+                if !clip.title.isEmpty {
+                    titleText
+                    Text(displayPreview)
+                        .font(.system(size: compact ? 11 : 12))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                } else {
+                    Text(displayPreview)
+                        .font(.system(size: compact ? 13 : 14, weight: .medium))
+                        .lineLimit(clip.note.isEmpty ? 2 : 1)
+                        .truncationMode(.tail)
+                }
+                if !clip.note.isEmpty { noteText }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var titleText: some View {
+        Text(String(clip.title.prefix(120)))
+            .font(.system(size: compact ? 13 : 14, weight: .semibold))
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .help(String(clip.title.prefix(500)))
+    }
+
+    private var noteText: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "note.text").font(.system(size: 9))
+            Text(String(clip.note.prefix(160))).lineLimit(1).truncationMode(.tail)
+        }
+        .font(.system(size: compact ? 10 : 11))
+        .foregroundStyle(.tertiary)
+        .help(String(clip.note.prefix(500)))
+    }
+
+    private var displayPreview: String {
+        String(clip.previewText.prefix(240))
+    }
+
+    private var accessibilitySummary: String {
+        let title = String(clip.title.prefix(120))
+        let preview = String(clip.previewText.prefix(240))
+        let note = String(clip.note.prefix(160))
+        return "\(clip.primaryKind.displayName)，\(title)，\(preview)，\(note)，来自 \(String(clip.source.appName.prefix(80)))\(clip.isPinned ? "，已置顶" : "")"
     }
 
     private var hasImagePreview: Bool {
