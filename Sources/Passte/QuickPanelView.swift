@@ -238,10 +238,15 @@ private struct QuickClipCard: View {
             }
             .simultaneousGesture(TapGesture(count: 2).onEnded { onCopy(clip, false, true) })
             .popover(isPresented: $showMetadataEditor, arrowEdge: .trailing) {
-                QuickMetadataEditor(clip: clip) { title, note in
-                    state.updateMetadata(for: clip, title: title, note: note)
-                    showMetadataEditor = false
-                }
+                QuickMetadataEditor(
+                    state: state,
+                    clip: clip,
+                    onSave: { title, note in
+                        state.updateMetadata(for: clip, title: title, note: note)
+                        showMetadataEditor = false
+                    },
+                    onCancel: { showMetadataEditor = false }
+                )
             }
             .contextMenu {
                 Button("直接粘贴") { onCopy(clip, false, true) }
@@ -274,14 +279,18 @@ private struct QuickClipCard: View {
 }
 
 private struct QuickMetadataEditor: View {
+    @ObservedObject var state: AppState
     let clip: Clip
     let onSave: (String, String) -> Void
+    let onCancel: () -> Void
     @State private var title: String
     @State private var note: String
 
-    init(clip: Clip, onSave: @escaping (String, String) -> Void) {
+    init(state: AppState, clip: Clip, onSave: @escaping (String, String) -> Void, onCancel: @escaping () -> Void) {
+        self.state = state
         self.clip = clip
         self.onSave = onSave
+        self.onCancel = onCancel
         _title = State(initialValue: clip.title)
         _note = State(initialValue: clip.note)
     }
@@ -311,5 +320,15 @@ private struct QuickMetadataEditor: View {
         }
         .padding(16)
         .frame(width: 340)
+        .onAppear { state.quickMetadataEditorActive = true }
+        .onDisappear { state.quickMetadataEditorActive = false }
+        .onChange(of: state.quickMetadataEditorCommitRequestID) { _, request in
+            guard request != nil else { return }
+            onSave(title, note)
+        }
+        .onChange(of: state.quickMetadataEditorDismissRequestID) { _, request in
+            guard request != nil else { return }
+            onCancel()
+        }
     }
 }

@@ -82,20 +82,27 @@ struct ClipRowView: View {
                 }
             }
             .frame(height: compact ? 42 : 46, alignment: .leading)
+        } else if clip.primaryKind == .file {
+            HStack(spacing: 8) {
+                Image(systemName: "doc.fill")
+                    .font(.system(size: compact ? 27 : 31))
+                    .foregroundStyle(.secondary)
+                    .frame(width: compact ? 36 : 42, height: compact ? 42 : 46)
+                VStack(alignment: .leading, spacing: 2) {
+                    if !clip.title.isEmpty { titleText }
+                    primaryContentText
+                    if !clip.note.isEmpty { noteText }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(height: compact ? 42 : 46, alignment: .leading)
         } else {
             VStack(alignment: .leading, spacing: 2) {
                 if !clip.title.isEmpty {
                     titleText
-                    Text(displayPreview)
-                        .font(.system(size: compact ? 11 : 12))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                    primaryContentText
                 } else {
-                    Text(displayPreview)
-                        .font(.system(size: compact ? 13 : 14, weight: .medium))
-                        .lineLimit(clip.note.isEmpty ? 2 : 1)
-                        .truncationMode(.tail)
+                    primaryContentText
                 }
                 if !clip.note.isEmpty { noteText }
             }
@@ -105,10 +112,19 @@ struct ClipRowView: View {
 
     private var titleText: some View {
         Text(String(clip.title.prefix(120)))
-            .font(.system(size: compact ? 13 : 14, weight: .semibold))
+            .font(.system(size: compact ? 11 : 12, weight: .semibold))
+            .foregroundStyle(.purple)
             .lineLimit(1)
             .truncationMode(.tail)
             .help(String(clip.title.prefix(500)))
+    }
+
+    private var primaryContentText: some View {
+        Text(displayPreview)
+            .font(.system(size: compact ? 13 : 14, weight: .medium))
+            .foregroundStyle(.primary)
+            .lineLimit(clip.title.isEmpty && clip.note.isEmpty ? 2 : 1)
+            .truncationMode(.tail)
     }
 
     private var noteText: some View {

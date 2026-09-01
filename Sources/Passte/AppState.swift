@@ -35,6 +35,9 @@ final class AppState: ObservableObject {
     @Published var selectedClipID: UUID?
     @Published var quickSelectionID: UUID?
     @Published var quickHoveredClipID: UUID?
+    @Published var quickMetadataEditorActive = false
+    @Published var quickMetadataEditorCommitRequestID: UUID?
+    @Published var quickMetadataEditorDismissRequestID: UUID?
     @Published var statusMessage: String?
     @Published var statusKind: AppStatusKind = .info
     @Published var isBusy = false

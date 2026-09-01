@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="1040" viewBox="0 0 1500 1040">
+  <defs>
+    <style>
+      .bg { fill: #f4f2f5; }
+      .card { fill: #ffffff; stroke: #ded9e2; stroke-width: 1.5; }
+      .pinned { fill: #f7f0ff; stroke: #a855f7; stroke-width: 2; }
+      .icon { fill: #eef2ff; }
+      .badge { fill: #c026d3; }
+      .heading { font: 700 26px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; fill: #211d24; }
+      .column { font: 600 18px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; fill: #55505a; }
+      .row { font: 700 20px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; fill: #211d24; }
+      .title { font: 600 13px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; fill: #7e22ce; }
+      .content { font: 500 16px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; fill: #27232a; }
+      .note { font: 400 11px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; fill: #77717c; }
+      .meta { font: 400 11px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; fill: #8a8490; }
+      .annotation { font: 400 13px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; fill: #5f5964; }
+      .line { stroke: #ddd7e1; stroke-width: 1; }
+    </style>
+  </defs>
+  <rect class="bg" width="1500" height="1040" rx="28"/>
+  <text class="heading" x="54" y="54">Passte 快捷面板 · Item 信息层级</text>
+  <text class="annotation" x="54" y="84">固定 72pt 行高。原复制内容始终保持相同字号和主色；标题、备注只增加信息，不替换正文视觉。</text>
+
+  <text class="column" x="170" y="130">只有原内容</text>
+  <text class="column" x="620" y="130">标题 + 原内容</text>
+  <text class="column" x="1065" y="130">标题 + 原内容 + 备注</text>
+
+  <text class="row" x="54" y="218">文字</text>
+  <g transform="translate(120 158)">
+    <rect class="card" width="410" height="132" rx="18"/>
+    <rect class="icon" x="18" y="34" width="48" height="48" rx="12"/>
+    <text class="content" x="84" y="52">原复制内容保持主视觉，可显示两行…</text>
+    <text class="content" x="84" y="75">第二行继续展示正文</text>
+    <text class="meta" x="84" y="104">ChatGPT　09-01 14:44　复制 1 次</text>
+  </g>
+  <g transform="translate(565 158)">
+    <rect class="card" width="410" height="132" rx="18"/>
+    <rect class="icon" x="18" y="34" width="48" height="48" rx="12"/>
+    <text class="title" x="84" y="35">自定义标题</text>
+    <text class="content" x="84" y="62">原复制内容仍是 16px 主色文本…</text>
+    <text class="meta" x="84" y="104">ChatGPT　09-01 14:44　复制 12 次</text>
+  </g>
+  <g transform="translate(1010 158)">
+    <rect class="pinned" width="410" height="132" rx="18"/>
+    <rect class="icon" x="18" y="34" width="48" height="48" rx="12"/>
+    <text class="title" x="84" y="30">很长的标题在一行内截断…</text>
+    <text class="content" x="84" y="56">原内容字号、颜色保持不变…</text>
+    <text class="note" x="84" y="78">▤ 备注使用单行摘要，超长内容截断…</text>
+    <text class="meta" x="84" y="105">ChatGPT　09-01 14:44　复制 128 次　📌</text>
+  </g>
+
+  <line class="line" x1="54" y1="326" x2="1446" y2="326"/>
+  <text class="row" x="54" y="412">图片</text>
+  <g transform="translate(120 352)">
+    <rect class="card" width="410" height="132" rx="18"/>
+    <rect class="icon" x="18" y="34" width="48" height="48" rx="12"/>
+    <rect x="84" y="24" width="64" height="64" rx="8" fill="#d8c8f7"/>
+    <circle cx="125" cy="44" r="8" fill="#fff4b8"/>
+    <path d="M88 82 L106 61 L119 73 L132 54 L145 82 Z" fill="#7c3aed"/>
+    <text class="meta" x="84" y="108">预览　09-01 14:44　复制 1 次</text>
+  </g>
+  <g transform="translate(565 352)">
+    <rect class="card" width="410" height="132" rx="18"/>
+    <rect class="icon" x="18" y="34" width="48" height="48" rx="12"/>
+    <rect x="84" y="24" width="64" height="64" rx="8" fill="#d8c8f7"/>
+    <circle cx="125" cy="44" r="8" fill="#fff4b8"/>
+    <path d="M88 82 L106 61 L119 73 L132 54 L145 82 Z" fill="#7c3aed"/>
+    <text class="title" x="164" y="48">产品截图</text>
+    <text class="content" x="164" y="72">图片本身仍是主内容</text>
+    <text class="meta" x="84" y="108">预览　09-01 14:44　复制 3 次</text>
+  </g>
+  <g transform="translate(1010 352)">
+    <rect class="pinned" width="410" height="132" rx="18"/>
+    <rect class="icon" x="18" y="34" width="48" height="48" rx="12"/>
+    <rect x="84" y="24" width="64" height="64" rx="8" fill="#d8c8f7"/>
+    <circle cx="125" cy="44" r="8" fill="#fff4b8"/>
+    <path d="M88 82 L106 61 L119 73 L132 54 L145 82 Z" fill="#7c3aed"/>
+    <text class="title" x="164" y="40">产品截图</text>
+    <text class="content" x="164" y="64">固定缩略图区域</text>
+    <text class="note" x="164" y="84">▤ 用于周报</text>
+    <text class="meta" x="84" y="108">预览　09-01 14:44　复制 16 次　📌</text>
+  </g>
+
+  <line class="line" x1="54" y1="520" x2="1446" y2="520"/>
+  <text class="row" x="54" y="606">文件</text>
+  <g transform="translate(120 546)">
+    <rect class="card" width="410" height="132" rx="18"/>
+    <rect class="icon" x="18" y="34" width="48" height="48" rx="12"/>
+    <rect x="84" y="26" width="42" height="52" rx="6" fill="#e8e5ec"/>
+    <path d="M112 26 L126 40 L112 40 Z" fill="#c5bfcb"/>
+    <text class="content" x="140" y="58">Passte-Design-v3.pdf</text>
+    <text class="meta" x="84" y="104">Finder　09-01 14:44　复制 1 次</text>
+  </g>
+  <g transform="translate(565 546)">
+    <rect class="card" width="410" height="132" rx="18"/>
+    <rect class="icon" x="18" y="34" width="48" height="48" rx="12"/>
+    <rect x="84" y="26" width="42" height="52" rx="6" fill="#e8e5ec"/>
+    <path d="M112 26 L126 40 L112 40 Z" fill="#c5bfcb"/>
+    <text class="title" x="140" y="42">设计交付稿</text>
+    <text class="content" x="140" y="67">Passte-Design-v3.pdf</text>
+    <text class="meta" x="84" y="104">Finder　09-01 14:44　复制 5 次</text>
+  </g>
+  <g transform="translate(1010 546)">
+    <rect class="pinned" width="410" height="132" rx="18"/>
+    <rect class="icon" x="18" y="34" width="48" height="48" rx="12"/>
+    <rect x="84" y="26" width="42" height="52" rx="6" fill="#e8e5ec"/>
+    <path d="M112 26 L126 40 L112 40 Z" fill="#c5bfcb"/>
+    <text class="title" x="140" y="36">设计交付稿</text>
+    <text class="content" x="140" y="60">Passte-Design-v3.pdf</text>
+    <text class="note" x="140" y="82">▤ 发给团队前复核</text>
+    <text class="meta" x="84" y="106">Finder　09-01 14:44　复制 28 次　📌</text>
+  </g>
+
+  <line class="line" x1="54" y1="724" x2="1446" y2="724"/>
+  <text class="heading" x="54" y="774">状态规则</text>
+  <text class="annotation" x="54" y="810">1. 原内容始终使用主文字样式；有标题时只把正文从两行收为一行，不改字号和颜色。</text>
+  <text class="annotation" x="54" y="842">2. 标题使用 11–13px 紫色半粗体；备注使用 10–11px 灰色单行摘要；两者都不参与复制内容。</text>
+  <text class="annotation" x="54" y="874">3. 图片使用固定 52×42pt 区域；文件使用文件图标 + 文件名。标题和备注只占右侧说明区。</text>
+  <text class="annotation" x="54" y="906">4. 底部始终保留来源、MM-DD HH:MM、复制次数和状态图标；来源先截断，其他字段不被挤掉。</text>
+  <text class="annotation" x="54" y="938">5. 置顶项排在最前，使用图钉 + 浅紫底双重提示；右键前先更新选中框。</text>
+  <text class="annotation" x="54" y="970">6. ⌘1～⌘9 只在按住 Command 时出现，固定在卡片右下角，不参与正文排版。</text>
+</svg>

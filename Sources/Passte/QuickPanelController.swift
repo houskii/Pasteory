@@ -94,6 +94,7 @@ final class QuickPanelController: NSObject {
     func close() {
         state.quickCommandKeyDown = false
         state.quickHoveredClipID = nil
+        state.quickMetadataEditorActive = false
         panel.saveFrame(usingName: frameAutosaveName)
         panel.orderOut(nil)
         if let eventMonitor { NSEvent.removeMonitor(eventMonitor); self.eventMonitor = nil }
@@ -131,6 +132,19 @@ final class QuickPanelController: NSObject {
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged, .rightMouseDown]) { [weak self] event in
             guard let self, self.panel.isVisible else { return event }
             let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if state.quickMetadataEditorActive {
+                if event.type == .flagsChanged || event.type == .rightMouseDown { return event }
+                if (event.keyCode == 36 || event.keyCode == 76) {
+                    if self.textInputHasMarkedText { return event }
+                    state.quickMetadataEditorCommitRequestID = UUID()
+                    return nil
+                }
+                if event.keyCode == 53 || (event.keyCode == 13 && modifiers.contains(.command)) {
+                    state.quickMetadataEditorDismissRequestID = UUID()
+                    return nil
+                }
+                return event
+            }
             if event.type == .rightMouseDown {
                 if let hovered = state.quickHoveredClipID { state.quickSelectionID = hovered }
                 return event
@@ -169,7 +183,9 @@ final class QuickPanelController: NSObject {
         if let globalMouseMonitor { NSEvent.removeMonitor(globalMouseMonitor) }
         globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             Task { @MainActor in
-                guard let self, !self.state.quickPanelPinned else { return }
+                guard let self,
+                      !self.state.quickPanelPinned,
+                      !self.state.quickMetadataEditorActive else { return }
                 self.close()
             }
         }
@@ -194,5 +210,9 @@ final class QuickPanelController: NSObject {
 
     private var isPanelOnVisibleScreen: Bool {
         NSScreen.screens.contains { $0.visibleFrame.intersects(panel.frame) }
+    }
+
+    private var textInputHasMarkedText: Bool {
+        (panel.firstResponder as? NSTextView)?.hasMarkedText() == true
     }
 }
