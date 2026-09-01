@@ -10,12 +10,15 @@ struct ClipRowView: View {
     var shortcutNumber: Int? = nil
 
     var body: some View {
-        HStack(alignment: .center, spacing: 10) {
+        HStack(
+            alignment: .center,
+            spacing: ClipSourceLayout.usesVerticalIdentity ? 6 : 10
+        ) {
             leadingArea
             VStack(alignment: .leading, spacing: 3) {
                 mainContent
                 HStack(spacing: 7) {
-                    if !ClipSourceTypePreview.underLeadingIcon {
+                    if !ClipSourceLayout.usesVerticalIdentity {
                         Text(String(clip.source.appName.prefix(40)))
                             .lineLimit(1)
                             .truncationMode(.tail)
@@ -73,26 +76,17 @@ struct ClipRowView: View {
 
     @ViewBuilder
     private var leadingArea: some View {
-        if ClipSourceTypePreview.underLeadingIcon {
-            HStack(spacing: 6) {
-                ClipLeadingVisual(clip: clip, showsTypeBadge: false)
-                    .frame(width: compact ? 32 : 36, height: compact ? 32 : 36)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(String(clip.source.appName.prefix(12)))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    HStack(spacing: 3) {
-                        Image(systemName: clip.primaryKind.symbolName)
-                            .font(.system(size: 8, weight: .bold))
-                        Text(clip.primaryKind.displayName)
-                    }
-                    .foregroundStyle(clip.primaryKind.markerColor)
-                }
-                .font(.system(size: 9, weight: .medium))
-                .frame(width: compact ? 44 : 50, alignment: .leading)
+        if ClipSourceLayout.usesVerticalIdentity {
+            VStack(spacing: 1) {
+                ClipLeadingVisual(clip: clip, showsTypeBadge: true)
+                    .frame(width: compact ? 34 : 38, height: compact ? 34 : 38)
+                Text(String(clip.source.appName.prefix(12)))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
-            .frame(width: compact ? 82 : 92, height: 46, alignment: .leading)
+            .font(.system(size: 8.5, weight: .medium))
+            .frame(width: compact ? 54 : 60, height: 54, alignment: .center)
         } else {
             ClipLeadingVisual(clip: clip)
                 .frame(width: compact ? 38 : 46, height: compact ? 38 : 46)
@@ -288,12 +282,12 @@ private enum ClipTypeMarkerPreview {
     }
 }
 
-private enum ClipSourceTypePreview {
-    static var underLeadingIcon: Bool {
+private enum ClipSourceLayout {
+    static var usesVerticalIdentity: Bool {
 #if DEBUG
-        ProcessInfo.processInfo.arguments.contains("--debug-source-type-under-icon")
+        !ProcessInfo.processInfo.arguments.contains("--debug-source-type-overlay")
 #else
-        false
+        true
 #endif
     }
 }
