@@ -11,15 +11,16 @@ struct ClipRowView: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
-            ClipLeadingVisual(clip: clip)
-                .frame(width: compact ? 38 : 46, height: compact ? 38 : 46)
+            leadingArea
             VStack(alignment: .leading, spacing: 3) {
                 mainContent
                 HStack(spacing: 7) {
-                    Text(String(clip.source.appName.prefix(40)))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .layoutPriority(1)
+                    if !ClipSourceTypePreview.underLeadingIcon {
+                        Text(String(clip.source.appName.prefix(40)))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .layoutPriority(1)
+                    }
                     Text(timestamp)
                         .monospacedDigit()
                         .fixedSize()
@@ -68,6 +69,30 @@ struct ClipRowView: View {
     private var timestamp: String {
         let parts = Calendar.current.dateComponents([.month, .day, .hour, .minute], from: clip.lastCopiedAt)
         return String(format: "%02d-%02d %02d:%02d", parts.month ?? 0, parts.day ?? 0, parts.hour ?? 0, parts.minute ?? 0)
+    }
+
+    @ViewBuilder
+    private var leadingArea: some View {
+        if ClipSourceTypePreview.underLeadingIcon {
+            VStack(spacing: 2) {
+                ClipLeadingVisual(clip: clip, showsTypeBadge: false)
+                    .frame(width: compact ? 34 : 38, height: compact ? 34 : 38)
+                HStack(spacing: 0) {
+                    Text(String(clip.source.appName.prefix(10)))
+                        .foregroundStyle(.secondary)
+                    Text("[\(clip.primaryKind.displayName)]")
+                        .foregroundStyle(clip.primaryKind.markerColor)
+                }
+                .font(.system(size: 8.5, weight: .medium))
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+                .frame(width: compact ? 72 : 80)
+            }
+            .frame(width: compact ? 72 : 80, height: 58)
+        } else {
+            ClipLeadingVisual(clip: clip)
+                .frame(width: compact ? 38 : 46, height: compact ? 38 : 46)
+        }
     }
 
     @ViewBuilder
@@ -186,6 +211,7 @@ private struct ClipRowAccessibility: ViewModifier {
 
 private struct ClipLeadingVisual: View {
     let clip: Clip
+    var showsTypeBadge = ClipTypeMarkerPreview.overlaysSourceIcon
     @State private var appIcon: NSImage?
 
     var body: some View {
@@ -196,7 +222,7 @@ private struct ClipLeadingVisual: View {
                 RoundedRectangle(cornerRadius: 9).fill(Color.accentColor.opacity(0.12))
                 Image(systemName: clip.primaryKind.symbolName).foregroundStyle(Color.accentColor)
             }
-            if ClipTypeMarkerPreview.overlaysSourceIcon {
+            if showsTypeBadge {
                 Image(systemName: clip.primaryKind.symbolName)
                     .font(.system(size: 8, weight: .bold))
                     .foregroundStyle(.white)
@@ -254,6 +280,16 @@ private enum ClipTypeMarkerPreview {
         !ProcessInfo.processInfo.arguments.contains("--debug-type-marker-as-label")
 #else
         true
+#endif
+    }
+}
+
+private enum ClipSourceTypePreview {
+    static var underLeadingIcon: Bool {
+#if DEBUG
+        ProcessInfo.processInfo.arguments.contains("--debug-source-type-under-icon")
+#else
+        false
 #endif
     }
 }
