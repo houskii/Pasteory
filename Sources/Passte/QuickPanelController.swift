@@ -13,13 +13,26 @@ final class QuickPanelController: NSObject {
     private let pasteCoordinator: PasteCoordinator
     private let targetProvider: () -> NSRunningApplication?
     private let onOpenLibrary: () -> Void
+    private let onOpenSettings: () -> Void
+    private let onCreateTextClip: () -> Void
+    private let onCreateCollection: (Bool) -> Void
     private let panel: PasstePanel
     private var eventMonitor: Any?
     private var globalMouseMonitor: Any?
     private(set) var targetApplication: NSRunningApplication?
 
-    init(state: AppState, pasteCoordinator: PasteCoordinator, targetProvider: @escaping () -> NSRunningApplication?, onOpenLibrary: @escaping () -> Void) {
-        self.state = state; self.pasteCoordinator = pasteCoordinator; self.targetProvider = targetProvider; self.onOpenLibrary = onOpenLibrary
+    init(
+        state: AppState,
+        pasteCoordinator: PasteCoordinator,
+        targetProvider: @escaping () -> NSRunningApplication?,
+        onOpenLibrary: @escaping () -> Void,
+        onOpenSettings: @escaping () -> Void,
+        onCreateTextClip: @escaping () -> Void,
+        onCreateCollection: @escaping (Bool) -> Void
+    ) {
+        self.state = state; self.pasteCoordinator = pasteCoordinator; self.targetProvider = targetProvider
+        self.onOpenLibrary = onOpenLibrary; self.onOpenSettings = onOpenSettings
+        self.onCreateTextClip = onCreateTextClip; self.onCreateCollection = onCreateCollection
         panel = PasstePanel(
             contentRect: NSRect(x: 0, y: 0, width: 380, height: 660),
             styleMask: [.nonactivatingPanel, .borderless, .resizable],
@@ -29,11 +42,18 @@ final class QuickPanelController: NSObject {
         super.init()
         panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true
         panel.isFloatingPanel = true; panel.level = .floating; panel.hidesOnDeactivate = false
-        panel.becomesKeyOnlyIfNeeded = true
+        panel.becomesKeyOnlyIfNeeded = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.minSize = NSSize(width: 340, height: 480); panel.maxSize = NSSize(width: 520, height: 760)
         panel.isMovableByWindowBackground = true
-        let view = QuickPanelView(state: state, onCopy: { [weak self] clip, plain, paste in self?.perform(clip, plainText: plain, paste: paste) }, onOpenLibrary: onOpenLibrary)
+        let view = QuickPanelView(
+            state: state,
+            onCopy: { [weak self] clip, plain, paste in self?.perform(clip, plainText: plain, paste: paste) },
+            onOpenLibrary: { [weak self] in self?.close(); onOpenLibrary() },
+            onOpenSettings: { [weak self] in self?.close(); onOpenSettings() },
+            onCreateTextClip: { [weak self] in self?.close(); onCreateTextClip() },
+            onCreateCollection: { [weak self] smart in self?.close(); onCreateCollection(smart) }
+        )
         panel.contentViewController = NSHostingController(rootView: view)
         panel.setContentSize(NSSize(width: 380, height: 660))
     }
@@ -41,6 +61,7 @@ final class QuickPanelController: NSObject {
     func toggle() { panel.isVisible ? close() : show() }
 
     func show() {
+        state.quickCommandKeyDown = false
         if let frontmost = NSWorkspace.shared.frontmostApplication, frontmost.bundleIdentifier != Bundle.main.bundleIdentifier {
             targetApplication = frontmost
         } else if let fallback = targetProvider(), !fallback.isTerminated {
@@ -48,12 +69,16 @@ final class QuickPanelController: NSObject {
         }
         positionOnMouseScreen()
         panel.orderFrontRegardless(); panel.makeKey()
+#if DEBUG
+        DispatchQueue.main.async { [weak panel] in print("quick-panel-is-key=\(panel?.isKeyWindow == true)") }
+#endif
         installKeyMonitor()
         installOutsideClickMonitor()
-        Task { await state.refreshQuick() }
+        Task { await state.prepareQuickPanel() }
     }
 
     func close() {
+        state.quickCommandKeyDown = false
         panel.orderOut(nil)
         if let eventMonitor { NSEvent.removeMonitor(eventMonitor); self.eventMonitor = nil }
         if let globalMouseMonitor { NSEvent.removeMonitor(globalMouseMonitor); self.globalMouseMonitor = nil }
@@ -87,9 +112,19 @@ final class QuickPanelController: NSObject {
 
     private func installKeyMonitor() {
         if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
-        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in
             guard let self, self.panel.isVisible else { return event }
             let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if event.type == .flagsChanged {
+                state.quickCommandKeyDown = modifiers.contains(.command)
+                return event
+            }
+            let numberKeyIndexes: [UInt16: Int] = [18: 0, 19: 1, 20: 2, 21: 3, 23: 4, 22: 5, 26: 6, 28: 7, 25: 8]
+            if modifiers.contains(.command), let index = numberKeyIndexes[event.keyCode], state.quickClips.indices.contains(index) {
+                state.quickSelectionID = state.quickClips[index].id
+                performSelected(plainText: false, paste: true)
+                return nil
+            }
             switch event.keyCode {
             case 36, 76:
                 let paste = modifiers.contains(.command) ? !self.state.settings.defaultDirectPaste : self.state.settings.defaultDirectPaste
@@ -97,6 +132,11 @@ final class QuickPanelController: NSObject {
             case 53: self.close(); return nil
             case 49: self.previewSelected(); return nil
             case 31 where modifiers.contains(.command): self.close(); self.onOpenLibrary(); return nil
+            case 125: self.state.moveQuickSelection(by: 1); return nil
+            case 126: self.state.moveQuickSelection(by: -1); return nil
+            case 123: Task { await self.state.moveQuickScope(by: -1) }; return nil
+            case 124: Task { await self.state.moveQuickScope(by: 1) }; return nil
+            case 115: self.state.quickSelectionID = self.state.quickClips.first?.id; return nil
             default: return event
             }
         }
@@ -105,7 +145,10 @@ final class QuickPanelController: NSObject {
     private func installOutsideClickMonitor() {
         if let globalMouseMonitor { NSEvent.removeMonitor(globalMouseMonitor) }
         globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            Task { @MainActor in self?.close() }
+            Task { @MainActor in
+                guard let self, !self.state.quickPanelPinned else { return }
+                self.close()
+            }
         }
     }
 

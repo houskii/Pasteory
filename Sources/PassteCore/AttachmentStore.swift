@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import UniformTypeIdentifiers
 
 public actor AttachmentStore {
     private let directories: AppDirectories
@@ -44,7 +45,7 @@ public actor AttachmentStore {
     }
 
     private func isBinaryAsset(_ uti: String) -> Bool {
-        uti == "public.png" || uti == "public.tiff" || uti == "com.adobe.pdf" || uti.hasPrefix("public.image")
+        uti == "com.adobe.pdf" || UTType(uti)?.conforms(to: .image) == true
     }
 
     private func digest(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }

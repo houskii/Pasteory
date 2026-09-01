@@ -20,7 +20,10 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
         state: state,
         pasteCoordinator: pasteCoordinator,
         targetProvider: { [weak self] in self?.lastExternalApplication },
-        onOpenLibrary: { [weak self] in self?.openLibrary() }
+        onOpenLibrary: { [weak self] in self?.openLibrary() },
+        onOpenSettings: { [weak self] in self?.openSettings() },
+        onCreateTextClip: { [weak self] in self?.createManualTextClip() },
+        onCreateCollection: { [weak self] smart in self?.promptCreateCollection(smart: smart) }
     )
 
     init(state: AppState, settings: AppSettings, attachments: AttachmentStore) {
@@ -56,7 +59,48 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
             applyMonitoringState()
             openOnboarding()
         }
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--debug-show-quick-panel") {
+            Task { [weak self] in
+                guard let self else { return }
+                if ProcessInfo.processInfo.arguments.contains("--debug-seed") { await seedDebugData() }
+                try? await Task.sleep(for: .milliseconds(600)); quickPanel.show()
+            }
+        }
+        if ProcessInfo.processInfo.arguments.contains("--debug-open-library") {
+            DispatchQueue.main.async { [weak self] in self?.openLibrary() }
+        }
+#endif
     }
+
+#if DEBUG
+    private func seedDebugData() async {
+        let samples = [
+            ("What was broken", "com.apple.Terminal", "终端"),
+            ("你要解决一下这个问题，无论是用户切换", "com.openai.chat", "ChatGPT"),
+            ("Lark Open API 调试记录", "com.google.Chrome", "Google Chrome"),
+            ("KMP 构建命令与排查结果", "com.googlecode.iterm2", "iTerm2"),
+            ("左边来源 App 和类型保持不变", "com.openai.chat", "ChatGPT")
+        ]
+        for sample in samples {
+            let capture = PasteboardCapture(
+                items: [CapturedItem(order: 0, representations: [CapturedRepresentation(uti: "public.utf8-plain-text", data: Data(sample.0.utf8))])],
+                source: ClipSource(appName: sample.2, bundleIdentifier: sample.1, confidence: .high)
+            )
+            await state.accept(capture)
+        }
+        if let image = NSImage(systemSymbolName: "photo.fill", accessibilityDescription: nil), let data = image.tiffRepresentation {
+            let capture = PasteboardCapture(
+                items: [CapturedItem(order: 0, representations: [CapturedRepresentation(uti: "public.tiff", data: data)])],
+                source: ClipSource(appName: "预览", bundleIdentifier: "com.apple.Preview", confidence: .high)
+            )
+            await state.accept(capture)
+        }
+        _ = await state.addCollection(name: "开发资料", smart: false)
+        _ = await state.addCollection(name: "Lark Open API", smart: false)
+        _ = await state.addCollection(name: "KMP", smart: false)
+    }
+#endif
 
     private func configureStatusItem() {
         if let button = statusItem.button {
@@ -116,10 +160,13 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
     func openLibrary() {
         if libraryWindow == nil {
             let view = LibraryView(state: state, onPaste: { [weak self] clip, plain, paste in self?.performFromLibrary(clip, plainText: plain, paste: paste) }, onOpenSettings: { [weak self] in self?.openSettings() })
-            let window = NSWindow(contentViewController: NSHostingController(rootView: view))
+            let hostingController = NSHostingController(rootView: view)
+            hostingController.sizingOptions = []
+            let window = NSWindow(contentViewController: hostingController)
             window.title = "Passte 资料库"; window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
             window.setContentSize(NSSize(width: 1120, height: 720)); window.minSize = NSSize(width: 900, height: 600)
             window.center(); window.isReleasedWhenClosed = false; window.titlebarAppearsTransparent = true
+            window.setFrameAutosaveName("PassteLibraryWindow")
             libraryWindow = window
         }
         activateAndShow(libraryWindow)
@@ -140,6 +187,32 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
             settingsWindow = window
         }
         activateAndShow(settingsWindow)
+    }
+
+    private func createManualTextClip() {
+        Task {
+            guard await state.createManualTextClip() != nil else { return }
+            openLibrary()
+        }
+    }
+
+    private func promptCreateCollection(smart: Bool) {
+        let alert = NSAlert()
+        alert.messageText = smart ? "创建智能列表" : "创建普通列表"
+        alert.informativeText = smart ? "创建后可在资料库中编辑匹配规则。" : "列表会显示在快捷面板的横向标签中。"
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
+        input.placeholderString = smart ? "智能列表名称" : "列表名称"
+        alert.accessoryView = input
+        alert.addButton(withTitle: "创建"); alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let name = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        Task {
+            guard let collection = await state.addCollection(name: name, smart: smart) else { return }
+            state.libraryFilter = .collection(collection.id)
+            await state.refreshLibrary()
+            openLibrary()
+        }
     }
 
     private func performFromLibrary(_ clip: Clip, plainText: Bool, paste: Bool) {

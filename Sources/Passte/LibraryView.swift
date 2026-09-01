@@ -12,11 +12,11 @@ struct LibraryView: View {
 
     var body: some View {
         HSplitView {
-            sidebar.frame(minWidth: 190, idealWidth: 220, maxWidth: 280)
-            content.frame(minWidth: 360, idealWidth: 440)
-            inspector.frame(minWidth: 280, idealWidth: 340)
+            sidebar.frame(minWidth: 190, idealWidth: 220, maxWidth: 280).layoutPriority(1)
+            content.frame(minWidth: 360, idealWidth: 520, maxWidth: .infinity).layoutPriority(3)
+            inspector.frame(minWidth: 280, idealWidth: 340, maxWidth: 460).layoutPriority(2)
         }
-        .frame(minWidth: 900, minHeight: 600)
+        .frame(minWidth: 900, maxWidth: .infinity, minHeight: 600, maxHeight: .infinity)
         .tint(.purple)
         .sheet(isPresented: $showNewCollection) { newCollectionSheet }
         .sheet(item: $editingSmartCollection) { SmartCollectionEditor(state: state, existing: $0) }
@@ -57,6 +57,7 @@ struct LibraryView: View {
                 Text("\(state.clips.count) 条").font(.caption).foregroundStyle(.secondary)
             }.padding(12)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.regularMaterial)
     }
 
@@ -89,7 +90,8 @@ struct LibraryView: View {
             } else {
                 List(state.clips, selection: $state.selectedClipID) { clip in
                     ClipRowView(clip: clip, attachments: state.attachments).tag(clip.id).contentShape(Rectangle())
-                        .onTapGesture(count: 2) { onPaste(clip, false, true) }
+                        .onTapGesture { state.selectedClipID = clip.id }
+                        .simultaneousGesture(TapGesture(count: 2).onEnded { onPaste(clip, false, true) })
                         .contextMenu { contextMenu(for: clip) }
                 }.listStyle(.inset)
             }
@@ -106,6 +108,11 @@ struct LibraryView: View {
                     Group {
                         Text("标题").font(.caption).foregroundStyle(.secondary)
                         TextField("可选标题", text: Binding(get: { state.selectedClip?.title ?? "" }, set: { value in state.mutateSelected { $0.title = value } }))
+                        if clip.source.bundleIdentifier == "app.passte.Passte" {
+                            Text("正文").font(.caption).foregroundStyle(.secondary)
+                            TextEditor(text: Binding(get: { state.selectedClip?.previewText ?? "" }, set: { state.updateManualText($0) }))
+                                .font(.body).frame(minHeight: 110).border(.quaternary)
+                        }
                         Text("备注").font(.caption).foregroundStyle(.secondary)
                         TextEditor(text: Binding(get: { state.selectedClip?.note ?? "" }, set: { value in state.mutateSelected { $0.note = value } })).frame(minHeight: 80).border(.quaternary)
                         Picker("优先级", selection: Binding(get: { state.selectedClip?.priority ?? 0 }, set: { value in state.mutateSelected { $0.priority = value } })) {

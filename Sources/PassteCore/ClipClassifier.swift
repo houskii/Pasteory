@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import UniformTypeIdentifiers
 
 public enum ClipClassifier {
     private static let colorPattern = try! NSRegularExpression(
@@ -67,7 +68,7 @@ public enum ClipClassifier {
             previewCandidates.append(filePreview(item))
             return .file
         }
-        if types.contains(where: { $0 == "public.png" || $0 == "public.tiff" || $0 == "com.adobe.pdf" || $0.hasPrefix("public.image") }) {
+        if types.contains(where: { $0 == "com.adobe.pdf" || UTType($0)?.conforms(to: .image) == true }) {
             previewCandidates.append("图像")
             return .image
         }

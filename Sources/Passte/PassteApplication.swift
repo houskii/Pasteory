@@ -20,7 +20,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
-            let directories = try AppDirectories()
+            let directories: AppDirectories
+#if DEBUG
+            let arguments = ProcessInfo.processInfo.arguments
+            if let index = arguments.firstIndex(of: "--debug-data-root"), arguments.indices.contains(index + 1) {
+                directories = try AppDirectories(root: URL(fileURLWithPath: arguments[index + 1], isDirectory: true))
+            } else {
+                directories = try AppDirectories()
+            }
+#else
+            directories = try AppDirectories()
+#endif
             let repository = try SQLiteClipRepository(databaseURL: directories.databaseFile)
             let attachments = AttachmentStore(directories: directories)
             let archive = ArchiveService(repository: repository, directories: directories)

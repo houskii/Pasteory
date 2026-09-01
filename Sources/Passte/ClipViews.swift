@@ -1,36 +1,51 @@
 import AppKit
 import PassteCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ClipRowView: View {
     let clip: Clip
     let attachments: AttachmentStore?
     var compact = false
+    var shortcutNumber: Int? = nil
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            ClipLeadingVisual(clip: clip, attachments: attachments)
+        HStack(alignment: .center, spacing: 10) {
+            ClipLeadingVisual(clip: clip)
                 .frame(width: compact ? 38 : 46, height: compact ? 38 : 46)
             VStack(alignment: .leading, spacing: 4) {
-                Text(clip.title.isEmpty ? clip.previewText : clip.title)
-                    .font(.system(size: compact ? 13 : 14, weight: .medium))
-                    .lineLimit(compact ? 2 : 3)
+                if hasImagePreview, let attachments {
+                    ClipInlineThumbnail(
+                        clip: clip,
+                        attachments: attachments,
+                        width: compact ? 52 : 60,
+                        height: compact ? 44 : 48
+                    )
+                } else {
+                    Text(clip.title.isEmpty ? clip.previewText : clip.title)
+                        .font(.system(size: compact ? 13 : 14, weight: .medium))
+                        .lineLimit(2)
+                }
                 HStack(spacing: 7) {
                     Text(clip.source.appName)
-                    Text(timestamp)
                     if clip.items.count > 1 { Text("\(clip.items.count) 项") }
                     if clip.copyCount > 1 { Text("复制 \(clip.copyCount) 次") }
+                    if clip.isFavorite { Image(systemName: "star.fill").foregroundStyle(.yellow) }
+                    if clip.priority > 0 { Text("P\(clip.priority)").font(.caption2.bold()).foregroundStyle(.purple) }
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
             Spacer(minLength: 4)
-            VStack(spacing: 6) {
-                if clip.isFavorite { Image(systemName: "star.fill").foregroundStyle(.yellow) }
-                if clip.priority > 0 { Text("P\(clip.priority)").font(.caption2.bold()).foregroundStyle(.purple) }
+            VStack(alignment: .trailing, spacing: 6) {
+                Text(timestamp).foregroundStyle(.tertiary)
+                Spacer(minLength: 0)
+                if let shortcutNumber { Text("⌘ \(shortcutNumber)").foregroundStyle(.primary) }
             }
+            .font(.caption).frame(width: compact ? 48 : 62)
         }
-        .padding(.vertical, 4)
+        .frame(height: compact ? 72 : 72)
+        .clipped()
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(clip.primaryKind.displayName)，\(clip.previewText)，来自 \(clip.source.appName)")
     }
@@ -39,20 +54,27 @@ struct ClipRowView: View {
         let parts = Calendar.current.dateComponents([.month, .day, .hour, .minute], from: clip.lastCopiedAt)
         return String(format: "%02d-%02d %02d:%02d", parts.month ?? 0, parts.day ?? 0, parts.hour ?? 0, parts.minute ?? 0)
     }
+
+    private var hasImagePreview: Bool {
+        if clip.primaryKind == .image || clip.items.contains(where: { item in
+            item.representations.contains { representation in
+                UTType(representation.uti)?.conforms(to: .image) == true
+            }
+        }) { return true }
+        guard clip.primaryKind == .file else { return false }
+        let ext = URL(fileURLWithPath: clip.previewText).pathExtension.lowercased()
+        return ["png", "jpg", "jpeg", "heic", "heif", "gif", "webp", "tiff", "bmp"].contains(ext)
+    }
 }
 
 private struct ClipLeadingVisual: View {
     let clip: Clip
-    let attachments: AttachmentStore?
-    @State private var thumbnail: NSImage?
     @State private var appIcon: NSImage?
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             Group {
-                if let thumbnail {
-                    Image(nsImage: thumbnail).resizable().scaledToFill()
-                } else if let appIcon {
+                if let appIcon {
                     Image(nsImage: appIcon).resizable().scaledToFit().padding(3)
                 } else {
                     RoundedRectangle(cornerRadius: 9).fill(Color.accentColor.opacity(0.12))
@@ -60,47 +82,80 @@ private struct ClipLeadingVisual: View {
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 9))
-            if thumbnail != nil, let appIcon {
-                Image(nsImage: appIcon).resizable().scaledToFit().padding(1)
-                    .frame(width: 17, height: 17).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 4))
-            } else {
-                Image(systemName: clip.primaryKind.symbolName).font(.system(size: 8, weight: .bold)).foregroundStyle(.white)
-                    .frame(width: 15, height: 15).background(Color.purple, in: Circle())
-            }
+            Image(systemName: clip.primaryKind.symbolName).font(.system(size: 8, weight: .bold)).foregroundStyle(.white)
+                .frame(width: 15, height: 15).background(Color.purple, in: Circle())
         }
-        .task(id: clip.id) { await loadVisuals() }
+        .task(id: clip.source.bundleIdentifier) { loadAppIcon() }
     }
 
     @MainActor
-    private func loadVisuals() async {
+    private func loadAppIcon() {
         if let bundle = clip.source.bundleIdentifier,
            let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundle) {
             appIcon = NSWorkspace.shared.icon(forFile: url.path)
         }
-        guard let attachments else { return }
-        for item in clip.items {
-            for representation in item.representations where representation.uti == "public.png" || representation.uti == "public.tiff" {
-                if let data = try? await attachments.data(for: representation), let image = NSImage(data: data) { thumbnail = image; return }
+    }
+}
+
+private struct ClipInlineThumbnail: View {
+    let clip: Clip
+    let attachments: AttachmentStore
+    let width: CGFloat
+    let height: CGFloat
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: width, height: height)
+                    .clipped()
+            } else {
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(.quaternary)
+                    .frame(width: width, height: height)
+                    .overlay { ProgressView().controlSize(.small) }
             }
         }
-        guard clip.primaryKind == .file else { return }
+        .frame(width: width, height: height)
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .clipped()
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(.quaternary, lineWidth: 1))
+        .task(id: clip.id) { image = await ClipImageLoader.load(clip: clip, attachments: attachments) }
+    }
+}
+
+@MainActor
+private enum ClipImageLoader {
+    static func load(clip: Clip, attachments: AttachmentStore) async -> NSImage? {
+        for item in clip.items {
+            for representation in item.representations where isImageUTI(representation.uti) {
+                if let data = try? await attachments.data(for: representation), let image = NSImage(data: data) { return image }
+            }
+        }
+        guard clip.primaryKind == .file else { return nil }
         for item in clip.items {
             for representation in item.representations where representation.uti == "public.file-url" || representation.uti == "NSFilenamesPboardType" {
                 guard let data = try? await attachments.data(for: representation), let url = fileURL(from: data, uti: representation.uti), isImageFile(url) else { continue }
-                if let image = NSImage(contentsOf: url) { thumbnail = image; return }
+                if let image = NSImage(contentsOf: url) { return image }
             }
         }
+        return nil
     }
 
-    private func fileURL(from data: Data, uti: String) -> URL? {
-        if uti == "NSFilenamesPboardType",
-           let paths = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String],
-           let path = paths.first { return URL(fileURLWithPath: path) }
+    private static func isImageUTI(_ uti: String) -> Bool {
+        ["public.png", "public.tiff", "public.jpeg", "public.jpeg-2000", "public.heic", "public.heif", "com.compuserve.gif", "org.webmproject.webp"].contains(uti)
+    }
+
+    private static func fileURL(from data: Data, uti: String) -> URL? {
+        if uti == "NSFilenamesPboardType", let paths = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String], let path = paths.first { return URL(fileURLWithPath: path) }
         guard let value = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) else { return nil }
         return URL(string: value) ?? URL(fileURLWithPath: value)
     }
 
-    private func isImageFile(_ url: URL) -> Bool {
+    private static func isImageFile(_ url: URL) -> Bool {
         ["png", "jpg", "jpeg", "heic", "heif", "gif", "webp", "tiff", "bmp"].contains(url.pathExtension.lowercased())
     }
 }
@@ -112,7 +167,7 @@ struct RepresentationPreview: View {
 
     var body: some View {
         Group {
-            if clip.primaryKind == .image, let image {
+            if let image {
                 Image(nsImage: image).resizable().scaledToFit()
             } else if clip.primaryKind == .color, let color = ColorParser.color(from: clip.previewText) {
                 VStack(spacing: 12) {
@@ -132,12 +187,7 @@ struct RepresentationPreview: View {
     }
 
     private func loadImage() async {
-        guard clip.primaryKind == .image else { image = nil; return }
-        for item in clip.items {
-            for representation in item.representations where representation.uti == "public.png" || representation.uti == "public.tiff" {
-                if let data = try? await attachments.data(for: representation), let value = NSImage(data: data) { image = value; return }
-            }
-        }
+        image = await ClipImageLoader.load(clip: clip, attachments: attachments)
     }
 }
 
