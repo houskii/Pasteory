@@ -41,7 +41,9 @@ struct ClipRowView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             Spacer(minLength: 4)
             VStack(alignment: .trailing, spacing: 0) {
-                ClipKindLabel(kind: clip.primaryKind)
+                if !ClipTypeMarkerPreview.overlaysSourceIcon {
+                    ClipKindLabel(kind: clip.primaryKind)
+                }
                 Spacer(minLength: 0)
                 if let shortcutNumber {
                     Text("⌘ \(shortcutNumber)")
@@ -50,14 +52,17 @@ struct ClipRowView: View {
                         .fixedSize()
                 }
             }
-            .frame(width: compact ? 54 : 58, height: 56, alignment: .trailing)
+            .frame(
+                width: ClipTypeMarkerPreview.overlaysSourceIcon ? (compact ? 34 : 38) : (compact ? 54 : 58),
+                height: 56,
+                alignment: .trailing
+            )
             .padding(.trailing, 4)
             .padding(.bottom, 4)
         }
         .frame(height: compact ? 72 : 72)
         .clipped()
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibilitySummary)
+        .modifier(ClipRowAccessibility(summary: accessibilitySummary))
     }
 
     private var timestamp: String {
@@ -162,17 +167,42 @@ struct ClipRowView: View {
     }
 }
 
+private struct ClipRowAccessibility: ViewModifier {
+    let summary: String
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--debug-ui-qa") {
+            content.accessibilityHidden(true)
+        } else {
+            content.accessibilityElement(children: .combine).accessibilityLabel(summary)
+        }
+#else
+        content.accessibilityElement(children: .combine).accessibilityLabel(summary)
+#endif
+    }
+}
+
 private struct ClipLeadingVisual: View {
     let clip: Clip
     @State private var appIcon: NSImage?
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .bottomTrailing) {
             if let appIcon {
                 Image(nsImage: appIcon).resizable().scaledToFit().padding(3)
             } else {
                 RoundedRectangle(cornerRadius: 9).fill(Color.accentColor.opacity(0.12))
                 Image(systemName: clip.primaryKind.symbolName).foregroundStyle(Color.accentColor)
+            }
+            if ClipTypeMarkerPreview.overlaysSourceIcon {
+                Image(systemName: clip.primaryKind.symbolName)
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 16, height: 16)
+                    .background(clip.primaryKind.markerColor, in: Circle())
+                    .overlay(Circle().stroke(.white, lineWidth: 1.5))
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 9))
@@ -194,17 +224,19 @@ private struct ClipKindLabel: View {
     var body: some View {
         Text(kind.displayName)
             .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(markerColor)
+            .foregroundStyle(kind.markerColor)
             .lineLimit(1)
             .fixedSize()
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
-            .background(markerColor.opacity(0.10), in: Capsule())
-            .accessibilityLabel("内容类型：\(kind.displayName)")
+            .background(kind.markerColor.opacity(0.10), in: Capsule())
+            .accessibilityHidden(true)
     }
+}
 
-    private var markerColor: Color {
-        switch kind {
+private extension ClipKind {
+    var markerColor: Color {
+        switch self {
         case .text: Color(red: 0.39, green: 0.40, blue: 0.95)
         case .image: Color(red: 0.86, green: 0.15, blue: 0.47)
         case .link: Color(red: 0.10, green: 0.45, blue: 0.86)
@@ -213,6 +245,16 @@ private struct ClipKindLabel: View {
         case .file: Color(red: 0.06, green: 0.62, blue: 0.56)
         case .mixed: Color(red: 0.42, green: 0.40, blue: 0.45)
         }
+    }
+}
+
+private enum ClipTypeMarkerPreview {
+    static var overlaysSourceIcon: Bool {
+#if DEBUG
+        !ProcessInfo.processInfo.arguments.contains("--debug-type-marker-as-label")
+#else
+        true
+#endif
     }
 }
 

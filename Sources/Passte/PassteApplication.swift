@@ -8,7 +8,13 @@ enum PassteApplication {
         let application = NSApplication.shared
         let delegate = AppDelegate()
         application.delegate = delegate
+#if DEBUG
+        application.setActivationPolicy(
+            ProcessInfo.processInfo.arguments.contains("--debug-ui-qa") ? .regular : .accessory
+        )
+#else
         application.setActivationPolicy(.accessory)
+#endif
         application.run()
         _ = delegate
     }

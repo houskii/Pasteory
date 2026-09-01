@@ -3,8 +3,9 @@ import PassteCore
 import SwiftUI
 
 final class PasstePanel: NSPanel {
+    var allowsMainWindow = false
     override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { false }
+    override var canBecomeMain: Bool { allowsMainWindow }
 }
 
 @MainActor
@@ -40,15 +41,29 @@ final class QuickPanelController: NSObject {
         self.onOpenLibrary = onOpenLibrary; self.onOpenSettings = onOpenSettings
         self.onCreateTextClip = onCreateTextClip; self.onCreateCollection = onCreateCollection
         self.onEditCollection = onEditCollection; self.onDeleteCollection = onDeleteCollection
+#if DEBUG
+        let isDebugUIQA = ProcessInfo.processInfo.arguments.contains("--debug-ui-qa")
+        let panelStyleMask: NSWindow.StyleMask = isDebugUIQA
+            ? [.borderless, .resizable]
+            : [.nonactivatingPanel, .borderless, .resizable]
+#else
+        let panelStyleMask: NSWindow.StyleMask = [.nonactivatingPanel, .borderless, .resizable]
+#endif
         panel = PasstePanel(
             contentRect: NSRect(x: 0, y: 0, width: 380, height: 660),
-            styleMask: [.nonactivatingPanel, .borderless, .resizable],
+            styleMask: panelStyleMask,
             backing: .buffered,
             defer: false
         )
         super.init()
-        panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true
+#if DEBUG
+        panel.allowsMainWindow = isDebugUIQA
+        panel.isFloatingPanel = !isDebugUIQA; panel.level = isDebugUIQA ? .normal : .floating; panel.hidesOnDeactivate = false
+#else
+        panel.allowsMainWindow = false
         panel.isFloatingPanel = true; panel.level = .floating; panel.hidesOnDeactivate = false
+#endif
+        panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true
         panel.becomesKeyOnlyIfNeeded = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.minSize = NSSize(width: 340, height: 480); panel.maxSize = NSSize(width: 520, height: 760)

@@ -13,6 +13,9 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
     private var libraryWindow: NSWindow?
     private var settingsWindow: NSWindow?
     private var onboardingWindow: NSWindow?
+#if DEBUG
+    private var debugQuickWindow: NSWindow?
+#endif
     private var workspaceObserver: NSObjectProtocol?
     private var libraryKeyMonitor: Any?
     private var maintenanceTimer: Timer?
@@ -60,18 +63,36 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
 
     func start() {
         configureStatusItem()
+#if DEBUG
+        if !ProcessInfo.processInfo.arguments.contains("--debug-disable-hotkey") {
+            registerHotKey()
+        }
+#else
         registerHotKey()
+#endif
         Task { await state.bootstrap() }
         maintenanceTimer = Timer.scheduledTimer(withTimeInterval: 86_400, repeats: true) { [weak state] _ in
             Task { @MainActor in await state?.runArchive() }
         }
         settings.monitoringEnabled = true
+#if DEBUG
+        if !ProcessInfo.processInfo.arguments.contains("--debug-disable-monitor") {
+            monitor.start()
+        }
+#else
         monitor.start()
+#endif
         if !settings.completedOnboarding {
             openOnboarding()
         }
 #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("--debug-show-quick-panel") {
+        if ProcessInfo.processInfo.arguments.contains("--debug-show-quick-window") {
+            Task { [weak self] in
+                guard let self else { return }
+                if ProcessInfo.processInfo.arguments.contains("--debug-seed") { await seedDebugData() }
+                try? await Task.sleep(for: .milliseconds(600)); openDebugQuickWindow()
+            }
+        } else if ProcessInfo.processInfo.arguments.contains("--debug-show-quick-panel") {
             Task { [weak self] in
                 guard let self else { return }
                 if ProcessInfo.processInfo.arguments.contains("--debug-seed") { await seedDebugData() }
@@ -85,6 +106,34 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
     }
 
 #if DEBUG
+    private func openDebugQuickWindow() {
+        let view = QuickPanelView(
+            state: state,
+            onCopy: { _, _, _ in },
+            onOpenLibrary: {},
+            onOpenSettings: {},
+            onCreateTextClip: {},
+            onCreateCollection: { _ in },
+            onEditCollection: { _ in },
+            onDeleteCollection: { _ in }
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 380, height: 660),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Passte 快捷面板实际测试"
+        window.contentViewController = NSHostingController(rootView: view.frame(width: 380, height: 660))
+        window.setContentSize(NSSize(width: 380, height: 660))
+        window.center()
+        window.isReleasedWhenClosed = false
+        debugQuickWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        Task { await state.prepareQuickPanel() }
+    }
+
     private func seedDebugData() async {
         let samples = [
             ("这是一条用于验证超长文本截断和布局边界的剪贴板内容，它不应该把时间、来源应用或快捷键挤出卡片，也不能覆盖相邻的条目。", "com.apple.Terminal", "一个名称同样非常长的测试来源应用"),
@@ -102,8 +151,13 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
             await state.accept(capture)
         }
         if var metadataSample = state.quickClips.first {
-            metadataSample.title = String(repeating: "这是一个很长的用户标题，用来验证标题会在卡片边界内截断。", count: 5)
-            metadataSample.note = String(repeating: "这是一条很长的备注，用于确认标题、正文、备注、复制次数和图钉同时存在时仍然清晰。", count: 10)
+            if ProcessInfo.processInfo.arguments.contains("--debug-screenshot-seed") {
+                metadataSample.title = "快捷面板类型标识实际测试：超长标题需要在标签前截断"
+                metadataSample.note = "备注、正文、类型标签和复制次数不能互相覆盖"
+            } else {
+                metadataSample.title = String(repeating: "这是一个很长的用户标题，用来验证标题会在卡片边界内截断。", count: 5)
+                metadataSample.note = String(repeating: "这是一条很长的备注，用于确认标题、正文、备注、复制次数和图钉同时存在时仍然清晰。", count: 10)
+            }
             metadataSample.isPinned = true
             metadataSample.copyCount = 128
             state.update(metadataSample)
@@ -125,6 +179,21 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
             )
             await state.accept(capture)
         }
+        let linkCapture = PasteboardCapture(
+            items: [CapturedItem(order: 0, representations: [CapturedRepresentation(uti: "public.url", data: Data("https://passte.app/design/type-marker".utf8))])],
+            source: ClipSource(appName: "Safari", bundleIdentifier: "com.apple.Safari", confidence: .high)
+        )
+        await state.accept(linkCapture)
+        let codeCapture = PasteboardCapture(
+            items: [CapturedItem(order: 0, representations: [CapturedRepresentation(uti: "public.utf8-plain-text", data: Data("swift test && make verify".utf8))])],
+            source: ClipSource(appName: "终端", bundleIdentifier: "com.apple.Terminal", confidence: .high)
+        )
+        await state.accept(codeCapture)
+        let fileCapture = PasteboardCapture(
+            items: [CapturedItem(order: 0, representations: [CapturedRepresentation(uti: "public.file-url", data: Data("file:///tmp/Passte-%E4%BA%A4%E4%BA%92%E8%AE%BE%E8%AE%A1-v4.pdf".utf8))])],
+            source: ClipSource(appName: "访达", bundleIdentifier: "com.apple.finder", confidence: .high)
+        )
+        await state.accept(fileCapture)
         _ = await state.addCollection(name: "开发资料", smart: false)
         _ = await state.addCollection(name: "Lark Open API", smart: false)
         _ = await state.addCollection(name: "KMP", smart: false)

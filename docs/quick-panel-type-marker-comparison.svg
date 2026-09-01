@@ -138,7 +138,7 @@
   <text class="annotation" x="54" y="873">方案 1：紧凑，但 16–18pt 角标既遮挡来源 App，又依赖用户记住图形和颜色；混合内容也很难表达。</text>
   <text class="annotation" x="54" y="906">方案 2：文字 + 颜色双重编码，来源 App 图标保持完整；标签区固定宽度，超长内容在进入标签区前截断。</text>
   <rect x="54" y="936" width="1332" height="72" rx="16" fill="#f2eafd" stroke="#d8b4fe" stroke-width="1.5"/>
-  <text class="verdict" x="78" y="966">推荐方案 2</text>
-  <text class="annotation" x="178" y="966">信息辨识更直接，也更符合 VoiceOver 和非颜色识别要求。标签只在快捷面板展示，资料库仍可使用类型筛选。</text>
-  <text class="annotation" x="78" y="991">实现约束：固定 48pt 标签区；文字最多 4 个汉字；使用浅色背景 + 较深文字，避免“浅色字放白底”导致对比度不足。</text>
+  <text class="verdict" x="78" y="966">最终选择方案 1</text>
+  <text class="annotation" x="194" y="966">类型是辅助信息，正文可用宽度优先。角标使用不同颜色，来源 App 图标和类型仍能快速区分。</text>
+  <text class="annotation" x="78" y="991">实现约束：角标固定 16pt；右侧不再预留类型标签区，只保留“⌘ 1”快捷序号所需的 34pt 紧凑空间。</text>
 </svg>
