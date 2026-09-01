@@ -26,7 +26,7 @@ final class GlobalHotKeyManager {
 
     @discardableResult
     func register(keyCode: UInt32, modifiers: UInt32) -> Bool {
-        if let reference { UnregisterEventHotKey(reference); self.reference = nil }
+        unregister()
         let signature = OSType(0x50535445)
         var newReference: EventHotKeyRef?
         let status = RegisterEventHotKey(keyCode, modifiers, EventHotKeyID(signature: signature, id: 1), GetApplicationEventTarget(), 0, &newReference)
@@ -35,6 +35,11 @@ final class GlobalHotKeyManager {
         }
         lastError = "快捷键已被其他应用占用（错误码 \(status)）"
         return false
+    }
+
+    func unregister() {
+        if let reference { UnregisterEventHotKey(reference); self.reference = nil }
+        lastError = nil
     }
 
     fileprivate func fire() { onPress?() }

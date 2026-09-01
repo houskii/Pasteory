@@ -17,7 +17,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
     private var debugQuickWindow: NSWindow?
 #endif
     private var workspaceObserver: NSObjectProtocol?
-    private var libraryKeyMonitor: Any?
+    private var windowCloseKeyMonitor: Any?
     private var maintenanceTimer: Timer?
     private var lastExternalApplication: NSRunningApplication?
     private lazy var quickPanel = QuickPanelController(
@@ -49,13 +49,18 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
                 self?.lastExternalApplication = app
             }
         }
-        libraryKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        windowCloseKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self,
                   event.keyCode == 13,
-                  event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
-                  let window = self.libraryWindow,
-                  window.isKeyWindow,
-                  window.attachedSheet == nil else { return event }
+                  event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command else { return event }
+            let window: NSWindow?
+            if self.settingsWindow?.isKeyWindow == true { window = self.settingsWindow }
+            else if self.libraryWindow?.isKeyWindow == true { window = self.libraryWindow }
+            else { window = nil }
+            guard let window, window.attachedSheet == nil else { return event }
+            if let recorder = window.firstResponder as? ShortcutRecorderNSView, recorder.isRecordingShortcut {
+                return event
+            }
             window.performClose(nil)
             return nil
         }
@@ -238,7 +243,11 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
     }
 
     func menuWillOpen(_ menu: NSMenu) {
-        menu.items.first?.title = "打开快捷面板（\(ShortcutFormatter.display(keyCode: settings.shortcutKeyCode, modifiers: settings.shortcutModifiers))）"
+        if let shortcut = settings.globalShortcut {
+            menu.items.first?.title = "打开快捷面板（\(ShortcutFormatter.display(keyCode: shortcut.keyCode, modifiers: shortcut.modifiers))）"
+        } else {
+            menu.items.first?.title = "打开快捷面板（未设置快捷键）"
+        }
         statusItem.button?.image = NSImage(systemSymbolName: "clipboard", accessibilityDescription: "Passte")
     }
 
@@ -252,7 +261,11 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
     @objc private func quit() { NSApplication.shared.terminate(nil) }
 
     private func registerHotKey() {
-        if !hotKeyManager.register(keyCode: settings.shortcutKeyCode, modifiers: settings.shortcutModifiers) {
+        guard let shortcut = settings.globalShortcut else {
+            hotKeyManager.unregister()
+            return
+        }
+        if !hotKeyManager.register(keyCode: shortcut.keyCode, modifiers: shortcut.modifiers) {
             state.presentStatus(hotKeyManager.lastError ?? "快捷键注册失败", kind: .error, dismissAfter: 5)
         }
     }
@@ -299,6 +312,16 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
             settingsWindow = window
         }
         activateAndShow(settingsWindow)
+#if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if let window = settingsWindow,
+           let index = arguments.firstIndex(of: "--debug-snapshot-path"), arguments.indices.contains(index + 1) {
+            Task {
+                try? await Task.sleep(for: .milliseconds(800))
+                saveDebugSnapshot(of: window, to: arguments[index + 1])
+            }
+        }
+#endif
     }
 
     private func createManualTextClip() {

@@ -15,12 +15,12 @@ struct OnboardingView: View {
             HStack(spacing: 14) {
                 feature("本地保存", "内容保存在这台 Mac，不会上传网络。", "internaldrive")
                 feature("敏感保护", "默认忽略密码、钥匙串和隐藏剪贴板内容。", "lock.shield")
-                feature("随时找回", "按 ⌘⇧B 搜索并粘贴历史内容。", "command")
+                feature("随时找回", "按 ⌘⇧C 搜索并粘贴历史内容。", "command")
             }
             .frame(maxWidth: 720)
             VStack(spacing: 10) {
                 HStack(spacing: 12) {
-                    Button("测试 ⌘⇧B") { onTestShortcut() }
+                    Button("测试 ⌘⇧C") { onTestShortcut() }
                     Button {
                         settings.completedOnboarding = true; onStart()
                     } label: {

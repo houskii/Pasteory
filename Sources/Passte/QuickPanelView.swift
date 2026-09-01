@@ -233,15 +233,13 @@ struct QuickCommandHelpView: View {
             ) {
                 commandHelpItem(shortcut: "⌘1～⌘9", title: "粘贴对应项目")
                 ForEach(commandActions) { action in
-                    let shortcut = settings.quickShortcut(for: action)
-                    commandHelpItem(
-                        shortcut: ShortcutFormatter.display(keyCode: shortcut.keyCode, modifiers: shortcut.modifiers),
-                        title: action.commandHelpTitle
-                    )
+                    if let shortcut = settings.quickShortcut(for: action) {
+                        commandHelpItem(
+                            shortcut: ShortcutFormatter.display(keyCode: shortcut.keyCode, modifiers: shortcut.modifiers),
+                            title: action.commandHelpTitle
+                        )
+                    }
                 }
-                commandHelpItem(shortcut: "⌘L", title: "打开资料库")
-                commandHelpItem(shortcut: "⌘,", title: "打开设置")
-                commandHelpItem(shortcut: "⌘W", title: "关闭面板")
             }
         }
         .padding(12)
@@ -251,7 +249,8 @@ struct QuickCommandHelpView: View {
 
     private var commandActions: [QuickPanelAction] {
         QuickPanelAction.allCases.filter {
-            settings.quickShortcut(for: $0).modifiers & UInt32(cmdKey) != 0
+            guard let shortcut = settings.quickShortcut(for: $0) else { return false }
+            return shortcut.modifiers & UInt32(cmdKey) != 0
         }
     }
 
@@ -281,6 +280,9 @@ private extension QuickPanelAction {
         case .editMetadata: "标题与备注"
         case .setCollection: "设置分组"
         case .moveToTrash: "移到废纸篓"
+        case .openLibrary: "打开资料库"
+        case .openSettings: "打开设置"
+        case .closePanel: "关闭面板"
         }
     }
 }
@@ -385,8 +387,8 @@ private struct QuickClipCard: View {
 
 private extension View {
     @ViewBuilder
-    func quickActionShortcut(_ shortcut: PassteShortcut) -> some View {
-        if let key = shortcut.keyEquivalent {
+    func quickActionShortcut(_ shortcut: PassteShortcut?) -> some View {
+        if let shortcut, let key = shortcut.keyEquivalent {
             keyboardShortcut(key, modifiers: shortcut.eventModifiers)
         } else {
             self

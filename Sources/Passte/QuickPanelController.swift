@@ -22,6 +22,7 @@ final class QuickPanelController: NSObject {
     private let onDeleteCollection: (ClipCollection) -> Void
     private let panel: PasstePanel
     private var commandHelpPanel: NSPanel?
+    private var commandHelpArmed = false
     private var eventMonitor: Any?
     private var globalMouseMonitor: Any?
     private let frameAutosaveName = "PassteQuickPanelWindow"
@@ -91,6 +92,7 @@ final class QuickPanelController: NSObject {
     func show() {
         state.quickCommandKeyDown = false
         hideCommandHelp()
+        commandHelpArmed = !NSEvent.modifierFlags.contains(.command)
         if let frontmost = NSWorkspace.shared.frontmostApplication, frontmost.bundleIdentifier != Bundle.main.bundleIdentifier {
             targetApplication = frontmost
         } else if let fallback = targetProvider(), !fallback.isTerminated {
@@ -123,6 +125,7 @@ final class QuickPanelController: NSObject {
 
     func close() {
         state.quickCommandKeyDown = false
+        commandHelpArmed = false
         hideCommandHelp()
         state.quickHoveredClipID = nil
         state.quickMetadataEditorActive = false
@@ -166,10 +169,17 @@ final class QuickPanelController: NSObject {
             let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             if event.type == .flagsChanged {
                 let commandDown = modifiers.contains(.command)
-                state.quickCommandKeyDown = commandDown
-                if commandDown, !state.quickMetadataEditorActive, !state.quickCollectionPickerActive {
+                if !commandDown {
+                    commandHelpArmed = true
+                    state.quickCommandKeyDown = false
+                    hideCommandHelp()
+                } else if commandHelpArmed,
+                          !state.quickMetadataEditorActive,
+                          !state.quickCollectionPickerActive {
+                    state.quickCommandKeyDown = true
                     showCommandHelp()
                 } else {
+                    state.quickCommandKeyDown = false
                     hideCommandHelp()
                 }
                 return event
@@ -213,12 +223,7 @@ final class QuickPanelController: NSObject {
                 return nil
             }
             switch event.keyCode {
-            case 13 where modifiers.contains(.command): self.close(); return nil
-            case 43 where modifiers.contains(.command): self.close(); self.onOpenSettings(); return nil
-            case 37 where modifiers.contains(.command): self.close(); self.onOpenLibrary(); return nil
             case 53: self.close(); return nil
-            case 49: self.previewSelected(); return nil
-            case 31 where modifiers.contains(.command): self.close(); self.onOpenLibrary(); return nil
             case 125: self.state.moveQuickSelection(by: 1); return nil
             case 126: self.state.moveQuickSelection(by: -1); return nil
             case 123: Task { await self.state.moveQuickScope(by: -1) }; return nil
@@ -247,10 +252,19 @@ final class QuickPanelController: NSObject {
             state.quickCollectionPickerOpenRequestID = UUID()
         case .moveToTrash:
             if let clip = state.quickSelectedClip { state.moveToTrash(clip) }
+        case .openLibrary:
+            close()
+            onOpenLibrary()
+        case .openSettings:
+            close()
+            onOpenSettings()
+        case .closePanel:
+            close()
         }
     }
 
     private func showCommandHelp() {
+        guard panel.isVisible, commandHelpArmed else { return }
         let targetScreen = panel.screen ?? NSScreen.screens.first(where: { $0.frame.intersects(panel.frame) }) ?? NSScreen.main
         guard let screen = targetScreen else { return }
         let visibleFrame = screen.visibleFrame
@@ -334,13 +348,6 @@ final class QuickPanelController: NSObject {
                 self.close()
             }
         }
-    }
-
-    private func previewSelected() {
-        guard let clip = state.quickSelectedClip else { return }
-        let controller = NSHostingController(rootView: RepresentationPreview(clip: clip, attachments: state.attachments).padding().frame(minWidth: 560, minHeight: 420))
-        let window = NSWindow(contentViewController: controller); window.title = "内容预览"; window.setContentSize(NSSize(width: 620, height: 480))
-        window.center(); window.makeKeyAndOrderFront(nil)
     }
 
     private func positionOnMouseScreen() {

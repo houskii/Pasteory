@@ -17,6 +17,20 @@ struct SettingsView: View {
     @State private var shortcutError: String?
 
     var body: some View {
+        Group {
+            if ProcessInfo.processInfo.arguments.contains("--debug-settings-shortcuts") {
+                shortcuts
+            } else {
+                settingsTabs
+            }
+        }
+        .frame(width: 680, height: 500)
+        .padding(20)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .tint(.purple)
+    }
+
+    private var settingsTabs: some View {
         TabView(selection: $selectedTab) {
             general.tabItem { Label("通用", systemImage: "gearshape") }.tag("general")
             privacy.tabItem { Label("采集与隐私", systemImage: "hand.raised") }.tag("privacy")
@@ -25,9 +39,6 @@ struct SettingsView: View {
             advanced.tabItem { Label("高级诊断", systemImage: "stethoscope") }.tag("advanced")
             about.tabItem { Label("关于", systemImage: "info.circle") }.tag("about")
         }
-        .frame(width: 680, height: 500)
-        .padding(20)
-        .tint(.purple)
     }
 
     private var general: some View {
@@ -78,47 +89,56 @@ struct SettingsView: View {
     private var shortcuts: some View {
         Form {
             Section("打开快捷面板") {
-                ShortcutRecorder(keyCode: settings.shortcutKeyCode, modifiers: settings.shortcutModifiers) { keyCode, modifiers in
-                    if let message = settings.globalShortcutConflict(keyCode: keyCode, modifiers: modifiers) {
-                        shortcutError = message
-                        return false
+                let shortcut = settings.globalShortcut
+                shortcutSettingRow(
+                    title: "全局唤起",
+                    detail: "从任意 App 打开快捷面板",
+                    isConfigured: shortcut != nil,
+                    onClear: {
+                        settings.clearGlobalShortcut()
+                        onShortcutChange()
+                        shortcutError = nil
                     }
-                    settings.shortcutKeyCode = keyCode; settings.shortcutModifiers = modifiers; onShortcutChange()
-                    shortcutError = nil
-                    return true
-                }
-                Button("恢复为 ⌘⇧B") {
-                    shortcutError = settings.resetShortcut()
-                    if shortcutError == nil { onShortcutChange() }
+                ) {
+                    ShortcutRecorder(
+                        keyCode: shortcut?.keyCode ?? 0,
+                        modifiers: shortcut?.modifiers ?? 0,
+                        isConfigured: shortcut != nil
+                    ) { keyCode, modifiers in
+                        if let message = settings.globalShortcutConflict(keyCode: keyCode, modifiers: modifiers) {
+                            shortcutError = message
+                            return false
+                        }
+                        settings.setGlobalShortcut(PassteShortcut(keyCode: keyCode, modifiers: modifiers))
+                        onShortcutChange()
+                        shortcutError = nil
+                        return true
+                    }
                 }
             }
-            Section("快捷面板右键操作") {
-                ForEach(QuickPanelAction.allCases) { action in
-                    let shortcut = settings.quickShortcut(for: action)
-                    HStack {
-                        Text(action.title)
-                        Spacer()
-                        ShortcutRecorder(
-                            keyCode: shortcut.keyCode,
-                            modifiers: shortcut.modifiers,
-                            allowsUnmodified: true
-                        ) { keyCode, modifiers in
-                            let message = settings.setQuickShortcut(
-                                PassteShortcut(keyCode: keyCode, modifiers: modifiers),
-                                for: action
-                            )
-                            shortcutError = message
-                            return message == nil
-                        }
-                    }
-                }
-                Button("恢复右键操作默认快捷键") {
-                    shortcutError = settings.resetQuickActionShortcuts()
-                }
+            Section("粘贴与复制") {
+                ForEach(pasteActions) { action in quickShortcutSettingRow(action) }
+            }
+            Section("整理当前项目") {
+                ForEach(organizeActions) { action in quickShortcutSettingRow(action) }
+            }
+            Section("窗口与页面") {
+                ForEach(windowActions) { action in quickShortcutSettingRow(action) }
             }
             Section("固定导航快捷键") {
-                LabeledContent("预览／关闭／资料库／设置", value: "Space／Esc／⌘L／⌘,")
+                LabeledContent("选择项目和分组", value: "↑↓←→")
                 LabeledContent("快速粘贴前 9 项", value: "⌘1～⌘9")
+                LabeledContent("关闭当前编辑层", value: "Esc")
+            }
+            Section {
+                Button("恢复全部默认快捷键") {
+                    settings.resetAllShortcuts()
+                    onShortcutChange()
+                    shortcutError = nil
+                }
+                Text("全局唤起恢复为 ⌘⇧C，其余操作恢复为各自默认组合。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             if let shortcutError {
                 Section {
@@ -127,6 +147,82 @@ struct SettingsView: View {
                 }
             }
         }.formStyle(.grouped)
+    }
+
+    private var pasteActions: [QuickPanelAction] {
+        [.directPaste, .copyOnly, .plainTextPaste, .plainTextCopy]
+    }
+
+    private var organizeActions: [QuickPanelAction] {
+        [.toggleFavorite, .togglePinned, .editMetadata, .setCollection, .moveToTrash]
+    }
+
+    private var windowActions: [QuickPanelAction] {
+        [.openLibrary, .openSettings, .closePanel]
+    }
+
+    private func quickShortcutSettingRow(_ action: QuickPanelAction) -> some View {
+        let shortcut = settings.quickShortcut(for: action)
+        return shortcutSettingRow(
+            title: action.title,
+            isConfigured: shortcut != nil,
+            onClear: {
+                settings.clearQuickShortcut(for: action)
+                shortcutError = nil
+            }
+        ) {
+            ShortcutRecorder(
+                keyCode: shortcut?.keyCode ?? 0,
+                modifiers: shortcut?.modifiers ?? 0,
+                isConfigured: shortcut != nil,
+                allowsUnmodified: true
+            ) { keyCode, modifiers in
+                let message = settings.setQuickShortcut(
+                    PassteShortcut(keyCode: keyCode, modifiers: modifiers),
+                    for: action
+                )
+                shortcutError = message
+                return message == nil
+            }
+        }
+    }
+
+    private func shortcutSettingRow<Recorder: View>(
+        title: String,
+        detail: String? = nil,
+        isConfigured: Bool,
+        onClear: @escaping () -> Void,
+        @ViewBuilder recorder: () -> Recorder
+    ) -> some View {
+        HStack(alignment: .center, spacing: 16) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).lineLimit(1)
+                if let detail {
+                    Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            .frame(width: 230, alignment: .leading)
+
+            Spacer(minLength: 12)
+
+            HStack(spacing: 8) {
+                recorder()
+                    .frame(width: 210, height: 32)
+                Button {
+                    NSApp.keyWindow?.makeFirstResponder(nil)
+                    onClear()
+                } label: {
+                    Image(systemName: "xmark.circle")
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.secondary.opacity(isConfigured ? 1 : 0.4))
+                .disabled(!isConfigured)
+                .help("移除快捷键")
+                .accessibilityLabel("移除\(title)快捷键")
+            }
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private var storage: some View {
@@ -177,30 +273,41 @@ struct SettingsView: View {
 struct ShortcutRecorder: NSViewRepresentable {
     let keyCode: UInt32
     let modifiers: UInt32
+    var isConfigured = true
     var allowsUnmodified = false
     let onChange: (UInt32, UInt32) -> Bool
 
     func makeNSView(context: Context) -> ShortcutRecorderNSView {
-        ShortcutRecorderNSView(keyCode: keyCode, modifiers: modifiers, allowsUnmodified: allowsUnmodified, onChange: onChange)
+        ShortcutRecorderNSView(keyCode: keyCode, modifiers: modifiers, isConfigured: isConfigured, allowsUnmodified: allowsUnmodified, onChange: onChange)
     }
-    func updateNSView(_ nsView: ShortcutRecorderNSView, context: Context) { nsView.update(keyCode: keyCode, modifiers: modifiers) }
+    func updateNSView(_ nsView: ShortcutRecorderNSView, context: Context) {
+        nsView.update(keyCode: keyCode, modifiers: modifiers, isConfigured: isConfigured)
+    }
 }
 
 final class ShortcutRecorderNSView: NSView {
     private var keyCode: UInt32
     private var modifiers: UInt32
+    private var isConfigured: Bool
     private let allowsUnmodified: Bool
     private let onChange: (UInt32, UInt32) -> Bool
     private var recording = false
+    var isRecordingShortcut: Bool { recording }
 
-    init(keyCode: UInt32, modifiers: UInt32, allowsUnmodified: Bool, onChange: @escaping (UInt32, UInt32) -> Bool) {
-        self.keyCode = keyCode; self.modifiers = modifiers; self.allowsUnmodified = allowsUnmodified; self.onChange = onChange
-        super.init(frame: NSRect(x: 0, y: 0, width: 220, height: 32))
+    init(keyCode: UInt32, modifiers: UInt32, isConfigured: Bool, allowsUnmodified: Bool, onChange: @escaping (UInt32, UInt32) -> Bool) {
+        self.keyCode = keyCode; self.modifiers = modifiers; self.isConfigured = isConfigured
+        self.allowsUnmodified = allowsUnmodified; self.onChange = onChange
+        super.init(frame: NSRect(x: 0, y: 0, width: 210, height: 32))
         wantsLayer = true
     }
     required init?(coder: NSCoder) { fatalError() }
     override var acceptsFirstResponder: Bool { true }
-    override var intrinsicContentSize: NSSize { NSSize(width: 220, height: 32) }
+    override var intrinsicContentSize: NSSize { NSSize(width: 210, height: 32) }
+    override func resignFirstResponder() -> Bool {
+        recording = false
+        needsDisplay = true
+        return super.resignFirstResponder()
+    }
     override func mouseDown(with event: NSEvent) { recording = true; window?.makeFirstResponder(self); needsDisplay = true }
     override func keyDown(with event: NSEvent) {
         guard recording else { return }
@@ -215,19 +322,25 @@ final class ShortcutRecorderNSView: NSView {
         guard onChange(candidateKeyCode, carbon) else {
             recording = false; NSSound.beep(); needsDisplay = true; return
         }
-        keyCode = candidateKeyCode; modifiers = carbon; recording = false; needsDisplay = true
+        keyCode = candidateKeyCode; modifiers = carbon; isConfigured = true; recording = false; needsDisplay = true
     }
     override func draw(_ dirtyRect: NSRect) {
         let rect = bounds.insetBy(dx: 0.5, dy: 0.5)
         let path = NSBezierPath(roundedRect: rect, xRadius: 7, yRadius: 7)
         (recording ? NSColor.controlAccentColor.withAlphaComponent(0.15) : NSColor.controlBackgroundColor).setFill(); path.fill()
         (recording ? NSColor.controlAccentColor : NSColor.separatorColor).setStroke(); path.stroke()
-        let text = recording ? "请按新的快捷键…" : ShortcutFormatter.display(keyCode: keyCode, modifiers: modifiers)
+        let text = recording ? "请按新的快捷键…" : (isConfigured ? ShortcutFormatter.display(keyCode: keyCode, modifiers: modifiers) : "未设置")
         let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 13, weight: .medium), .foregroundColor: NSColor.labelColor]
         let size = text.size(withAttributes: attributes)
         text.draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2), withAttributes: attributes)
     }
-    func update(keyCode: UInt32, modifiers: UInt32) { self.keyCode = keyCode; self.modifiers = modifiers; needsDisplay = true }
+    func update(keyCode: UInt32, modifiers: UInt32, isConfigured: Bool) {
+        self.keyCode = keyCode
+        self.modifiers = modifiers
+        self.isConfigured = isConfigured
+        if !isConfigured { recording = false }
+        needsDisplay = true
+    }
 }
 
 enum ShortcutFormatter {

@@ -28,6 +28,9 @@ enum QuickPanelAction: String, CaseIterable, Codable, Identifiable {
     case editMetadata
     case setCollection
     case moveToTrash
+    case openLibrary
+    case openSettings
+    case closePanel
 
     var id: String { rawValue }
     var title: String {
@@ -41,6 +44,9 @@ enum QuickPanelAction: String, CaseIterable, Codable, Identifiable {
         case .editMetadata: "编辑标题与备注"
         case .setCollection: "设置分组"
         case .moveToTrash: "移到废纸篓"
+        case .openLibrary: "打开资料库"
+        case .openSettings: "打开设置"
+        case .closePanel: "关闭快捷面板"
         }
     }
 }
@@ -61,8 +67,10 @@ final class AppSettings: ObservableObject {
         static let excludedApps = "excludedApps"
         static let shortcutKeyCode = "shortcutKeyCode"
         static let shortcutModifiers = "shortcutModifiers"
+        static let globalShortcutEnabled = "globalShortcutEnabled"
         static let shortcutDefaultVersion = "shortcutDefaultVersion"
         static let quickActionShortcuts = "quickActionShortcuts"
+        static let disabledQuickActions = "disabledQuickActions"
     }
 
     @Published var completedOnboarding: Bool { didSet { defaults.set(completedOnboarding, forKey: Key.completedOnboarding) } }
@@ -74,8 +82,14 @@ final class AppSettings: ObservableObject {
     @Published var excludedBundleIdentifiers: Set<String> { didSet { defaults.set(Array(excludedBundleIdentifiers).sorted(), forKey: Key.excludedApps) } }
     @Published var shortcutKeyCode: UInt32 { didSet { defaults.set(Int(shortcutKeyCode), forKey: Key.shortcutKeyCode) } }
     @Published var shortcutModifiers: UInt32 { didSet { defaults.set(Int(shortcutModifiers), forKey: Key.shortcutModifiers) } }
+    @Published private(set) var globalShortcutEnabled: Bool {
+        didSet { defaults.set(globalShortcutEnabled, forKey: Key.globalShortcutEnabled) }
+    }
     @Published private(set) var quickActionShortcuts: [QuickPanelAction: PassteShortcut] {
         didSet { persistQuickActionShortcuts() }
+    }
+    @Published private(set) var disabledQuickActions: Set<QuickPanelAction> {
+        didSet { defaults.set(disabledQuickActions.map(\.rawValue).sorted(), forKey: Key.disabledQuickActions) }
     }
 
     private let defaults: UserDefaults
@@ -97,18 +111,22 @@ final class AppSettings: ObservableObject {
         excludedBundleIdentifiers = Set(defaults.stringArray(forKey: Key.excludedApps) ?? [])
         let storedKeyCode = defaults.object(forKey: Key.shortcutKeyCode) as? Int
         let storedModifiers = defaults.object(forKey: Key.shortcutModifiers) as? Int
-        if defaults.integer(forKey: Key.shortcutDefaultVersion) < 2,
-           (storedKeyCode == nil || storedKeyCode == 9),
+        globalShortcutEnabled = defaults.object(forKey: Key.globalShortcutEnabled) as? Bool ?? true
+        if defaults.integer(forKey: Key.shortcutDefaultVersion) < 3,
+           (storedKeyCode == nil || storedKeyCode == 9 || storedKeyCode == 11),
            (storedModifiers == nil || storedModifiers == 768) {
-            shortcutKeyCode = 11
+            shortcutKeyCode = 8
             shortcutModifiers = 768
-            defaults.set(11, forKey: Key.shortcutKeyCode)
+            defaults.set(8, forKey: Key.shortcutKeyCode)
             defaults.set(768, forKey: Key.shortcutModifiers)
         } else {
-            shortcutKeyCode = UInt32(storedKeyCode ?? 11)
+            shortcutKeyCode = UInt32(storedKeyCode ?? 8)
             shortcutModifiers = UInt32(storedModifiers ?? 768)
         }
-        defaults.set(2, forKey: Key.shortcutDefaultVersion)
+        defaults.set(3, forKey: Key.shortcutDefaultVersion)
+        disabledQuickActions = Set(
+            (defaults.stringArray(forKey: Key.disabledQuickActions) ?? []).compactMap(QuickPanelAction.init(rawValue:))
+        )
         if let data = defaults.data(forKey: Key.quickActionShortcuts),
            let stored = try? JSONDecoder().decode([String: PassteShortcut].self, from: data) {
             var values = Self.defaultQuickActionShortcuts
@@ -127,17 +145,14 @@ final class AppSettings: ObservableObject {
         return policy
     }
 
-    @discardableResult
-    func resetShortcut() -> String? {
-        let keyCode: UInt32 = 11, modifiers = UInt32(cmdKey | shiftKey)
-        if let message = globalShortcutConflict(keyCode: keyCode, modifiers: modifiers) { return message }
-        shortcutKeyCode = keyCode
-        shortcutModifiers = modifiers
-        return nil
+    var globalShortcut: PassteShortcut? {
+        guard globalShortcutEnabled else { return nil }
+        return PassteShortcut(keyCode: shortcutKeyCode, modifiers: shortcutModifiers)
     }
 
-    func quickShortcut(for action: QuickPanelAction) -> PassteShortcut {
-        quickActionShortcuts[action] ?? Self.defaultQuickActionShortcuts[action]!
+    func quickShortcut(for action: QuickPanelAction) -> PassteShortcut? {
+        guard !disabledQuickActions.contains(action) else { return nil }
+        return quickActionShortcuts[action] ?? Self.defaultQuickActionShortcuts[action]
     }
 
     func quickAction(keyCode: UInt32, modifiers: UInt32) -> QuickPanelAction? {
@@ -153,18 +168,30 @@ final class AppSettings: ObservableObject {
         var values = quickActionShortcuts
         values[action] = normalized
         quickActionShortcuts = values
+        disabledQuickActions.remove(action)
         return nil
     }
 
-    @discardableResult
-    func resetQuickActionShortcuts() -> String? {
-        if let conflict = Self.defaultQuickActionShortcuts.first(where: {
-            $0.value.keyCode == shortcutKeyCode && $0.value.modifiers == shortcutModifiers
-        }) {
-            return "默认的“\(conflict.key.title)”与当前全局快捷键重复"
-        }
+    func clearQuickShortcut(for action: QuickPanelAction) {
+        disabledQuickActions.insert(action)
+    }
+
+    func setGlobalShortcut(_ shortcut: PassteShortcut) {
+        shortcutKeyCode = shortcut.keyCode
+        shortcutModifiers = shortcut.modifiers
+        globalShortcutEnabled = true
+    }
+
+    func clearGlobalShortcut() {
+        globalShortcutEnabled = false
+    }
+
+    func resetAllShortcuts() {
+        shortcutKeyCode = 8
+        shortcutModifiers = UInt32(cmdKey | shiftKey)
+        globalShortcutEnabled = true
         quickActionShortcuts = Self.defaultQuickActionShortcuts
-        return nil
+        disabledQuickActions.removeAll()
     }
 
     func globalShortcutConflict(keyCode: UInt32, modifiers: UInt32) -> String? {
@@ -176,11 +203,11 @@ final class AppSettings: ObservableObject {
         guard Self.menuRenderableKeyCodes.contains(shortcut.keyCode) else {
             return "该按键无法在 macOS 右键菜单中显示，请换一个按键"
         }
-        if shortcut.keyCode == shortcutKeyCode, shortcut.modifiers == shortcutModifiers {
+        if globalShortcutEnabled,
+           shortcut.keyCode == shortcutKeyCode, shortcut.modifiers == shortcutModifiers {
             return "与“打开快捷面板”的全局快捷键重复"
         }
         if shortcut.keyCode == 53 { return "Esc 固定用于关闭快捷面板" }
-        if shortcut.keyCode == 49, shortcut.modifiers == 0 { return "Space 固定用于预览内容" }
         if [123, 124, 125, 126, 115].contains(shortcut.keyCode) { return "方向键和 Home 固定用于列表导航" }
         let command = UInt32(cmdKey)
         if shortcut.modifiers == command,
@@ -190,16 +217,12 @@ final class AppSettings: ObservableObject {
         if shortcut.modifiers == (command | UInt32(optionKey)), shortcut.keyCode == 53 {
             return "Command-Option-Esc 由 macOS 保留"
         }
-        if shortcut.modifiers == command,
-           [13, 31, 37, 43].contains(shortcut.keyCode) {
-            return "该组合是快捷面板的窗口快捷键"
-        }
         if shortcut.modifiers & command != 0,
            [18, 19, 20, 21, 23, 22, 26, 28, 25].contains(shortcut.keyCode) {
             return "Command-1～9 固定用于快速粘贴对应项目"
         }
         if shortcut.modifiers == 0, ![36, 76].contains(shortcut.keyCode) {
-            return "普通字母和数字会用于搜索，请至少加入一个修饰键"
+            return "未加修饰键的按键会用于搜索；除 Return 外请至少加入一个修饰键"
         }
         if let duplicate = QuickPanelAction.allCases.first(where: {
             $0 != action && quickShortcut(for: $0) == shortcut
@@ -225,7 +248,10 @@ final class AppSettings: ObservableObject {
             .togglePinned: PassteShortcut(keyCode: 35, modifiers: command | shift),
             .editMetadata: PassteShortcut(keyCode: 14, modifiers: command | shift),
             .setCollection: PassteShortcut(keyCode: 5, modifiers: command | shift),
-            .moveToTrash: PassteShortcut(keyCode: 51, modifiers: command)
+            .moveToTrash: PassteShortcut(keyCode: 51, modifiers: command),
+            .openLibrary: PassteShortcut(keyCode: 37, modifiers: command),
+            .openSettings: PassteShortcut(keyCode: 43, modifiers: command),
+            .closePanel: PassteShortcut(keyCode: 13, modifiers: command)
         ]
     }
 
