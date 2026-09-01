@@ -277,7 +277,7 @@ struct SettingsView: View {
         VStack(spacing: 16) {
             Image(systemName: "square.stack.3d.up.fill").font(.system(size: 64)).foregroundStyle(.purple)
             Text("Passte").font(.largeTitle.bold())
-            Text("版本 0.1.0（Build 1）")
+            Text("版本 0.1.1（Build 2）")
             Text("本地优先的 macOS 剪贴板资料库").foregroundStyle(.secondary)
             Text("Passte v0.1 不包含网络、AI 分析或云同步功能。").font(.caption).foregroundStyle(.secondary)
         }.frame(maxWidth: .infinity, maxHeight: .infinity)

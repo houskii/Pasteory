@@ -53,7 +53,7 @@ public actor BackupService {
                 }
             }
         }
-        let manifest = BackupManifest(formatVersion: 1, appVersion: "0.1.0", exportedAt: Date(), clipCount: clips.count, fileChecksums: checksums)
+        let manifest = BackupManifest(formatVersion: 1, appVersion: "0.1.1", exportedAt: Date(), clipCount: clips.count, fileChecksums: checksums)
         try encoder.encode(manifest).write(to: destination.appendingPathComponent("manifest.json"), options: .atomic)
     }
 
