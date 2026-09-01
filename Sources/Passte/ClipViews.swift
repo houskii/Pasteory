@@ -74,21 +74,25 @@ struct ClipRowView: View {
     @ViewBuilder
     private var leadingArea: some View {
         if ClipSourceTypePreview.underLeadingIcon {
-            VStack(spacing: 2) {
+            HStack(spacing: 6) {
                 ClipLeadingVisual(clip: clip, showsTypeBadge: false)
-                    .frame(width: compact ? 34 : 38, height: compact ? 34 : 38)
-                HStack(spacing: 0) {
-                    Text(String(clip.source.appName.prefix(10)))
+                    .frame(width: compact ? 32 : 36, height: compact ? 32 : 36)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(clip.source.appName.prefix(12)))
                         .foregroundStyle(.secondary)
-                    Text("[\(clip.primaryKind.displayName)]")
-                        .foregroundStyle(clip.primaryKind.markerColor)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    HStack(spacing: 3) {
+                        Image(systemName: clip.primaryKind.symbolName)
+                            .font(.system(size: 8, weight: .bold))
+                        Text(clip.primaryKind.displayName)
+                    }
+                    .foregroundStyle(clip.primaryKind.markerColor)
                 }
-                .font(.system(size: 8.5, weight: .medium))
-                .lineLimit(1)
-                .minimumScaleFactor(0.65)
-                .frame(width: compact ? 72 : 80)
+                .font(.system(size: 9, weight: .medium))
+                .frame(width: compact ? 44 : 50, alignment: .leading)
             }
-            .frame(width: compact ? 72 : 80, height: 58)
+            .frame(width: compact ? 82 : 92, height: 46, alignment: .leading)
         } else {
             ClipLeadingVisual(clip: clip)
                 .frame(width: compact ? 38 : 46, height: compact ? 38 : 46)
