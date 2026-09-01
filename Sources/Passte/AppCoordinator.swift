@@ -105,7 +105,12 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
             }
         }
         if ProcessInfo.processInfo.arguments.contains("--debug-open-library") {
-            DispatchQueue.main.async { [weak self] in self?.openLibrary() }
+            Task { [weak self] in
+                guard let self else { return }
+                if ProcessInfo.processInfo.arguments.contains("--debug-seed") { await seedDebugData() }
+                try? await Task.sleep(for: .milliseconds(600))
+                openLibrary()
+            }
         }
         if ProcessInfo.processInfo.arguments.contains("--debug-open-settings") {
             DispatchQueue.main.async { [weak self] in self?.openSettings() }
@@ -296,6 +301,22 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
             libraryWindow = window
         }
         activateAndShow(libraryWindow)
+#if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if let window = libraryWindow,
+           let index = arguments.firstIndex(of: "--debug-snapshot-path"), arguments.indices.contains(index + 1) {
+            Task {
+                try? await Task.sleep(for: .milliseconds(300))
+                if arguments.contains("--debug-ui-qa") {
+                    state.libraryQuery = ""
+                    await state.refreshLibrary()
+                }
+                try? await Task.sleep(for: .milliseconds(200))
+                window.makeFirstResponder(nil)
+                saveDebugSnapshot(of: window, to: arguments[index + 1])
+            }
+        }
+#endif
     }
 
     private func openSettings() {
