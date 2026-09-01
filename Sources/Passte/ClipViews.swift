@@ -79,14 +79,14 @@ struct ClipRowView: View {
         if ClipSourceLayout.usesVerticalIdentity {
             VStack(spacing: 1) {
                 ClipLeadingVisual(clip: clip, showsTypeBadge: true)
-                    .frame(width: compact ? 34 : 38, height: compact ? 34 : 38)
+                    .frame(width: compact ? 38 : 46, height: compact ? 38 : 46)
                 Text(String(clip.source.appName.prefix(12)))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
             .font(.system(size: 8.5, weight: .medium))
-            .frame(width: compact ? 54 : 60, height: 54, alignment: .center)
+            .frame(width: compact ? 54 : 60, height: compact ? 54 : 60, alignment: .center)
         } else {
             ClipLeadingVisual(clip: clip)
                 .frame(width: compact ? 38 : 46, height: compact ? 38 : 46)
@@ -141,12 +141,19 @@ struct ClipRowView: View {
     }
 
     private var titleText: some View {
-        Text(String(clip.title.prefix(120)))
-            .font(.system(size: compact ? 11 : 12, weight: .semibold))
-            .foregroundStyle(.purple)
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .help(String(clip.title.prefix(500)))
+        HStack(spacing: 4) {
+            Image(systemName: "tag.fill")
+                .font(.system(size: compact ? 8 : 9, weight: .semibold))
+                .fixedSize()
+                .accessibilityHidden(true)
+            Text(String(clip.title.prefix(120)))
+                .font(.system(size: compact ? 11 : 12, weight: .semibold))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .layoutPriority(1)
+        }
+        .foregroundStyle(.purple)
+        .help(String(clip.title.prefix(500)))
     }
 
     private var primaryContentText: some View {

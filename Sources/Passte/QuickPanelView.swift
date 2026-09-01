@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import PassteCore
 import SwiftUI
 
@@ -214,6 +215,7 @@ private struct QuickClipCard: View {
     let index: Int
     let onCopy: (Clip, Bool, Bool) -> Void
     @State private var showMetadataEditor = false
+    @State private var showCollectionPicker = false
 
     var body: some View {
         ClipRowView(
@@ -248,15 +250,40 @@ private struct QuickClipCard: View {
                     onCancel: { showMetadataEditor = false }
                 )
             }
+            .popover(isPresented: $showCollectionPicker, arrowEdge: .trailing) {
+                QuickCollectionPicker(
+                    state: state,
+                    clipID: clip.id,
+                    onDone: { showCollectionPicker = false }
+                )
+            }
+            .onChange(of: state.quickMetadataEditorOpenRequestID) { _, request in
+                guard request != nil, isSelected else { return }
+                showCollectionPicker = false
+                showMetadataEditor = true
+            }
+            .onChange(of: state.quickCollectionPickerOpenRequestID) { _, request in
+                guard request != nil, isSelected else { return }
+                showMetadataEditor = false
+                showCollectionPicker = true
+            }
             .contextMenu {
                 Button("直接粘贴") { onCopy(clip, false, true) }
+                    .quickActionShortcut(state.settings.quickShortcut(for: .directPaste))
                 Button("只复制") { onCopy(clip, false, false) }
+                    .quickActionShortcut(state.settings.quickShortcut(for: .copyOnly))
                 Button("纯文本粘贴") { onCopy(clip, true, true) }
+                    .quickActionShortcut(state.settings.quickShortcut(for: .plainTextPaste))
+                Button("纯文本复制") { onCopy(clip, true, false) }
+                    .quickActionShortcut(state.settings.quickShortcut(for: .plainTextCopy))
                 Divider()
                 Button(clip.isFavorite ? "取消收藏" : "收藏") { state.toggleFavorite(clip) }
+                    .quickActionShortcut(state.settings.quickShortcut(for: .toggleFavorite))
                 Button(clip.isPinned ? "取消置顶" : "置顶") { state.togglePinned(clip) }
+                    .quickActionShortcut(state.settings.quickShortcut(for: .togglePinned))
                 Button("编辑标题与备注…") { showMetadataEditor = true }
-                Menu("设置分组") {
+                    .quickActionShortcut(state.settings.quickShortcut(for: .editMetadata))
+                Menu {
                     let groups = state.collections.filter { $0.kind == .normal }
                     if groups.isEmpty {
                         Text("还没有普通分组")
@@ -269,13 +296,108 @@ private struct QuickClipCard: View {
                             }
                         }
                     }
-                }
+                } label: { Text("设置分组") }
+                    .quickActionShortcut(state.settings.quickShortcut(for: .setCollection))
                 Divider()
                 Button("移到废纸篓", role: .destructive) { state.moveToTrash(clip) }
+                    .quickActionShortcut(state.settings.quickShortcut(for: .moveToTrash))
             }
     }
 
     private var isSelected: Bool { state.quickSelectionID == clip.id }
+}
+
+private extension View {
+    @ViewBuilder
+    func quickActionShortcut(_ shortcut: PassteShortcut) -> some View {
+        if let key = shortcut.keyEquivalent {
+            keyboardShortcut(key, modifiers: shortcut.eventModifiers)
+        } else {
+            self
+        }
+    }
+}
+
+private extension PassteShortcut {
+    var eventModifiers: SwiftUI.EventModifiers {
+        var value: SwiftUI.EventModifiers = []
+        if modifiers & UInt32(cmdKey) != 0 { value.insert(.command) }
+        if modifiers & UInt32(optionKey) != 0 { value.insert(.option) }
+        if modifiers & UInt32(shiftKey) != 0 { value.insert(.shift) }
+        if modifiers & UInt32(controlKey) != 0 { value.insert(.control) }
+        return value
+    }
+
+    var keyEquivalent: KeyEquivalent? {
+        let characters: [UInt32: Character] = [
+            0: "a", 1: "s", 2: "d", 3: "f", 4: "h", 5: "g", 6: "z", 7: "x", 8: "c", 9: "v",
+            11: "b", 12: "q", 13: "w", 14: "e", 15: "r", 16: "y", 17: "t", 18: "1", 19: "2",
+            20: "3", 21: "4", 22: "6", 23: "5", 24: "=", 25: "9", 26: "7", 27: "-", 28: "8", 29: "0",
+            30: "]", 31: "o", 32: "u", 33: "[", 34: "i", 35: "p", 37: "l", 38: "j", 39: "'",
+            40: "k", 41: ";", 42: "\\", 43: ",", 44: "/", 45: "n", 46: "m", 47: ".", 50: "`"
+        ]
+        if let character = characters[keyCode] { return KeyEquivalent(character) }
+        switch keyCode {
+        case 36, 76: return .return
+        case 48: return .tab
+        case 49: return .space
+        case 51: return .delete
+        case 53: return .escape
+        default: return nil
+        }
+    }
+}
+
+private struct QuickCollectionPicker: View {
+    @ObservedObject var state: AppState
+    let clipID: UUID
+    let onDone: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("设置分组").font(.headline)
+            let groups = state.collections.filter { $0.kind == .normal }
+            if groups.isEmpty {
+                ContentUnavailableView("还没有普通分组", systemImage: "folder")
+                    .frame(height: 120)
+            } else {
+                ScrollView {
+                    VStack(spacing: 4) {
+                        ForEach(groups) { collection in
+                            Button {
+                                guard let current = state.quickClips.first(where: { $0.id == clipID }) else { return }
+                                state.toggleCollection(collection, for: current)
+                            } label: {
+                                HStack {
+                                    Image(systemName: selectedCollectionIDs.contains(collection.id) ? "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(selectedCollectionIDs.contains(collection.id) ? Color.purple : Color.secondary)
+                                    Text(collection.name).lineLimit(1)
+                                    Spacer()
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.vertical, 5)
+                        }
+                    }
+                }
+                .frame(maxHeight: 220)
+            }
+            HStack { Spacer(); Button("完成", action: onDone).keyboardShortcut(.defaultAction) }
+        }
+        .padding(16)
+        .frame(width: 300)
+        .onAppear { state.quickCollectionPickerActive = true }
+        .onDisappear { state.quickCollectionPickerActive = false }
+        .onChange(of: state.quickCollectionPickerDismissRequestID) { _, request in
+            guard request != nil else { return }
+            onDone()
+        }
+    }
+
+    private var selectedCollectionIDs: Set<UUID> {
+        state.quickClips.first(where: { $0.id == clipID })?.collectionIDs ?? []
+    }
 }
 
 private struct QuickMetadataEditor: View {

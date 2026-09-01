@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import PassteCore
 import SwiftUI
 
@@ -110,6 +111,7 @@ final class QuickPanelController: NSObject {
         state.quickCommandKeyDown = false
         state.quickHoveredClipID = nil
         state.quickMetadataEditorActive = false
+        state.quickCollectionPickerActive = false
         panel.saveFrame(usingName: frameAutosaveName)
         panel.orderOut(nil)
         if let eventMonitor { NSEvent.removeMonitor(eventMonitor); self.eventMonitor = nil }
@@ -160,6 +162,14 @@ final class QuickPanelController: NSObject {
                 }
                 return event
             }
+            if state.quickCollectionPickerActive {
+                if event.type == .flagsChanged || event.type == .rightMouseDown { return event }
+                if event.keyCode == 53 || (event.keyCode == 13 && modifiers.contains(.command)) {
+                    state.quickCollectionPickerDismissRequestID = UUID()
+                    return nil
+                }
+                return event
+            }
             if event.type == .rightMouseDown {
                 if let hovered = state.quickHoveredClipID { state.quickSelectionID = hovered }
                 return event
@@ -174,13 +184,17 @@ final class QuickPanelController: NSObject {
                 performSelected(plainText: false, paste: true)
                 return nil
             }
+            if let action = state.settings.quickAction(
+                keyCode: UInt32(event.keyCode),
+                modifiers: self.carbonModifiers(from: modifiers)
+            ) {
+                self.perform(action)
+                return nil
+            }
             switch event.keyCode {
             case 13 where modifiers.contains(.command): self.close(); return nil
             case 43 where modifiers.contains(.command): self.close(); self.onOpenSettings(); return nil
             case 37 where modifiers.contains(.command): self.close(); self.onOpenLibrary(); return nil
-            case 36, 76:
-                let paste = modifiers.contains(.command) ? !self.state.settings.defaultDirectPaste : self.state.settings.defaultDirectPaste
-                self.performSelected(plainText: modifiers.contains(.option), paste: paste); return nil
             case 53: self.close(); return nil
             case 49: self.previewSelected(); return nil
             case 31 where modifiers.contains(.command): self.close(); self.onOpenLibrary(); return nil
@@ -194,13 +208,42 @@ final class QuickPanelController: NSObject {
         }
     }
 
+    private func perform(_ action: QuickPanelAction) {
+        switch action {
+        case .directPaste: performSelected(plainText: false, paste: true)
+        case .copyOnly: performSelected(plainText: false, paste: false)
+        case .plainTextPaste: performSelected(plainText: true, paste: true)
+        case .plainTextCopy: performSelected(plainText: true, paste: false)
+        case .toggleFavorite:
+            if let clip = state.quickSelectedClip { state.toggleFavorite(clip) }
+        case .togglePinned:
+            if let clip = state.quickSelectedClip { state.togglePinned(clip) }
+        case .editMetadata:
+            state.quickMetadataEditorOpenRequestID = UUID()
+        case .setCollection:
+            state.quickCollectionPickerOpenRequestID = UUID()
+        case .moveToTrash:
+            if let clip = state.quickSelectedClip { state.moveToTrash(clip) }
+        }
+    }
+
+    private func carbonModifiers(from modifiers: NSEvent.ModifierFlags) -> UInt32 {
+        var value: UInt32 = 0
+        if modifiers.contains(.command) { value |= UInt32(cmdKey) }
+        if modifiers.contains(.shift) { value |= UInt32(shiftKey) }
+        if modifiers.contains(.option) { value |= UInt32(optionKey) }
+        if modifiers.contains(.control) { value |= UInt32(controlKey) }
+        return value
+    }
+
     private func installOutsideClickMonitor() {
         if let globalMouseMonitor { NSEvent.removeMonitor(globalMouseMonitor) }
         globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             Task { @MainActor in
                 guard let self,
                       !self.state.quickPanelPinned,
-                      !self.state.quickMetadataEditorActive else { return }
+                      !self.state.quickMetadataEditorActive,
+                      !self.state.quickCollectionPickerActive else { return }
                 self.close()
             }
         }

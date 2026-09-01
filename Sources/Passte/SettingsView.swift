@@ -14,6 +14,7 @@ struct SettingsView: View {
     @State private var selectedTab = "general"
     @State private var excludedBundle = ""
     @State private var loginEnabled = SMAppService.mainApp.status == .enabled
+    @State private var shortcutError: String?
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -33,7 +34,6 @@ struct SettingsView: View {
         Form {
             Section("运行") {
                 Toggle("登录时启动 Passte", isOn: Binding(get: { loginEnabled }, set: { enabled in updateLoginItem(enabled) }))
-                Toggle("Return 默认直接粘贴", isOn: $settings.defaultDirectPaste)
             }
             Section("状态") {
                 LabeledContent("运行形态", value: "仅菜单栏")
@@ -68,16 +68,52 @@ struct SettingsView: View {
         Form {
             Section("打开快捷面板") {
                 ShortcutRecorder(keyCode: settings.shortcutKeyCode, modifiers: settings.shortcutModifiers) { keyCode, modifiers in
+                    if let message = settings.globalShortcutConflict(keyCode: keyCode, modifiers: modifiers) {
+                        shortcutError = message
+                        return false
+                    }
                     settings.shortcutKeyCode = keyCode; settings.shortcutModifiers = modifiers; onShortcutChange()
+                    shortcutError = nil
+                    return true
                 }
-                Button("恢复为 ⌘⇧B") { settings.resetShortcut(); onShortcutChange() }
+                Button("恢复为 ⌘⇧B") {
+                    shortcutError = settings.resetShortcut()
+                    if shortcutError == nil { onShortcutChange() }
+                }
             }
-            Section("快捷面板操作") {
-                LabeledContent("直接粘贴", value: "Return")
-                LabeledContent("只复制", value: "⌘Return")
-                LabeledContent("纯文本粘贴", value: "⌥Return")
-                LabeledContent("纯文本复制", value: "⌘⌥Return")
-                LabeledContent("预览／关闭／资料库", value: "Space／Esc／⌘O")
+            Section("快捷面板右键操作") {
+                ForEach(QuickPanelAction.allCases) { action in
+                    let shortcut = settings.quickShortcut(for: action)
+                    HStack {
+                        Text(action.title)
+                        Spacer()
+                        ShortcutRecorder(
+                            keyCode: shortcut.keyCode,
+                            modifiers: shortcut.modifiers,
+                            allowsUnmodified: true
+                        ) { keyCode, modifiers in
+                            let message = settings.setQuickShortcut(
+                                PassteShortcut(keyCode: keyCode, modifiers: modifiers),
+                                for: action
+                            )
+                            shortcutError = message
+                            return message == nil
+                        }
+                    }
+                }
+                Button("恢复右键操作默认快捷键") {
+                    shortcutError = settings.resetQuickActionShortcuts()
+                }
+            }
+            Section("固定导航快捷键") {
+                LabeledContent("预览／关闭／资料库／设置", value: "Space／Esc／⌘L／⌘,")
+                LabeledContent("快速粘贴前 9 项", value: "⌘1～⌘9")
+            }
+            if let shortcutError {
+                Section {
+                    Label(shortcutError, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                }
             }
         }.formStyle(.grouped)
     }
@@ -130,20 +166,24 @@ struct SettingsView: View {
 struct ShortcutRecorder: NSViewRepresentable {
     let keyCode: UInt32
     let modifiers: UInt32
-    let onChange: (UInt32, UInt32) -> Void
+    var allowsUnmodified = false
+    let onChange: (UInt32, UInt32) -> Bool
 
-    func makeNSView(context: Context) -> ShortcutRecorderNSView { ShortcutRecorderNSView(keyCode: keyCode, modifiers: modifiers, onChange: onChange) }
+    func makeNSView(context: Context) -> ShortcutRecorderNSView {
+        ShortcutRecorderNSView(keyCode: keyCode, modifiers: modifiers, allowsUnmodified: allowsUnmodified, onChange: onChange)
+    }
     func updateNSView(_ nsView: ShortcutRecorderNSView, context: Context) { nsView.update(keyCode: keyCode, modifiers: modifiers) }
 }
 
 final class ShortcutRecorderNSView: NSView {
     private var keyCode: UInt32
     private var modifiers: UInt32
-    private let onChange: (UInt32, UInt32) -> Void
+    private let allowsUnmodified: Bool
+    private let onChange: (UInt32, UInt32) -> Bool
     private var recording = false
 
-    init(keyCode: UInt32, modifiers: UInt32, onChange: @escaping (UInt32, UInt32) -> Void) {
-        self.keyCode = keyCode; self.modifiers = modifiers; self.onChange = onChange
+    init(keyCode: UInt32, modifiers: UInt32, allowsUnmodified: Bool, onChange: @escaping (UInt32, UInt32) -> Bool) {
+        self.keyCode = keyCode; self.modifiers = modifiers; self.allowsUnmodified = allowsUnmodified; self.onChange = onChange
         super.init(frame: NSRect(x: 0, y: 0, width: 220, height: 32))
         wantsLayer = true
     }
@@ -159,8 +199,12 @@ final class ShortcutRecorderNSView: NSView {
         if flags.contains(.shift) { carbon |= UInt32(shiftKey) }
         if flags.contains(.option) { carbon |= UInt32(optionKey) }
         if flags.contains(.control) { carbon |= UInt32(controlKey) }
-        guard carbon != 0 else { NSSound.beep(); return }
-        keyCode = UInt32(event.keyCode); modifiers = carbon; recording = false; onChange(keyCode, modifiers); needsDisplay = true
+        guard carbon != 0 || allowsUnmodified else { NSSound.beep(); return }
+        let candidateKeyCode = UInt32(event.keyCode)
+        guard onChange(candidateKeyCode, carbon) else {
+            recording = false; NSSound.beep(); needsDisplay = true; return
+        }
+        keyCode = candidateKeyCode; modifiers = carbon; recording = false; needsDisplay = true
     }
     override func draw(_ dirtyRect: NSRect) {
         let rect = bounds.insetBy(dx: 0.5, dy: 0.5)
@@ -182,7 +226,14 @@ enum ShortcutFormatter {
         if modifiers & UInt32(optionKey) != 0 { value += "⌥" }
         if modifiers & UInt32(shiftKey) != 0 { value += "⇧" }
         if modifiers & UInt32(cmdKey) != 0 { value += "⌘" }
-        let names: [UInt32: String] = [11: "B", 9: "V", 8: "C", 3: "F", 31: "O", 49: "Space", 36: "Return"]
+        let names: [UInt32: String] = [
+            0: "A", 1: "S", 2: "D", 3: "F", 4: "H", 5: "G", 6: "Z", 7: "X", 8: "C", 9: "V",
+            11: "B", 12: "Q", 13: "W", 14: "E", 15: "R", 16: "Y", 17: "T", 18: "1", 19: "2",
+            20: "3", 21: "4", 22: "6", 23: "5", 24: "=", 25: "9", 26: "7", 27: "-", 28: "8", 29: "0",
+            30: "]", 31: "O", 32: "U", 33: "[", 34: "I", 35: "P", 36: "Return", 37: "L", 38: "J",
+            39: "'", 40: "K", 41: ";", 42: "\\", 43: ",", 44: "/", 45: "N", 46: "M", 47: ".",
+            48: "Tab", 49: "Space", 50: "`", 51: "⌫", 53: "Esc", 76: "Return"
+        ]
         return value + (names[keyCode] ?? "Key \(keyCode)")
     }
 }

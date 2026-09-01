@@ -102,6 +102,9 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
         if ProcessInfo.processInfo.arguments.contains("--debug-open-library") {
             DispatchQueue.main.async { [weak self] in self?.openLibrary() }
         }
+        if ProcessInfo.processInfo.arguments.contains("--debug-open-settings") {
+            DispatchQueue.main.async { [weak self] in self?.openSettings() }
+        }
 #endif
     }
 
