@@ -21,6 +21,7 @@ final class QuickPanelController: NSObject {
     private let onEditCollection: (ClipCollection) -> Void
     private let onDeleteCollection: (ClipCollection) -> Void
     private let panel: PasstePanel
+    private var commandHelpPanel: NSPanel?
     private var eventMonitor: Any?
     private var globalMouseMonitor: Any?
     private let frameAutosaveName = "PassteQuickPanelWindow"
@@ -89,6 +90,7 @@ final class QuickPanelController: NSObject {
 
     func show() {
         state.quickCommandKeyDown = false
+        hideCommandHelp()
         if let frontmost = NSWorkspace.shared.frontmostApplication, frontmost.bundleIdentifier != Bundle.main.bundleIdentifier {
             targetApplication = frontmost
         } else if let fallback = targetProvider(), !fallback.isTerminated {
@@ -98,6 +100,12 @@ final class QuickPanelController: NSObject {
             positionOnMouseScreen()
             hasInitialPlacement = true
         }
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--debug-panel-top-edge"), let screen = panel.screen ?? NSScreen.main {
+            let visible = screen.visibleFrame
+            panel.setFrameOrigin(NSPoint(x: panel.frame.minX, y: visible.maxY - panel.frame.height - 8))
+        }
+#endif
         panel.orderFrontRegardless(); panel.makeKey()
 #if DEBUG
         DispatchQueue.main.async { [weak panel] in print("quick-panel-is-key=\(panel?.isKeyWindow == true)") }
@@ -105,10 +113,17 @@ final class QuickPanelController: NSObject {
         installKeyMonitor()
         installOutsideClickMonitor()
         Task { await state.prepareQuickPanel() }
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--debug-command-help") {
+            state.quickCommandKeyDown = true
+            showCommandHelp()
+        }
+#endif
     }
 
     func close() {
         state.quickCommandKeyDown = false
+        hideCommandHelp()
         state.quickHoveredClipID = nil
         state.quickMetadataEditorActive = false
         state.quickCollectionPickerActive = false
@@ -149,8 +164,18 @@ final class QuickPanelController: NSObject {
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged, .rightMouseDown]) { [weak self] event in
             guard let self, self.panel.isVisible else { return event }
             let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if event.type == .flagsChanged {
+                let commandDown = modifiers.contains(.command)
+                state.quickCommandKeyDown = commandDown
+                if commandDown, !state.quickMetadataEditorActive, !state.quickCollectionPickerActive {
+                    showCommandHelp()
+                } else {
+                    hideCommandHelp()
+                }
+                return event
+            }
             if state.quickMetadataEditorActive {
-                if event.type == .flagsChanged || event.type == .rightMouseDown { return event }
+                if event.type == .rightMouseDown { return event }
                 if (event.keyCode == 36 || event.keyCode == 76) {
                     if self.textInputHasMarkedText { return event }
                     state.quickMetadataEditorCommitRequestID = UUID()
@@ -163,7 +188,7 @@ final class QuickPanelController: NSObject {
                 return event
             }
             if state.quickCollectionPickerActive {
-                if event.type == .flagsChanged || event.type == .rightMouseDown { return event }
+                if event.type == .rightMouseDown { return event }
                 if event.keyCode == 53 || (event.keyCode == 13 && modifiers.contains(.command)) {
                     state.quickCollectionPickerDismissRequestID = UUID()
                     return nil
@@ -172,10 +197,6 @@ final class QuickPanelController: NSObject {
             }
             if event.type == .rightMouseDown {
                 if let hovered = state.quickHoveredClipID { state.quickSelectionID = hovered }
-                return event
-            }
-            if event.type == .flagsChanged {
-                state.quickCommandKeyDown = modifiers.contains(.command)
                 return event
             }
             let numberKeyIndexes: [UInt16: Int] = [18: 0, 19: 1, 20: 2, 21: 3, 23: 4, 22: 5, 26: 6, 28: 7, 25: 8]
@@ -219,12 +240,78 @@ final class QuickPanelController: NSObject {
         case .togglePinned:
             if let clip = state.quickSelectedClip { state.togglePinned(clip) }
         case .editMetadata:
+            hideCommandHelp()
             state.quickMetadataEditorOpenRequestID = UUID()
         case .setCollection:
+            hideCommandHelp()
             state.quickCollectionPickerOpenRequestID = UUID()
         case .moveToTrash:
             if let clip = state.quickSelectedClip { state.moveToTrash(clip) }
         }
+    }
+
+    private func showCommandHelp() {
+        let targetScreen = panel.screen ?? NSScreen.screens.first(where: { $0.frame.intersects(panel.frame) }) ?? NSScreen.main
+        guard let screen = targetScreen else { return }
+        let visibleFrame = screen.visibleFrame
+        let width = min(max(panel.frame.width, 340), visibleFrame.width - 16)
+
+        let helpPanel: NSPanel
+        if let existing = commandHelpPanel {
+            helpPanel = existing
+            helpPanel.contentViewController = NSHostingController(
+                rootView: QuickCommandHelpView(settings: state.settings).frame(width: width)
+            )
+        } else {
+            helpPanel = NSPanel(
+                contentRect: NSRect(x: 0, y: 0, width: width, height: 180),
+                styleMask: [.nonactivatingPanel, .borderless],
+                backing: .buffered,
+                defer: false
+            )
+            helpPanel.isOpaque = false
+            helpPanel.backgroundColor = .clear
+            helpPanel.hasShadow = true
+            helpPanel.ignoresMouseEvents = true
+            helpPanel.level = panel.level
+            helpPanel.collectionBehavior = panel.collectionBehavior
+            helpPanel.contentViewController = NSHostingController(
+                rootView: QuickCommandHelpView(settings: state.settings).frame(width: width)
+            )
+            commandHelpPanel = helpPanel
+        }
+
+        guard let contentView = helpPanel.contentViewController?.view else { return }
+        contentView.layoutSubtreeIfNeeded()
+        let fittingHeight = max(120, contentView.fittingSize.height)
+        helpPanel.setContentSize(NSSize(width: width, height: fittingHeight))
+
+        let gap: CGFloat = 8
+        let preferredX = panel.frame.midX - width / 2
+        let x = min(max(preferredX, visibleFrame.minX + 8), visibleFrame.maxX - width - 8)
+        let belowY = panel.frame.minY - fittingHeight - gap
+        let y: CGFloat
+        if belowY >= visibleFrame.minY + 8 {
+            y = belowY
+        } else {
+            y = min(panel.frame.maxY + gap, visibleFrame.maxY - fittingHeight - 8)
+        }
+        helpPanel.setFrameOrigin(NSPoint(x: x, y: y))
+#if DEBUG
+        print("quick-command-help-placement=\(y == belowY ? "below" : "above") frame=\(helpPanel.frame) panel=\(panel.frame)")
+#endif
+
+        if helpPanel.parent !== panel {
+            helpPanel.parent?.removeChildWindow(helpPanel)
+            panel.addChildWindow(helpPanel, ordered: .above)
+        }
+        helpPanel.orderFrontRegardless()
+    }
+
+    private func hideCommandHelp() {
+        guard let commandHelpPanel else { return }
+        commandHelpPanel.parent?.removeChildWindow(commandHelpPanel)
+        commandHelpPanel.orderOut(nil)
     }
 
     private func carbonModifiers(from modifiers: NSEvent.ModifierFlags) -> UInt32 {

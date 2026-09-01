@@ -121,3 +121,20 @@ private func textClip(_ value: String, date: Date = Date(), source: String = "ap
     #expect(result.map(\.id) == [pinned.id, newer.id])
     #expect(SearchRanker.rank([newer, pinned], query: "").map(\.id) == [pinned.id, newer.id])
 }
+
+@Test func recentClipCountUsesLastActivityAndExcludesTrash() async throws {
+    let directories = try temporaryDirectories()
+    defer { try? FileManager.default.removeItem(at: directories.root) }
+    let repository = try SQLiteClipRepository(databaseURL: directories.databaseFile)
+    let now = Date(timeIntervalSince1970: 1_000_000)
+
+    var recentlyReused = textClip("最近再次使用", date: now.addingTimeInterval(-30 * 86_400))
+    recentlyReused.lastCopiedAt = now.addingTimeInterval(-3_600)
+    let old = textClip("很久没有使用", date: now.addingTimeInterval(-30 * 86_400))
+    var trashed = textClip("已进废纸篓", date: now.addingTimeInterval(-1_800))
+    trashed.deletedAt = now
+    try await repository.saveBatch([recentlyReused, old, trashed])
+
+    #expect(try await repository.recentClipCount(since: now.addingTimeInterval(-86_400)) == 1)
+    #expect(try await repository.recentClipCount(since: now.addingTimeInterval(-7 * 86_400)) == 1)
+}

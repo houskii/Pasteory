@@ -3,6 +3,21 @@ import Carbon
 import Foundation
 import PassteCore
 
+enum ClipboardPollingInterval: Double, CaseIterable, Identifiable {
+    case halfSecond = 0.5
+    case oneSecond = 1
+    case threeSeconds = 3
+
+    var id: Double { rawValue }
+    var title: String {
+        switch self {
+        case .halfSecond: "0.5 秒"
+        case .oneSecond: "1 秒"
+        case .threeSeconds: "3 秒"
+        }
+    }
+}
+
 enum QuickPanelAction: String, CaseIterable, Codable, Identifiable {
     case directPaste
     case copyOnly
@@ -41,6 +56,7 @@ final class AppSettings: ObservableObject {
         static let completedOnboarding = "completedOnboarding"
         static let monitoringEnabled = "monitoringEnabled"
         static let monitoringDefaultVersion = "monitoringDefaultVersion"
+        static let clipboardPollingInterval = "clipboardPollingInterval"
         static let defaultDirectPaste = "defaultDirectPaste"
         static let excludedApps = "excludedApps"
         static let shortcutKeyCode = "shortcutKeyCode"
@@ -51,6 +67,9 @@ final class AppSettings: ObservableObject {
 
     @Published var completedOnboarding: Bool { didSet { defaults.set(completedOnboarding, forKey: Key.completedOnboarding) } }
     @Published var monitoringEnabled: Bool { didSet { defaults.set(monitoringEnabled, forKey: Key.monitoringEnabled) } }
+    @Published var clipboardPollingInterval: ClipboardPollingInterval {
+        didSet { defaults.set(clipboardPollingInterval.rawValue, forKey: Key.clipboardPollingInterval) }
+    }
     @Published var defaultDirectPaste: Bool { didSet { defaults.set(defaultDirectPaste, forKey: Key.defaultDirectPaste) } }
     @Published var excludedBundleIdentifiers: Set<String> { didSet { defaults.set(Array(excludedBundleIdentifiers).sorted(), forKey: Key.excludedApps) } }
     @Published var shortcutKeyCode: UInt32 { didSet { defaults.set(Int(shortcutKeyCode), forKey: Key.shortcutKeyCode) } }
@@ -71,6 +90,9 @@ final class AppSettings: ObservableObject {
         } else {
             monitoringEnabled = defaults.object(forKey: Key.monitoringEnabled) as? Bool ?? true
         }
+        clipboardPollingInterval = ClipboardPollingInterval(
+            rawValue: defaults.double(forKey: Key.clipboardPollingInterval)
+        ) ?? .oneSecond
         defaultDirectPaste = defaults.object(forKey: Key.defaultDirectPaste) as? Bool ?? true
         excludedBundleIdentifiers = Set(defaults.stringArray(forKey: Key.excludedApps) ?? [])
         let storedKeyCode = defaults.object(forKey: Key.shortcutKeyCode) as? Int

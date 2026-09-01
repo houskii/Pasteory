@@ -10,6 +10,7 @@ public protocol ClipRepository: Sendable {
     func purgeTrash(olderThan date: Date) async throws -> Int
     func archiveCandidates(olderThan date: Date, hotLimit: Int) async throws -> [Clip]
     func activeClipCount() async throws -> Int
+    func recentClipCount(since date: Date) async throws -> Int
     func collections() async throws -> [ClipCollection]
     func saveCollection(_ collection: ClipCollection) async throws
     func removeCollection(id: UUID) async throws

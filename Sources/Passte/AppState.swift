@@ -31,6 +31,8 @@ final class AppState: ObservableObject {
     @Published var quickPresentationID = UUID()
     @Published var quickPanelPinned = false
     @Published var quickCommandKeyDown = false
+    @Published var quickDayCount = 0
+    @Published var quickWeekCount = 0
     @Published var requestedCollectionEditorID: UUID?
     @Published var selectedClipID: UUID?
     @Published var quickSelectionID: UUID?
@@ -75,6 +77,7 @@ final class AppState: ObservableObject {
         await refreshCollections()
         await refreshLibrary()
         await refreshQuick()
+        await refreshQuickStats()
         Task.detached(priority: .utility) { [archive] in _ = try? await archive.run() }
     }
 
@@ -88,6 +91,7 @@ final class AppState: ObservableObject {
             if quickClips.count > 500 { quickClips.removeLast(quickClips.count - 500) }
             quickClips = SearchRanker.rank(quickClips, query: quickQuery)
             await refreshLibrary()
+            await refreshQuickStats()
             if try await repository.activeClipCount() > RetentionPolicy.default.maximumHotClips {
                 Task.detached(priority: .utility) { [archive] in _ = try? await archive.run() }
             }
@@ -126,7 +130,17 @@ final class AppState: ObservableObject {
     func prepareQuickPanel() async {
         await refreshCollections()
         await refreshQuick(resetSelection: true)
+        await refreshQuickStats()
         quickPresentationID = UUID()
+    }
+
+    func refreshQuickStats(now: Date = Date()) async {
+        do {
+            async let day = repository.recentClipCount(since: now.addingTimeInterval(-86_400))
+            async let week = repository.recentClipCount(since: now.addingTimeInterval(-7 * 86_400))
+            quickDayCount = try await day
+            quickWeekCount = try await week
+        } catch { show(error) }
     }
 
     func moveQuickSelection(by offset: Int) {
@@ -256,16 +270,16 @@ final class AppState: ObservableObject {
 
     func moveToTrash(_ clip: Clip) {
         var value = clip; value.deletedAt = Date(); value.updatedAt = Date(); update(value)
-        Task { await refreshLibrary(); await refreshQuick() }
+        Task { await refreshLibrary(); await refreshQuick(); await refreshQuickStats() }
     }
 
     func restore(_ clip: Clip) {
         var value = clip; value.deletedAt = nil; value.updatedAt = Date(); update(value)
-        Task { await refreshLibrary(); await refreshQuick() }
+        Task { await refreshLibrary(); await refreshQuick(); await refreshQuickStats() }
     }
 
     func permanentlyDelete(_ clip: Clip) async {
-        do { try await repository.removePermanently(id: clip.id); await refreshLibrary(); await refreshQuick() }
+        do { try await repository.removePermanently(id: clip.id); await refreshLibrary(); await refreshQuick(); await refreshQuickStats() }
         catch { show(error) }
     }
 
@@ -293,7 +307,7 @@ final class AppState: ObservableObject {
         do {
             try await repository.save(clip)
             libraryFilter = .all; selectedClipID = clip.id
-            await refreshLibrary(); await refreshQuick()
+            await refreshLibrary(); await refreshQuick(); await refreshQuickStats()
             return clip
         } catch { show(error); return nil }
     }
@@ -401,7 +415,7 @@ final class AppState: ObservableObject {
 
     func runArchive() async {
         isBusy = true; defer { isBusy = false }
-        do { let count = try await archive.run(); presentStatus(count > 0 ? "已归档 \(count) 条内容" : "当前没有需要归档的内容"); await refreshLibrary(); await refreshQuick() }
+        do { let count = try await archive.run(); presentStatus(count > 0 ? "已归档 \(count) 条内容" : "当前没有需要归档的内容"); await refreshLibrary(); await refreshQuick(); await refreshQuickStats() }
         catch { show(error) }
     }
 
@@ -413,7 +427,7 @@ final class AppState: ObservableObject {
 
     func importBackup(from url: URL) async {
         isBusy = true; defer { isBusy = false }
-        do { let count = try await backup.importBackup(from: url); presentStatus("已导入 \(count) 条内容"); await refreshLibrary(); await refreshQuick() }
+        do { let count = try await backup.importBackup(from: url); presentStatus("已导入 \(count) 条内容"); await refreshLibrary(); await refreshQuick(); await refreshQuickStats() }
         catch { show(error) }
     }
 

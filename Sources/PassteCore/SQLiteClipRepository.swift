@@ -192,6 +192,14 @@ public actor SQLiteClipRepository: ClipRepository {
         try scalarInt("SELECT COUNT(*) FROM clips WHERE deleted_at IS NULL AND archived=0;")
     }
 
+    public func recentClipCount(since date: Date) throws -> Int {
+        let statement = try prepare("SELECT COUNT(*) FROM clips WHERE deleted_at IS NULL AND last_copied_at>=?;")
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_double(statement, 1, date.timeIntervalSince1970)
+        guard sqlite3_step(statement) == SQLITE_ROW else { throw sqliteError() }
+        return Int(sqlite3_column_int64(statement, 0))
+    }
+
     public func collections() throws -> [ClipCollection] {
         let statement = try prepare("SELECT payload_json FROM collections ORDER BY sort_order, name;")
         defer { sqlite3_finalize(statement) }

@@ -197,15 +197,91 @@ struct QuickPanelView: View {
     }
 
     private var footer: some View {
-        HStack {
+        HStack(spacing: 8) {
             Button(action: onOpenLibrary) { Image(systemName: "list.star") }
                 .buttonStyle(.plain).help("打开资料库（⌘L）")
-            Spacer()
-            Text("\(state.quickClips.count) 个项目")
-            Spacer()
-            Text("↑↓ 选择　↩ 粘贴　⌘L 资料库")
+            Text("1天·\(state.quickDayCount)条｜7天 \(state.quickWeekCount)条")
+                .monospacedDigit()
+                .help("按最近复制或使用时间统计，不包含废纸篓")
+            Spacer(minLength: 12)
+            Text("↑↓←→ 选择　↩ 粘贴")
         }
-        .font(.caption2).foregroundStyle(.secondary).padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+    }
+
+}
+
+struct QuickCommandHelpView: View {
+    @ObservedObject var settings: AppSettings
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack {
+                Text("Command 快捷操作").font(.caption.weight(.semibold))
+                Spacer()
+                Text("松开 ⌘ 隐藏").font(.caption2).foregroundStyle(.tertiary)
+            }
+
+            LazyVGrid(
+                columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)],
+                alignment: .leading,
+                spacing: 7
+            ) {
+                commandHelpItem(shortcut: "⌘1～⌘9", title: "粘贴对应项目")
+                ForEach(commandActions) { action in
+                    let shortcut = settings.quickShortcut(for: action)
+                    commandHelpItem(
+                        shortcut: ShortcutFormatter.display(keyCode: shortcut.keyCode, modifiers: shortcut.modifiers),
+                        title: action.commandHelpTitle
+                    )
+                }
+                commandHelpItem(shortcut: "⌘L", title: "打开资料库")
+                commandHelpItem(shortcut: "⌘,", title: "打开设置")
+                commandHelpItem(shortcut: "⌘W", title: "关闭面板")
+            }
+        }
+        .padding(12)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator.opacity(0.65), lineWidth: 1))
+    }
+
+    private var commandActions: [QuickPanelAction] {
+        QuickPanelAction.allCases.filter {
+            settings.quickShortcut(for: $0).modifiers & UInt32(cmdKey) != 0
+        }
+    }
+
+    private func commandHelpItem(shortcut: String, title: String) -> some View {
+        HStack(spacing: 5) {
+            Text(shortcut)
+                .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                .foregroundStyle(Color.accentColor)
+                .frame(minWidth: 42, alignment: .trailing)
+            Text(title)
+                .font(.system(size: 10.5))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+        }
+    }
+}
+
+private extension QuickPanelAction {
+    var commandHelpTitle: String {
+        switch self {
+        case .directPaste: "直接粘贴"
+        case .copyOnly: "只复制"
+        case .plainTextPaste: "纯文本粘贴"
+        case .plainTextCopy: "纯文本复制"
+        case .toggleFavorite: "收藏"
+        case .togglePinned: "置顶"
+        case .editMetadata: "标题与备注"
+        case .setCollection: "设置分组"
+        case .moveToTrash: "移到废纸篓"
+        }
     }
 }
 

@@ -134,7 +134,26 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
         debugQuickWindow = window
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        Task { await state.prepareQuickPanel() }
+        Task {
+            await state.prepareQuickPanel()
+            if ProcessInfo.processInfo.arguments.contains("--debug-command-help") {
+                state.quickCommandKeyDown = true
+            }
+            let arguments = ProcessInfo.processInfo.arguments
+            if let index = arguments.firstIndex(of: "--debug-snapshot-path"), arguments.indices.contains(index + 1) {
+                try? await Task.sleep(for: .milliseconds(300))
+                saveDebugSnapshot(of: window, to: arguments[index + 1])
+            }
+        }
+    }
+
+    private func saveDebugSnapshot(of window: NSWindow, to path: String) {
+        guard let view = window.contentView else { return }
+        view.layoutSubtreeIfNeeded()
+        guard let representation = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+        view.cacheDisplay(in: view.bounds, to: representation)
+        guard let data = representation.representation(using: .png, properties: [:]) else { return }
+        try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
     }
 
     private func seedDebugData() async {

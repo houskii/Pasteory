@@ -10,7 +10,6 @@ final class ClipboardMonitor {
     private var timer: Timer?
     private var lastChangeCount: Int
     private var ownChangeCounts = Set<Int>()
-    private var idleTicks = 0
     private var observers = [NSObjectProtocol]()
     private(set) var isRunning = false
 
@@ -38,7 +37,7 @@ final class ClipboardMonitor {
         guard !isRunning else { return }
         isRunning = true
         lastChangeCount = pasteboard.changeCount
-        schedule(after: 0.5)
+        schedule(after: settings.clipboardPollingInterval.rawValue)
     }
 
     func stop() {
@@ -56,7 +55,7 @@ final class ClipboardMonitor {
     private func resumeAfterWake() {
         guard isRunning else { return }
         lastChangeCount = pasteboard.changeCount
-        schedule(after: 0.5)
+        schedule(after: settings.clipboardPollingInterval.rawValue)
     }
 
     private func schedule(after interval: TimeInterval) {
@@ -65,14 +64,15 @@ final class ClipboardMonitor {
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
+        timer?.tolerance = min(0.1, interval * 0.1)
         if let timer { RunLoop.main.add(timer, forMode: .common) }
     }
 
     private func tick() {
-        defer { schedule(after: idleTicks > 30 ? 1 : 0.5) }
+        defer { schedule(after: settings.clipboardPollingInterval.rawValue) }
         let count = pasteboard.changeCount
-        guard count != lastChangeCount else { idleTicks += 1; return }
-        lastChangeCount = count; idleTicks = 0
+        guard count != lastChangeCount else { return }
+        lastChangeCount = count
         if ownChangeCounts.remove(count) != nil { return }
         guard settings.monitoringEnabled else { return }
 
