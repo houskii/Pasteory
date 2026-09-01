@@ -22,12 +22,21 @@ struct ClipRowView: View {
                         height: compact ? 44 : 48
                     )
                 } else {
-                    Text(clip.title.isEmpty ? clip.previewText : clip.title)
+                    Text(displayTitle)
                         .font(.system(size: compact ? 13 : 14, weight: .medium))
                         .lineLimit(2)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 HStack(spacing: 7) {
-                    Text(clip.source.appName)
+                    Text(String(clip.source.appName.prefix(40)))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .layoutPriority(1)
+                    Text(timestamp)
+                        .monospacedDigit()
+                        .fixedSize()
+                        .layoutPriority(2)
                     if clip.items.count > 1 { Text("\(clip.items.count) 项") }
                     if clip.copyCount > 1 { Text("复制 \(clip.copyCount) 次") }
                     if clip.isFavorite { Image(systemName: "star.fill").foregroundStyle(.yellow) }
@@ -35,14 +44,23 @@ struct ClipRowView: View {
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .clipped()
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             Spacer(minLength: 4)
-            VStack(alignment: .trailing, spacing: 6) {
-                Text(timestamp).foregroundStyle(.tertiary)
-                Spacer(minLength: 0)
-                if let shortcutNumber { Text("⌘ \(shortcutNumber)").foregroundStyle(.primary) }
+            ZStack(alignment: .bottomTrailing) {
+                if let shortcutNumber {
+                    Text("⌘ \(shortcutNumber)")
+                        .font(.caption)
+                        .foregroundStyle(.primary)
+                        .fixedSize()
+                }
             }
-            .font(.caption).frame(width: compact ? 48 : 62)
+            .frame(width: compact ? 34 : 38, height: 56, alignment: .bottomTrailing)
+            .padding(.trailing, 4)
+            .padding(.bottom, 4)
         }
         .frame(height: compact ? 72 : 72)
         .clipped()
@@ -53,6 +71,10 @@ struct ClipRowView: View {
     private var timestamp: String {
         let parts = Calendar.current.dateComponents([.month, .day, .hour, .minute], from: clip.lastCopiedAt)
         return String(format: "%02d-%02d %02d:%02d", parts.month ?? 0, parts.day ?? 0, parts.hour ?? 0, parts.minute ?? 0)
+    }
+
+    private var displayTitle: String {
+        String((clip.title.isEmpty ? clip.previewText : clip.title).prefix(240))
     }
 
     private var hasImagePreview: Bool {

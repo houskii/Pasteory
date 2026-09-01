@@ -27,3 +27,25 @@ import Testing
     let invalid = SmartRuleSet(conditions: [SmartCondition(field: .body, operation: .matchesRegex, value: "[")])
     #expect(throws: SmartRuleError.self) { try engine.validate(invalid) }
 }
+
+@Test func smartRulesRejectOperatorsThatDoNotMatchFieldType() throws {
+    let engine = SmartRuleEngine()
+    let invalidSource = SmartRuleSet(conditions: [SmartCondition(field: .sourceApp, operation: .before, value: "7")])
+    #expect(throws: SmartRuleError.self) { try engine.validate(invalidSource) }
+
+    let validSource = SmartRuleSet(conditions: [SmartCondition(field: .sourceApp, operation: .equals, value: "Safari")])
+    try engine.validate(validSource)
+
+    let validTime = SmartRuleSet(conditions: [SmartCondition(field: .createdAt, operation: .after, value: "7")])
+    try engine.validate(validTime)
+
+    let sourceClip = Clip(
+        primaryKind: .text,
+        source: ClipSource(appName: "Safari", bundleIdentifier: "com.apple.Safari", confidence: .high),
+        previewText: "example",
+        contentHash: "source-rule-test",
+        byteSize: 7,
+        items: []
+    )
+    #expect(try engine.matches(sourceClip, ruleSet: validSource))
+}

@@ -47,6 +47,20 @@ private func textClip(_ value: String, date: Date = Date(), source: String = "ap
     #expect(candidates.isEmpty)
 }
 
+@Test func collectionNamesAreUniqueIgnoringCaseAndWhitespace() async throws {
+    let directories = try temporaryDirectories()
+    defer { try? FileManager.default.removeItem(at: directories.root) }
+    let repository = try SQLiteClipRepository(databaseURL: directories.databaseFile)
+    try await repository.saveCollection(ClipCollection(name: "开发资料", kind: .normal))
+    var rejected = false
+    do {
+        try await repository.saveCollection(ClipCollection(name: "  开发资料  ", kind: .smart))
+    } catch RepositoryError.duplicateCollectionName {
+        rejected = true
+    }
+    #expect(rejected)
+}
+
 @Test func archiveCompressesAndRestoresInlineRepresentation() async throws {
     let directories = try temporaryDirectories()
     defer { try? FileManager.default.removeItem(at: directories.root) }

@@ -2,11 +2,26 @@ import Foundation
 
 public enum SmartRuleError: LocalizedError {
     case tooManyConditions, invalidRegularExpression, unsafeRegularExpression
+    case unsupportedOperator(SmartRuleField, SmartRuleOperator)
+    case invalidValue(SmartRuleField)
     public var errorDescription: String? {
         switch self {
         case .tooManyConditions: "智能分组最多包含 10 个条件"
         case .invalidRegularExpression: "正则表达式无效"
         case .unsafeRegularExpression: "正则表达式过长或复杂度过高"
+        case .unsupportedOperator: "当前字段不支持这个判断条件"
+        case .invalidValue(let field):
+            switch field {
+            case .createdAt: "时间必须填写大于或等于 0 的天数"
+            case .byteSize: "大小必须填写大于或等于 0 的字节数"
+            case .copyCount: "使用次数必须填写大于或等于 0 的整数"
+            case .priority: "优先级必须是无、P1、P2 或 P3"
+            case .favorite: "收藏状态无效"
+            case .kind: "内容类型无效"
+            case .sourceConfidence: "来源可信度无效"
+            case .sourceApp: "请选择来源 App"
+            case .title, .body, .note: "请输入匹配内容"
+            }
         }
     }
 }
@@ -16,13 +31,19 @@ public struct SmartRuleEngine: Sendable {
 
     public func validate(_ ruleSet: SmartRuleSet) throws {
         guard ruleSet.conditions.count <= 10 else { throw SmartRuleError.tooManyConditions }
-        for condition in ruleSet.conditions where condition.operation == .matchesRegex {
-            guard condition.value.count <= 512,
-                  !condition.value.contains(".*.*"),
-                  !condition.value.contains("++"),
-                  !condition.value.contains("**") else { throw SmartRuleError.unsafeRegularExpression }
-            do { _ = try NSRegularExpression(pattern: condition.value, options: [.caseInsensitive]) }
-            catch { throw SmartRuleError.invalidRegularExpression }
+        for condition in ruleSet.conditions {
+            guard condition.field.supportedOperators.contains(condition.operation) else {
+                throw SmartRuleError.unsupportedOperator(condition.field, condition.operation)
+            }
+            try validateValue(condition)
+            if condition.operation == .matchesRegex {
+                guard condition.value.count <= 512,
+                      !condition.value.contains(".*.*"),
+                      !condition.value.contains("++"),
+                      !condition.value.contains("**") else { throw SmartRuleError.unsafeRegularExpression }
+                do { _ = try NSRegularExpression(pattern: condition.value, options: [.caseInsensitive]) }
+                catch { throw SmartRuleError.invalidRegularExpression }
+            }
         }
     }
 
@@ -58,6 +79,10 @@ public struct SmartRuleEngine: Sendable {
         case .contains:
             return string.localizedCaseInsensitiveContains(condition.value)
         case .equals:
+            if condition.field == .sourceApp {
+                return clip.source.appName.compare(condition.value, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame ||
+                    clip.source.bundleIdentifier?.compare(condition.value, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+            }
             return string.compare(condition.value, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
         case .matchesRegex:
             let regex = try NSRegularExpression(pattern: condition.value, options: [.caseInsensitive])
@@ -78,5 +103,26 @@ public struct SmartRuleEngine: Sendable {
     private func dateValue(_ value: String, now: Date) -> Date? {
         if let days = Double(value) { return Calendar.current.date(byAdding: .second, value: -Int(days * 86_400), to: now) }
         return ISO8601DateFormatter().date(from: value)
+    }
+
+    private func validateValue(_ condition: SmartCondition) throws {
+        switch condition.field {
+        case .title, .body, .note, .sourceApp:
+            guard !condition.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw SmartRuleError.invalidValue(condition.field)
+            }
+        case .sourceConfidence:
+            guard SourceConfidence(rawValue: condition.value) != nil else { throw SmartRuleError.invalidValue(condition.field) }
+        case .kind:
+            guard ClipKind(rawValue: condition.value) != nil else { throw SmartRuleError.invalidValue(condition.field) }
+        case .createdAt, .byteSize:
+            guard let value = Double(condition.value), value >= 0 else { throw SmartRuleError.invalidValue(condition.field) }
+        case .priority:
+            guard let value = Int(condition.value), (0...3).contains(value) else { throw SmartRuleError.invalidValue(condition.field) }
+        case .favorite:
+            guard condition.value == "true" || condition.value == "false" else { throw SmartRuleError.invalidValue(condition.field) }
+        case .copyCount:
+            guard let value = Int(condition.value), value >= 0 else { throw SmartRuleError.invalidValue(condition.field) }
+        }
     }
 }

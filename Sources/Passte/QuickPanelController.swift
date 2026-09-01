@@ -16,9 +16,13 @@ final class QuickPanelController: NSObject {
     private let onOpenSettings: () -> Void
     private let onCreateTextClip: () -> Void
     private let onCreateCollection: (Bool) -> Void
+    private let onEditCollection: (ClipCollection) -> Void
+    private let onDeleteCollection: (ClipCollection) -> Void
     private let panel: PasstePanel
     private var eventMonitor: Any?
     private var globalMouseMonitor: Any?
+    private let frameAutosaveName = "PassteQuickPanelWindow"
+    private var hasInitialPlacement = false
     private(set) var targetApplication: NSRunningApplication?
 
     init(
@@ -28,11 +32,14 @@ final class QuickPanelController: NSObject {
         onOpenLibrary: @escaping () -> Void,
         onOpenSettings: @escaping () -> Void,
         onCreateTextClip: @escaping () -> Void,
-        onCreateCollection: @escaping (Bool) -> Void
+        onCreateCollection: @escaping (Bool) -> Void,
+        onEditCollection: @escaping (ClipCollection) -> Void,
+        onDeleteCollection: @escaping (ClipCollection) -> Void
     ) {
         self.state = state; self.pasteCoordinator = pasteCoordinator; self.targetProvider = targetProvider
         self.onOpenLibrary = onOpenLibrary; self.onOpenSettings = onOpenSettings
         self.onCreateTextClip = onCreateTextClip; self.onCreateCollection = onCreateCollection
+        self.onEditCollection = onEditCollection; self.onDeleteCollection = onDeleteCollection
         panel = PasstePanel(
             contentRect: NSRect(x: 0, y: 0, width: 380, height: 660),
             styleMask: [.nonactivatingPanel, .borderless, .resizable],
@@ -52,10 +59,14 @@ final class QuickPanelController: NSObject {
             onOpenLibrary: { [weak self] in self?.close(); onOpenLibrary() },
             onOpenSettings: { [weak self] in self?.close(); onOpenSettings() },
             onCreateTextClip: { [weak self] in self?.close(); onCreateTextClip() },
-            onCreateCollection: { [weak self] smart in self?.close(); onCreateCollection(smart) }
+            onCreateCollection: { [weak self] smart in self?.close(); onCreateCollection(smart) },
+            onEditCollection: { [weak self] collection in self?.close(); onEditCollection(collection) },
+            onDeleteCollection: { [weak self] collection in self?.close(); onDeleteCollection(collection) }
         )
         panel.contentViewController = NSHostingController(rootView: view)
         panel.setContentSize(NSSize(width: 380, height: 660))
+        hasInitialPlacement = panel.setFrameUsingName(frameAutosaveName)
+        panel.setFrameAutosaveName(frameAutosaveName)
     }
 
     func toggle() { panel.isVisible ? close() : show() }
@@ -67,7 +78,10 @@ final class QuickPanelController: NSObject {
         } else if let fallback = targetProvider(), !fallback.isTerminated {
             targetApplication = fallback
         }
-        positionOnMouseScreen()
+        if !hasInitialPlacement || !isPanelOnVisibleScreen {
+            positionOnMouseScreen()
+            hasInitialPlacement = true
+        }
         panel.orderFrontRegardless(); panel.makeKey()
 #if DEBUG
         DispatchQueue.main.async { [weak panel] in print("quick-panel-is-key=\(panel?.isKeyWindow == true)") }
@@ -79,6 +93,7 @@ final class QuickPanelController: NSObject {
 
     func close() {
         state.quickCommandKeyDown = false
+        panel.saveFrame(usingName: frameAutosaveName)
         panel.orderOut(nil)
         if let eventMonitor { NSEvent.removeMonitor(eventMonitor); self.eventMonitor = nil }
         if let globalMouseMonitor { NSEvent.removeMonitor(globalMouseMonitor); self.globalMouseMonitor = nil }
@@ -167,5 +182,9 @@ final class QuickPanelController: NSObject {
         origin.x = min(max(origin.x, visible.minX), visible.maxX - panel.frame.width)
         origin.y = min(max(origin.y, visible.minY), visible.maxY - panel.frame.height)
         panel.setFrameOrigin(origin)
+    }
+
+    private var isPanelOnVisibleScreen: Bool {
+        NSScreen.screens.contains { $0.visibleFrame.intersects(panel.frame) }
     }
 }

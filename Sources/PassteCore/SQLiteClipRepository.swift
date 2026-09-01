@@ -205,6 +205,12 @@ public actor SQLiteClipRepository: ClipRepository {
     }
 
     public func saveCollection(_ collection: ClipCollection) throws {
+        let duplicate = try prepare("SELECT 1 FROM collections WHERE id<>? AND lower(trim(name))=lower(trim(?)) LIMIT 1;")
+        bind(collection.id.uuidString, at: 1, to: duplicate)
+        bind(collection.name, at: 2, to: duplicate)
+        let nameExists = sqlite3_step(duplicate) == SQLITE_ROW
+        sqlite3_finalize(duplicate)
+        guard !nameExists else { throw RepositoryError.duplicateCollectionName }
         let data = try encoder.encode(collection)
         let statement = try prepare("INSERT INTO collections(id,name,kind,sort_order,payload_json) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,kind=excluded.kind,sort_order=excluded.sort_order,payload_json=excluded.payload_json;")
         defer { sqlite3_finalize(statement) }

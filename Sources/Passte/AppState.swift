@@ -27,6 +27,7 @@ final class AppState: ObservableObject {
     @Published var quickPresentationID = UUID()
     @Published var quickPanelPinned = false
     @Published var quickCommandKeyDown = false
+    @Published var requestedCollectionEditorID: UUID?
     @Published var selectedClipID: UUID?
     @Published var quickSelectionID: UUID?
     @Published var statusMessage: String?
@@ -109,8 +110,8 @@ final class AppState: ObservableObject {
 
     func prepareQuickPanel() async {
         await refreshCollections()
-        quickPresentationID = UUID()
         await refreshQuick(resetSelection: true)
+        quickPresentationID = UUID()
     }
 
     func moveQuickSelection(by offset: Int) {
@@ -162,7 +163,36 @@ final class AppState: ObservableObject {
     }
 
     func refreshCollections() async {
-        do { collections = try await repository.collections() } catch { show(error) }
+        do {
+            let loaded = try await repository.collections()
+            let reservedNames = Set(loaded.map { canonicalCollectionName($0.name) })
+            var usedNames = Set<String>()
+            var normalized = [ClipCollection]()
+            for original in loaded {
+                var collection = original
+                let base = String(collection.name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(40))
+                let safeBase = base.isEmpty ? "未命名分组" : base
+                var candidate = safeBase
+                var suffix = 2
+                while usedNames.contains(canonicalCollectionName(candidate)) {
+                    repeat {
+                        let suffixText = " \(suffix)"
+                        candidate = String(safeBase.prefix(max(1, 40 - suffixText.count))) + suffixText
+                        suffix += 1
+                    } while usedNames.contains(canonicalCollectionName(candidate)) || reservedNames.contains(canonicalCollectionName(candidate))
+                }
+                collection.name = candidate
+                if collection.kind == .smart, let rules = collection.ruleSet {
+                    collection.ruleSet = normalizedLegacyRules(rules)
+                }
+                usedNames.insert(canonicalCollectionName(candidate))
+                if collection != original { try await repository.saveCollection(collection) }
+                normalized.append(collection)
+            }
+            collections = normalized.sorted { lhs, rhs in
+                lhs.sortOrder == rhs.sortOrder ? lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending : lhs.sortOrder < rhs.sortOrder
+            }
+        } catch { show(error) }
     }
 
     func update(_ clip: Clip) {
@@ -178,8 +208,34 @@ final class AppState: ObservableObject {
         mutation(&clip); clip.updatedAt = Date(); update(clip)
     }
 
+    func mutate(_ clip: Clip, _ mutation: (inout Clip) -> Void) {
+        var value = clip
+        mutation(&value)
+        value.updatedAt = Date()
+        update(value)
+    }
+
     func toggleFavorite(_ clip: Clip) {
         var value = clip; value.isFavorite.toggle(); value.updatedAt = Date(); update(value)
+    }
+
+    func togglePinned(_ clip: Clip) {
+        mutate(clip) { $0.isPinned.toggle() }
+    }
+
+    func toggleCollection(_ collection: ClipCollection, for clip: Clip) {
+        guard collection.kind == .normal else { return }
+        mutate(clip) { value in
+            if value.collectionIDs.contains(collection.id) { value.collectionIDs.remove(collection.id) }
+            else { value.collectionIDs.insert(collection.id) }
+        }
+    }
+
+    func updateMetadata(for clip: Clip, title: String, note: String) {
+        mutate(clip) { value in
+            value.title = String(title.prefix(120))
+            value.note = String(note.prefix(4_000))
+        }
     }
 
     func moveToTrash(_ clip: Clip) {
@@ -199,8 +255,9 @@ final class AppState: ObservableObject {
 
     @discardableResult
     func addCollection(name: String, smart: Bool) async -> ClipCollection? {
+        if let message = collectionNameValidationMessage(name) { statusMessage = message; return nil }
         let rules = smart ? SmartRuleSet(mode: .all, conditions: []) : nil
-        let collection = ClipCollection(name: name, kind: smart ? .smart : .normal, sortOrder: collections.count, ruleSet: rules)
+        let collection = ClipCollection(name: name.trimmingCharacters(in: .whitespacesAndNewlines), kind: smart ? .smart : .normal, sortOrder: collections.count, ruleSet: rules)
         do { try await repository.saveCollection(collection); await refreshCollections(); return collection }
         catch { show(error); return nil }
     }
@@ -241,9 +298,89 @@ final class AppState: ObservableObject {
         }
     }
 
-    func saveCollection(_ collection: ClipCollection) async {
-        do { try SmartRuleEngine().validate(collection.ruleSet ?? SmartRuleSet()); try await repository.saveCollection(collection); await refreshCollections() }
-        catch { show(error) }
+    @discardableResult
+    func saveCollection(_ collection: ClipCollection) async -> Bool {
+        if let message = collectionNameValidationMessage(collection.name, excluding: collection.id) { statusMessage = message; return false }
+        var value = collection
+        value.name = collection.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            if value.kind == .smart { try SmartRuleEngine().validate(value.ruleSet ?? SmartRuleSet()) }
+            try await repository.saveCollection(value)
+            await refreshCollections()
+            await refreshQuick()
+            return true
+        } catch { show(error); return false }
+    }
+
+    func deleteCollection(_ collection: ClipCollection) async {
+        do {
+            for var clip in try await repository.allClips() where clip.collectionIDs.contains(collection.id) {
+                clip.collectionIDs.remove(collection.id)
+                try await repository.save(clip)
+            }
+            try await repository.removeCollection(id: collection.id)
+            if libraryFilter == .collection(collection.id) { libraryFilter = .all }
+            if quickScope == .collection(collection.id) { quickScope = .all }
+            await refreshCollections()
+            await refreshLibrary()
+            await refreshQuick(resetSelection: true)
+        } catch { show(error) }
+    }
+
+    func reorderCollections(kind: CollectionKind, fromOffsets: IndexSet, toOffset: Int) async {
+        var target = collections.filter { $0.kind == kind }
+        let moving = fromOffsets.sorted().compactMap { target.indices.contains($0) ? target[$0] : nil }
+        for index in fromOffsets.sorted(by: >) where target.indices.contains(index) { target.remove(at: index) }
+        let removedBeforeDestination = fromOffsets.filter { $0 < toOffset }.count
+        let destination = min(max(toOffset - removedBeforeDestination, 0), target.count)
+        target.insert(contentsOf: moving, at: destination)
+        var normal = kind == .normal ? target : collections.filter { $0.kind == .normal }
+        var smart = kind == .smart ? target : collections.filter { $0.kind == .smart }
+        if kind != .normal { normal.sort { $0.sortOrder < $1.sortOrder } }
+        if kind != .smart { smart.sort { $0.sortOrder < $1.sortOrder } }
+        let ordered = normal + smart
+        do {
+            for (index, var collection) in ordered.enumerated() {
+                collection.sortOrder = index
+                try await repository.saveCollection(collection)
+            }
+            await refreshCollections()
+        } catch { show(error) }
+    }
+
+    func moveCollection(id: UUID, before targetID: UUID) async {
+        guard id != targetID,
+              let source = collections.first(where: { $0.id == id }),
+              let target = collections.first(where: { $0.id == targetID }),
+              source.kind == target.kind else { return }
+        var sameKind = collections.filter { $0.kind == source.kind }
+        guard let sourceIndex = sameKind.firstIndex(where: { $0.id == id }) else { return }
+        let moved = sameKind.remove(at: sourceIndex)
+        guard let targetIndex = sameKind.firstIndex(where: { $0.id == targetID }) else { return }
+        sameKind.insert(moved, at: targetIndex)
+        let normal = source.kind == .normal ? sameKind : collections.filter { $0.kind == .normal }.sorted { $0.sortOrder < $1.sortOrder }
+        let smart = source.kind == .smart ? sameKind : collections.filter { $0.kind == .smart }.sorted { $0.sortOrder < $1.sortOrder }
+        do {
+            for (index, var collection) in (normal + smart).enumerated() {
+                collection.sortOrder = index
+                try await repository.saveCollection(collection)
+            }
+            await refreshCollections()
+        } catch { show(error) }
+    }
+
+    func collectionNameValidationMessage(_ name: String, excluding id: UUID? = nil) -> String? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "请输入分组名称" }
+        if trimmed.count > 40 { return "分组名称最多 40 个字符" }
+        let key = canonicalCollectionName(trimmed)
+        if collections.contains(where: { $0.id != id && canonicalCollectionName($0.name) == key }) { return "分组名称已经存在" }
+        return nil
+    }
+
+    func smartRuleCandidates() async -> [Clip] {
+        do { return try await repository.list(filter: .all, query: "", limit: 100_000) }
+        catch { show(error); return [] }
     }
 
     func runArchive() async {
@@ -269,5 +406,26 @@ final class AppState: ObservableObject {
     private func replaceLocal(_ clip: Clip) {
         if let index = clips.firstIndex(where: { $0.id == clip.id }) { clips[index] = clip }
         if let index = quickClips.firstIndex(where: { $0.id == clip.id }) { quickClips[index] = clip }
+    }
+
+    private func canonicalCollectionName(_ name: String) -> String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+    }
+
+    private func normalizedLegacyRules(_ rules: SmartRuleSet) -> SmartRuleSet {
+        let conditions = rules.conditions.map { condition in
+            guard !condition.field.supportedOperators.contains(condition.operation) else { return condition }
+            var value = condition
+            value.operation = condition.field.supportedOperators[0]
+            switch condition.field {
+            case .sourceConfidence, .kind, .priority, .favorite:
+                value.value = condition.field.defaultValue
+            default:
+                if value.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { value.value = condition.field.defaultValue }
+            }
+            return value
+        }
+        return SmartRuleSet(mode: rules.mode, conditions: conditions)
     }
 }

@@ -23,7 +23,9 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
         onOpenLibrary: { [weak self] in self?.openLibrary() },
         onOpenSettings: { [weak self] in self?.openSettings() },
         onCreateTextClip: { [weak self] in self?.createManualTextClip() },
-        onCreateCollection: { [weak self] smart in self?.promptCreateCollection(smart: smart) }
+        onCreateCollection: { [weak self] smart in self?.promptCreateCollection(smart: smart) },
+        onEditCollection: { [weak self] collection in self?.editCollection(collection) },
+        onDeleteCollection: { [weak self] collection in self?.confirmDeleteCollection(collection) }
     )
 
     init(state: AppState, settings: AppSettings, attachments: AttachmentStore) {
@@ -76,6 +78,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
 #if DEBUG
     private func seedDebugData() async {
         let samples = [
+            ("这是一条用于验证超长文本截断和布局边界的剪贴板内容，它不应该把时间、来源应用或快捷键挤出卡片，也不能覆盖相邻的条目。", "com.apple.Terminal", "一个名称同样非常长的测试来源应用"),
             ("What was broken", "com.apple.Terminal", "终端"),
             ("你要解决一下这个问题，无论是用户切换", "com.openai.chat", "ChatGPT"),
             ("Lark Open API 调试记录", "com.google.Chrome", "Google Chrome"),
@@ -89,6 +92,11 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
             )
             await state.accept(capture)
         }
+        let colorCapture = PasteboardCapture(
+            items: [CapturedItem(order: 0, representations: [CapturedRepresentation(uti: "public.utf8-plain-text", data: Data("#7C3AED".utf8))])],
+            source: ClipSource(appName: "设计工具", bundleIdentifier: "com.apple.Preview", confidence: .high)
+        )
+        await state.accept(colorCapture)
         if let image = NSImage(systemSymbolName: "photo.fill", accessibilityDescription: nil), let data = image.tiffRepresentation {
             let capture = PasteboardCapture(
                 items: [CapturedItem(order: 0, representations: [CapturedRepresentation(uti: "public.tiff", data: data)])],
@@ -99,6 +107,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
         _ = await state.addCollection(name: "开发资料", smart: false)
         _ = await state.addCollection(name: "Lark Open API", smart: false)
         _ = await state.addCollection(name: "KMP", smart: false)
+        _ = await state.addCollection(name: "最近来源", smart: true)
     }
 #endif
 
@@ -199,7 +208,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
     private func promptCreateCollection(smart: Bool) {
         let alert = NSAlert()
         alert.messageText = smart ? "创建智能列表" : "创建普通列表"
-        alert.informativeText = smart ? "创建后可在资料库中编辑匹配规则。" : "列表会显示在快捷面板的横向标签中。"
+        alert.informativeText = smart ? "先创建列表，之后可以在资料库中补充匹配规则。" : "列表会直接显示在快捷面板的横向标签中。"
         let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
         input.placeholderString = smart ? "智能列表名称" : "列表名称"
         alert.accessoryView = input
@@ -208,10 +217,31 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
         let name = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
         Task {
-            guard let collection = await state.addCollection(name: name, smart: smart) else { return }
-            state.libraryFilter = .collection(collection.id)
-            await state.refreshLibrary()
-            openLibrary()
+            guard let collection = await state.addCollection(name: name, smart: smart) else {
+                quickPanel.show()
+                return
+            }
+            state.quickScope = .collection(collection.id)
+            await state.refreshQuick(resetSelection: true)
+            quickPanel.show()
+        }
+    }
+
+    private func editCollection(_ collection: ClipCollection) {
+        state.requestedCollectionEditorID = collection.id
+        openLibrary()
+    }
+
+    private func confirmDeleteCollection(_ collection: ClipCollection) {
+        let alert = NSAlert()
+        alert.messageText = "删除“\(collection.name)”？"
+        alert.informativeText = "剪贴板内容不会被删除。"
+        alert.addButton(withTitle: "删除")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { quickPanel.show(); return }
+        Task {
+            await state.deleteCollection(collection)
+            quickPanel.show()
         }
     }
 

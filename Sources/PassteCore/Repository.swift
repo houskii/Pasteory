@@ -21,12 +21,14 @@ public enum RepositoryError: LocalizedError {
     case openDatabase(String)
     case sqlite(String)
     case encoding
+    case duplicateCollectionName
 
     public var errorDescription: String? {
         switch self {
         case .openDatabase(let message): "无法打开数据库：\(message)"
         case .sqlite(let message): "数据库错误：\(message)"
         case .encoding: "无法解析剪贴板记录"
+        case .duplicateCollectionName: "分组名称已经存在"
         }
     }
 }

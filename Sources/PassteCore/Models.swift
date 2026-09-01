@@ -234,6 +234,33 @@ public enum SmartRuleOperator: String, Codable, CaseIterable, Sendable {
     case contains, equals, matchesRegex, before, after, greaterThan, lessThan
 }
 
+public extension SmartRuleField {
+    var supportedOperators: [SmartRuleOperator] {
+        switch self {
+        case .title, .body, .note:
+            [.contains, .equals, .matchesRegex]
+        case .sourceApp, .sourceConfidence, .kind, .priority, .favorite:
+            [.equals]
+        case .createdAt:
+            [.before, .after]
+        case .byteSize, .copyCount:
+            [.greaterThan, .lessThan, .equals]
+        }
+    }
+
+    var defaultValue: String {
+        switch self {
+        case .sourceConfidence: SourceConfidence.high.rawValue
+        case .kind: ClipKind.text.rawValue
+        case .priority: "0"
+        case .favorite: "true"
+        case .createdAt: "7"
+        case .byteSize, .copyCount: "1"
+        case .sourceApp, .title, .body, .note: ""
+        }
+    }
+}
+
 public struct SmartCondition: Codable, Hashable, Identifiable, Sendable {
     public var id: UUID
     public var field: SmartRuleField

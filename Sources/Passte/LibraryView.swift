@@ -6,21 +6,33 @@ struct LibraryView: View {
     @ObservedObject var state: AppState
     let onPaste: (Clip, Bool, Bool) -> Void
     let onOpenSettings: () -> Void
-    @State private var showNewCollection = false
+    @State private var showNewNormalCollection = false
+    @State private var editingNormalCollection: ClipCollection?
     @State private var editingSmartCollection: ClipCollection?
-    @State private var newCollectionName = ""
 
     var body: some View {
-        HSplitView {
-            sidebar.frame(minWidth: 190, idealWidth: 220, maxWidth: 280).layoutPriority(1)
-            content.frame(minWidth: 360, idealWidth: 520, maxWidth: .infinity).layoutPriority(3)
-            inspector.frame(minWidth: 280, idealWidth: 340, maxWidth: 460).layoutPriority(2)
+        GeometryReader { geometry in
+            HStack(spacing: 0) {
+                sidebar.frame(width: 220)
+                Divider()
+                content.frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
+                if geometry.size.width >= 1_000 {
+                    Divider()
+                    inspector.frame(width: 340).frame(maxHeight: .infinity).clipped()
+                }
+            }
         }
         .frame(minWidth: 900, maxWidth: .infinity, minHeight: 600, maxHeight: .infinity)
         .tint(.purple)
-        .sheet(isPresented: $showNewCollection) { newCollectionSheet }
+        .sheet(isPresented: $showNewNormalCollection) { CollectionNameEditor(state: state, existing: nil) }
+        .sheet(item: $editingNormalCollection) { CollectionNameEditor(state: state, existing: $0) }
         .sheet(item: $editingSmartCollection) { SmartCollectionEditor(state: state, existing: $0) }
-        .task { await state.refreshCollections(); await state.refreshLibrary() }
+        .task {
+            await state.refreshCollections()
+            await state.refreshLibrary()
+            openRequestedCollectionEditor()
+        }
+        .onChange(of: state.requestedCollectionEditorID) { _, _ in openRequestedCollectionEditor() }
     }
 
     private var sidebar: some View {
@@ -38,14 +50,19 @@ struct LibraryView: View {
                 }
                 Section("普通分组") {
                     ForEach(state.collections.filter { $0.kind == .normal }) { collection in
-                        sidebarRow(collection.name, symbol: "folder", filter: .collection(collection.id))
+                        collectionRow(collection)
                     }
-                    Button { newCollectionName = ""; showNewCollection = true } label: { Label("新建分组", systemImage: "plus") }
+                    .onMove { offsets, destination in
+                        Task { await state.reorderCollections(kind: .normal, fromOffsets: offsets, toOffset: destination) }
+                    }
+                    Button { showNewNormalCollection = true } label: { Label("新建分组", systemImage: "plus") }
                 }
                 Section("智能分组") {
                     ForEach(state.collections.filter { $0.kind == .smart }) { collection in
-                        sidebarRow(collection.name, symbol: "sparkles", filter: .collection(collection.id))
-                            .contextMenu { Button("编辑规则") { editingSmartCollection = collection } }
+                        collectionRow(collection)
+                    }
+                    .onMove { offsets, destination in
+                        Task { await state.reorderCollections(kind: .smart, fromOffsets: offsets, toOffset: destination) }
                     }
                     Button { editingSmartCollection = ClipCollection(name: "", kind: .smart, sortOrder: state.collections.count, ruleSet: SmartRuleSet()) } label: { Label("新建智能分组", systemImage: "plus") }
                 }
@@ -73,6 +90,42 @@ struct LibraryView: View {
             }.contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    private func collectionRow(_ collection: ClipCollection) -> some View {
+        Button {
+            state.libraryFilter = .collection(collection.id)
+            Task { await state.refreshLibrary() }
+        } label: {
+            HStack(spacing: 7) {
+                Label(String(collection.name.prefix(40)), systemImage: collection.kind == .smart ? "sparkles" : "folder")
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 4)
+                if state.libraryFilter == .collection(collection.id) { Image(systemName: "checkmark").font(.caption) }
+                Image(systemName: "line.3.horizontal").font(.caption2).foregroundStyle(.tertiary).help("拖动调整顺序")
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .draggable(collection.id.uuidString)
+        .dropDestination(for: String.self) { identifiers, _ in
+            guard let raw = identifiers.first,
+                  let sourceID = UUID(uuidString: raw),
+                  sourceID != collection.id,
+                  state.collections.first(where: { $0.id == sourceID })?.kind == collection.kind else { return false }
+            Task { await state.moveCollection(id: sourceID, before: collection.id) }
+            return true
+        }
+        .contextMenu {
+            if collection.kind == .smart {
+                Button("编辑名称和规则…") { editingSmartCollection = collection }
+            } else {
+                Button("重命名…") { editingNormalCollection = collection }
+            }
+            Divider()
+            Button("删除分组", role: .destructive) { confirmDeleteCollection(collection) }
+        }
     }
 
     private var content: some View {
@@ -107,14 +160,20 @@ struct LibraryView: View {
                     Divider()
                     Group {
                         Text("标题").font(.caption).foregroundStyle(.secondary)
-                        TextField("可选标题", text: Binding(get: { state.selectedClip?.title ?? "" }, set: { value in state.mutateSelected { $0.title = value } }))
+                        TextField("可选标题", text: Binding(
+                            get: { state.selectedClip?.title ?? "" },
+                            set: { value in state.mutateSelected { $0.title = String(value.prefix(120)) } }
+                        ))
                         if clip.source.bundleIdentifier == "app.passte.Passte" {
                             Text("正文").font(.caption).foregroundStyle(.secondary)
                             TextEditor(text: Binding(get: { state.selectedClip?.previewText ?? "" }, set: { state.updateManualText($0) }))
                                 .font(.body).frame(minHeight: 110).border(.quaternary)
                         }
                         Text("备注").font(.caption).foregroundStyle(.secondary)
-                        TextEditor(text: Binding(get: { state.selectedClip?.note ?? "" }, set: { value in state.mutateSelected { $0.note = value } })).frame(minHeight: 80).border(.quaternary)
+                        TextEditor(text: Binding(
+                            get: { state.selectedClip?.note ?? "" },
+                            set: { value in state.mutateSelected { $0.note = String(value.prefix(4_000)) } }
+                        )).frame(minHeight: 80).border(.quaternary)
                         Picker("优先级", selection: Binding(get: { state.selectedClip?.priority ?? 0 }, set: { value in state.mutateSelected { $0.priority = value } })) {
                             Text("无").tag(0); Text("P1").tag(1); Text("P2").tag(2); Text("P3").tag(3)
                         }
@@ -168,17 +227,74 @@ struct LibraryView: View {
         } else { Button("移到废纸篓", role: .destructive) { state.moveToTrash(clip) } }
     }
 
-    private var newCollectionSheet: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("新建分组").font(.title2.bold())
-            TextField("分组名称", text: $newCollectionName)
-            HStack { Spacer(); Button("取消") { showNewCollection = false }; Button("创建") { let name = newCollectionName.trimmingCharacters(in: .whitespacesAndNewlines); guard !name.isEmpty else { return }; Task { await state.addCollection(name: name, smart: false); showNewCollection = false } }.keyboardShortcut(.defaultAction) }
-        }.padding(24).frame(width: 360)
-    }
-
     private func confirmPermanentDelete(_ clip: Clip) {
         let alert = NSAlert(); alert.messageText = "彻底删除这条内容？"; alert.informativeText = "此操作无法撤销。"; alert.addButton(withTitle: "删除"); alert.addButton(withTitle: "取消")
         if alert.runModal() == .alertFirstButtonReturn { Task { await state.permanentlyDelete(clip) } }
+    }
+
+    private func confirmDeleteCollection(_ collection: ClipCollection) {
+        let alert = NSAlert()
+        alert.messageText = "删除“\(collection.name)”？"
+        alert.informativeText = collection.kind == .smart ? "智能规则会一并删除，剪贴板内容不会被删除。" : "内容只会移出这个分组，不会从资料库删除。"
+        alert.addButton(withTitle: "删除")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        Task { await state.deleteCollection(collection) }
+    }
+
+    private func openRequestedCollectionEditor() {
+        guard let id = state.requestedCollectionEditorID,
+              let collection = state.collections.first(where: { $0.id == id }) else { return }
+        state.requestedCollectionEditorID = nil
+        if collection.kind == .smart { editingSmartCollection = collection }
+        else { editingNormalCollection = collection }
+    }
+}
+
+private struct CollectionNameEditor: View {
+    @ObservedObject var state: AppState
+    @Environment(\.dismiss) private var dismiss
+    let existing: ClipCollection?
+    @State private var name: String
+    @State private var error: String?
+
+    init(state: AppState, existing: ClipCollection?) {
+        self.state = state
+        self.existing = existing
+        _name = State(initialValue: existing?.name ?? "")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(existing == nil ? "新建分组" : "重命名分组").font(.title2.bold())
+            VStack(alignment: .leading, spacing: 5) {
+                TextField("分组名称", text: Binding(get: { name }, set: { name = String($0.prefix(40)) }))
+                Text("\(name.count)/40").font(.caption2).foregroundStyle(.tertiary).frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            if let error { Text(error).font(.caption).foregroundStyle(.red) }
+            HStack {
+                Spacer()
+                Button("取消") { dismiss() }
+                Button(existing == nil ? "创建" : "保存") { save() }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24)
+        .frame(width: 380)
+    }
+
+    private func save() {
+        if let message = state.collectionNameValidationMessage(name, excluding: existing?.id) { error = message; return }
+        Task {
+            let succeeded: Bool
+            if var existing {
+                existing.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                succeeded = await state.saveCollection(existing)
+            } else {
+                succeeded = await state.addCollection(name: name, smart: false) != nil
+            }
+            if succeeded { dismiss() }
+            else { error = state.statusMessage }
+        }
     }
 }
 
@@ -190,25 +306,27 @@ struct SmartCollectionEditor: View {
     @State private var mode: RuleMatchMode
     @State private var conditions: [SmartCondition]
     @State private var error: String?
+    @State private var candidates: [Clip] = []
 
     init(state: AppState, existing: ClipCollection) {
         self.state = state; self.existing = existing
         _name = State(initialValue: existing.name)
         _mode = State(initialValue: existing.ruleSet?.mode ?? .all)
-        _conditions = State(initialValue: existing.ruleSet?.conditions.isEmpty == false ? existing.ruleSet!.conditions : [SmartCondition(field: .body, operation: .contains, value: "")])
+        let saved = existing.ruleSet?.conditions.isEmpty == false ? existing.ruleSet!.conditions : [SmartCondition(field: .body, operation: .contains, value: "")]
+        _conditions = State(initialValue: saved.map(Self.normalized))
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("新建智能分组").font(.title2.bold())
-            TextField("分组名称", text: $name)
+            Text(existing.name.isEmpty ? "新建智能分组" : "编辑智能分组").font(.title2.bold())
+            VStack(alignment: .leading, spacing: 5) {
+                TextField("分组名称", text: Binding(get: { name }, set: { name = String($0.prefix(40)) }))
+                Text("\(name.count)/40").font(.caption2).foregroundStyle(.tertiary).frame(maxWidth: .infinity, alignment: .trailing)
+            }
             Picker("匹配方式", selection: $mode) { Text("满足全部条件").tag(RuleMatchMode.all); Text("满足任一条件").tag(RuleMatchMode.any) }.pickerStyle(.segmented)
             ForEach($conditions) { $condition in
-                HStack {
-                    Picker("字段", selection: $condition.field) { ForEach(SmartRuleField.allCases, id: \.self) { Text(ruleFieldName($0)).tag($0) } }.labelsHidden()
-                    Picker("条件", selection: $condition.operation) { ForEach(SmartRuleOperator.allCases, id: \.self) { Text(ruleOperatorName($0)).tag($0) } }.labelsHidden()
-                    TextField("值", text: $condition.value)
-                    Button { conditions.removeAll { $0.id == condition.id } } label: { Image(systemName: "minus.circle") }.buttonStyle(.plain)
+                SmartConditionRow(condition: $condition, sourceOptions: sourceOptions) {
+                    conditions.removeAll { $0.id == condition.id }
                 }
             }
             if conditions.count < 10 { Button("添加条件") { conditions.append(SmartCondition(field: .body, operation: .contains, value: "")) } }
@@ -223,29 +341,169 @@ struct SmartCollectionEditor: View {
                 }
             }
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
-            HStack { Spacer(); Button("取消") { dismiss() }; Button("创建") { save() }.keyboardShortcut(.defaultAction) }
-        }.padding(24).frame(minWidth: 620)
+            HStack { Spacer(); Button("取消") { dismiss() }; Button(existing.name.isEmpty ? "创建" : "保存") { save() }.keyboardShortcut(.defaultAction) }
+        }
+        .padding(24)
+        .frame(minWidth: 680)
+        .task { candidates = await state.smartRuleCandidates() }
     }
 
     private func save() {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { error = "请输入分组名称"; return }
+        if let message = state.collectionNameValidationMessage(trimmed, excluding: existing.name.isEmpty ? nil : existing.id) { error = message; return }
         let rules = SmartRuleSet(mode: mode, conditions: conditions)
         do { try SmartRuleEngine().validate(rules) }
         catch { self.error = error.localizedDescription; return }
         var collection = existing
         collection.name = trimmed; collection.kind = .smart; collection.ruleSet = rules
-        Task { await state.saveCollection(collection); dismiss() }
+        Task {
+            if await state.saveCollection(collection) { dismiss() }
+            else { error = state.statusMessage }
+        }
     }
 
     private var previewResult: (items: [Clip], count: Int) {
-        (try? SmartRuleEngine().preview(state.clips, ruleSet: SmartRuleSet(mode: mode, conditions: conditions))) ?? ([], 0)
+        (try? SmartRuleEngine().preview(candidates, ruleSet: SmartRuleSet(mode: mode, conditions: conditions))) ?? ([], 0)
     }
 
-    private func ruleFieldName(_ field: SmartRuleField) -> String {
-        switch field { case .sourceApp: "来源"; case .sourceConfidence: "来源可信度"; case .createdAt: "时间"; case .kind: "类型"; case .title: "标题"; case .body: "正文"; case .note: "备注"; case .byteSize: "大小"; case .priority: "优先级"; case .favorite: "收藏"; case .copyCount: "使用次数" }
+    private var sourceOptions: [String] {
+        var values = Set(candidates.map(\.source.appName).filter { !$0.isEmpty })
+        for condition in conditions where condition.field == .sourceApp && !condition.value.isEmpty { values.insert(condition.value) }
+        return values.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
-    private func ruleOperatorName(_ operation: SmartRuleOperator) -> String {
-        switch operation { case .contains: "包含"; case .equals: "等于"; case .matchesRegex: "匹配正则"; case .before: "早于／距今超过天数"; case .after: "晚于／距今以内天数"; case .greaterThan: "大于"; case .lessThan: "小于" }
+
+    private static func normalized(_ condition: SmartCondition) -> SmartCondition {
+        guard !condition.field.supportedOperators.contains(condition.operation) else { return condition }
+        var value = condition
+        value.operation = condition.field.supportedOperators[0]
+        value.value = condition.field.defaultValue
+        return value
+    }
+}
+
+private struct SmartConditionRow: View {
+    @Binding var condition: SmartCondition
+    let sourceOptions: [String]
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Picker("字段", selection: $condition.field) {
+                ForEach(SmartRuleField.allCases, id: \.self) { Text($0.displayName).tag($0) }
+            }
+            .labelsHidden()
+            .frame(width: 112)
+            .onChange(of: condition.field) { _, field in
+                condition.operation = field.supportedOperators[0]
+                condition.value = field == .sourceApp ? (sourceOptions.first ?? "") : field.defaultValue
+            }
+
+            Picker("条件", selection: $condition.operation) {
+                ForEach(condition.field.supportedOperators, id: \.self) { operation in
+                    Text(operation.displayName(for: condition.field)).tag(operation)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 112)
+
+            valueEditor.frame(maxWidth: .infinity, alignment: .leading)
+
+            Button(action: onRemove) { Image(systemName: "minus.circle") }
+                .buttonStyle(.plain)
+                .help("删除条件")
+        }
+        .padding(.vertical, 2)
+    }
+
+    @ViewBuilder
+    private var valueEditor: some View {
+        switch condition.field {
+        case .title, .body, .note:
+            TextField(condition.operation == .matchesRegex ? "输入正则表达式" : "输入匹配文字", text: limitedValue(maxLength: 512))
+                .textFieldStyle(.roundedBorder)
+        case .sourceApp:
+            Picker("来源 App", selection: $condition.value) {
+                if sourceOptions.isEmpty { Text("没有可选来源").tag("") }
+                ForEach(sourceOptions, id: \.self) { Text(String($0.prefix(50))).tag($0) }
+            }
+            .labelsHidden()
+        case .sourceConfidence:
+            Picker("来源可信度", selection: $condition.value) {
+                Text("高").tag(SourceConfidence.high.rawValue)
+                Text("低").tag(SourceConfidence.low.rawValue)
+                Text("未知").tag(SourceConfidence.unknown.rawValue)
+            }
+            .labelsHidden()
+        case .kind:
+            Picker("内容类型", selection: $condition.value) {
+                ForEach(ClipKind.allCases, id: \.self) { Text($0.displayName).tag($0.rawValue) }
+            }
+            .labelsHidden()
+        case .favorite:
+            Picker("收藏状态", selection: $condition.value) {
+                Text("已收藏").tag("true")
+                Text("未收藏").tag("false")
+            }
+            .labelsHidden()
+        case .priority:
+            Picker("优先级", selection: $condition.value) {
+                Text("无").tag("0")
+                Text("P1").tag("1")
+                Text("P2").tag("2")
+                Text("P3").tag("3")
+            }
+            .labelsHidden()
+        case .createdAt:
+            HStack(spacing: 6) {
+                TextField("天数", text: limitedValue(maxLength: 6)).textFieldStyle(.roundedBorder).frame(width: 90)
+                Text("天").foregroundStyle(.secondary)
+            }
+        case .byteSize:
+            HStack(spacing: 6) {
+                TextField("字节数", text: limitedValue(maxLength: 14)).textFieldStyle(.roundedBorder).frame(width: 120)
+                Text("字节").foregroundStyle(.secondary)
+            }
+        case .copyCount:
+            HStack(spacing: 6) {
+                TextField("次数", text: limitedValue(maxLength: 9)).textFieldStyle(.roundedBorder).frame(width: 100)
+                Text("次").foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func limitedValue(maxLength: Int) -> Binding<String> {
+        Binding(get: { condition.value }, set: { condition.value = String($0.prefix(maxLength)) })
+    }
+}
+
+private extension SmartRuleField {
+    var displayName: String {
+        switch self {
+        case .sourceApp: "来源"
+        case .sourceConfidence: "来源可信度"
+        case .createdAt: "时间"
+        case .kind: "类型"
+        case .title: "标题"
+        case .body: "正文"
+        case .note: "备注"
+        case .byteSize: "大小"
+        case .priority: "优先级"
+        case .favorite: "收藏"
+        case .copyCount: "使用次数"
+        }
+    }
+}
+
+private extension SmartRuleOperator {
+    func displayName(for field: SmartRuleField) -> String {
+        switch self {
+        case .contains: "包含"
+        case .equals: [.sourceApp, .sourceConfidence, .kind, .priority, .favorite].contains(field) ? "是" : "等于"
+        case .matchesRegex: "匹配正则"
+        case .before: "距今超过"
+        case .after: "距今以内"
+        case .greaterThan: "大于"
+        case .lessThan: "小于"
+        }
     }
 }
