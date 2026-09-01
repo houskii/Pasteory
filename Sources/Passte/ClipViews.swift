@@ -40,7 +40,9 @@ struct ClipRowView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             Spacer(minLength: 4)
-            ZStack(alignment: .bottomTrailing) {
+            VStack(alignment: .trailing, spacing: 0) {
+                ClipKindLabel(kind: clip.primaryKind)
+                Spacer(minLength: 0)
                 if let shortcutNumber {
                     Text("⌘ \(shortcutNumber)")
                         .font(.caption)
@@ -48,7 +50,7 @@ struct ClipRowView: View {
                         .fixedSize()
                 }
             }
-            .frame(width: compact ? 34 : 38, height: 56, alignment: .bottomTrailing)
+            .frame(width: compact ? 54 : 58, height: 56, alignment: .trailing)
             .padding(.trailing, 4)
             .padding(.bottom, 4)
         }
@@ -165,19 +167,15 @@ private struct ClipLeadingVisual: View {
     @State private var appIcon: NSImage?
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            Group {
-                if let appIcon {
-                    Image(nsImage: appIcon).resizable().scaledToFit().padding(3)
-                } else {
-                    RoundedRectangle(cornerRadius: 9).fill(Color.accentColor.opacity(0.12))
-                    Image(systemName: clip.primaryKind.symbolName).foregroundStyle(Color.accentColor)
-                }
+        ZStack {
+            if let appIcon {
+                Image(nsImage: appIcon).resizable().scaledToFit().padding(3)
+            } else {
+                RoundedRectangle(cornerRadius: 9).fill(Color.accentColor.opacity(0.12))
+                Image(systemName: clip.primaryKind.symbolName).foregroundStyle(Color.accentColor)
             }
-            .clipShape(RoundedRectangle(cornerRadius: 9))
-            Image(systemName: clip.primaryKind.symbolName).font(.system(size: 8, weight: .bold)).foregroundStyle(.white)
-                .frame(width: 15, height: 15).background(Color.purple, in: Circle())
         }
+        .clipShape(RoundedRectangle(cornerRadius: 9))
         .task(id: clip.source.bundleIdentifier) { loadAppIcon() }
     }
 
@@ -186,6 +184,34 @@ private struct ClipLeadingVisual: View {
         if let bundle = clip.source.bundleIdentifier,
            let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundle) {
             appIcon = NSWorkspace.shared.icon(forFile: url.path)
+        }
+    }
+}
+
+private struct ClipKindLabel: View {
+    let kind: ClipKind
+
+    var body: some View {
+        Text(kind.displayName)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(markerColor)
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(markerColor.opacity(0.10), in: Capsule())
+            .accessibilityLabel("内容类型：\(kind.displayName)")
+    }
+
+    private var markerColor: Color {
+        switch kind {
+        case .text: Color(red: 0.39, green: 0.40, blue: 0.95)
+        case .image: Color(red: 0.86, green: 0.15, blue: 0.47)
+        case .link: Color(red: 0.10, green: 0.45, blue: 0.86)
+        case .color: Color(red: 0.85, green: 0.40, blue: 0.08)
+        case .code: Color(red: 0.49, green: 0.23, blue: 0.93)
+        case .file: Color(red: 0.06, green: 0.62, blue: 0.56)
+        case .mixed: Color(red: 0.42, green: 0.40, blue: 0.45)
         }
     }
 }

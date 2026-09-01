@@ -1,0 +1,144 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1050" viewBox="0 0 1440 1050">
+  <defs>
+    <style>
+      .bg { fill: #f5f3f6; }
+      .panel { fill: #ebe8ec; stroke: #d7d2da; stroke-width: 1.5; }
+      .card { fill: #ffffff; stroke: #ded9e2; stroke-width: 1.5; }
+      .selected { fill: #ffffff; stroke: #1683ff; stroke-width: 3; }
+      .heading { font: 700 28px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; fill: #211d24; }
+      .subheading { font: 650 20px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; fill: #302b33; }
+      .body { font: 500 16px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; fill: #27232a; }
+      .meta { font: 400 12px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; fill: #8a8490; }
+      .label { font: 650 11px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; }
+      .annotation { font: 400 14px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; fill: #66606a; }
+      .verdict { font: 600 15px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; fill: #4c1d95; }
+      .appIcon { fill: #f8f7f9; stroke: #d7d2da; stroke-width: 1; }
+      .divider { stroke: #ddd8e0; stroke-width: 1; }
+    </style>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#201925" flood-opacity="0.10"/>
+    </filter>
+  </defs>
+
+  <rect class="bg" width="1440" height="1050" rx="28"/>
+  <text class="heading" x="54" y="58">Passte · 内容类型标识方案对比</text>
+  <text class="annotation" x="54" y="88">两侧使用同一组 Item。来源 App、正文、时间与复制次数完全相同，只改变类型标识的位置与表达方式。</text>
+
+  <text class="subheading" x="72" y="138">方案 1 · App Icon 右下角彩色类型角标</text>
+  <text class="annotation" x="72" y="165">不占正文宽度；通过角标颜色区分文字、图片和文件。</text>
+  <text class="subheading" x="752" y="138">方案 2 · Item 右上角浅色文字标签</text>
+  <text class="annotation" x="752" y="165">App Icon 保持完整；类型使用文字和颜色双重表达。</text>
+
+  <!-- Left panel -->
+  <g transform="translate(54 190)">
+    <rect class="panel" width="640" height="560" rx="24"/>
+
+    <g transform="translate(22 24)" filter="url(#shadow)">
+      <rect class="selected" width="596" height="148" rx="18"/>
+      <g transform="translate(20 48)">
+        <rect class="appIcon" width="54" height="54" rx="13"/>
+        <circle cx="27" cy="27" r="17" fill="#151118"/>
+        <text x="18" y="33" font-size="18" fill="#7cff6b">$</text>
+        <circle cx="50" cy="50" r="12" fill="#6366f1" stroke="#fff" stroke-width="2"/>
+        <path d="M44 47h12M44 51h9M44 55h7" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>
+      </g>
+      <text class="body" x="94" y="50">这是一条文字内容，类型角标不占正文区域</text>
+      <text class="body" x="94" y="75">但需要先识别小图形，再理解它代表文字</text>
+      <text class="meta" x="94" y="112">Terminal　09-01 15:20　复制 18 次</text>
+    </g>
+
+    <g transform="translate(22 190)" filter="url(#shadow)">
+      <rect class="card" width="596" height="148" rx="18"/>
+      <g transform="translate(20 48)">
+        <rect class="appIcon" width="54" height="54" rx="13"/>
+        <circle cx="27" cy="27" r="18" fill="#ece7f8"/>
+        <path d="M15 37l10-13 7 8 7-10 4 15z" fill="#7c3aed"/>
+        <circle cx="38" cy="18" r="4" fill="#fbbf24"/>
+        <circle cx="50" cy="50" r="12" fill="#ec4899" stroke="#fff" stroke-width="2"/>
+        <path d="M43 55l5-7 4 4 3-5 3 8z" fill="#fff"/>
+      </g>
+      <rect x="94" y="28" width="74" height="66" rx="8" fill="#d8c8f7"/>
+      <circle cx="146" cy="47" r="7" fill="#fff1a8"/>
+      <path d="M99 88l19-24 13 14 15-19 17 29z" fill="#7c3aed"/>
+      <text class="body" x="184" y="58">产品页面截图</text>
+      <text class="meta" x="94" y="118">预览　09-01 15:18　复制 3 次</text>
+    </g>
+
+    <g transform="translate(22 356)" filter="url(#shadow)">
+      <rect class="card" width="596" height="148" rx="18"/>
+      <g transform="translate(20 48)">
+        <rect class="appIcon" width="54" height="54" rx="13"/>
+        <path d="M15 13h20l8 8v26H15z" fill="#e7edf1"/>
+        <path d="M35 13v9h8" fill="#c4d1d9"/>
+        <circle cx="50" cy="50" r="12" fill="#14b8a6" stroke="#fff" stroke-width="2"/>
+        <path d="M44 43h8l4 4v10H44zM52 43v4h4" fill="none" stroke="#fff" stroke-width="1.4"/>
+      </g>
+      <text class="body" x="94" y="57">Passte-交互设计-v4.pdf</text>
+      <text class="meta" x="94" y="90">Finder　09-01 15:12　复制 2 次</text>
+    </g>
+  </g>
+
+  <!-- Right panel -->
+  <g transform="translate(734 190)">
+    <rect class="panel" width="652" height="560" rx="24"/>
+
+    <g transform="translate(22 24)" filter="url(#shadow)">
+      <rect class="selected" width="608" height="148" rx="18"/>
+      <g transform="translate(20 48)">
+        <rect class="appIcon" width="54" height="54" rx="13"/>
+        <circle cx="27" cy="27" r="17" fill="#151118"/>
+        <text x="18" y="33" font-size="18" fill="#7cff6b">$</text>
+      </g>
+      <g transform="translate(541 18)">
+        <rect width="48" height="22" rx="11" fill="#eef2ff"/>
+        <text class="label" x="13" y="15" fill="#6366f1">文字</text>
+      </g>
+      <text class="body" x="94" y="52">这是一条文字内容，类型可直接读出</text>
+      <text class="body" x="94" y="77">右上角预留固定标签区，不与正文重叠</text>
+      <text class="meta" x="94" y="112">Terminal　09-01 15:20　复制 18 次</text>
+    </g>
+
+    <g transform="translate(22 190)" filter="url(#shadow)">
+      <rect class="card" width="608" height="148" rx="18"/>
+      <g transform="translate(20 48)">
+        <rect class="appIcon" width="54" height="54" rx="13"/>
+        <circle cx="27" cy="27" r="18" fill="#ece7f8"/>
+        <path d="M15 37l10-13 7 8 7-10 4 15z" fill="#7c3aed"/>
+        <circle cx="38" cy="18" r="4" fill="#fbbf24"/>
+      </g>
+      <g transform="translate(541 18)">
+        <rect width="48" height="22" rx="11" fill="#fdf2f8"/>
+        <text class="label" x="13" y="15" fill="#db2777">图片</text>
+      </g>
+      <rect x="94" y="28" width="74" height="66" rx="8" fill="#d8c8f7"/>
+      <circle cx="146" cy="47" r="7" fill="#fff1a8"/>
+      <path d="M99 88l19-24 13 14 15-19 17 29z" fill="#7c3aed"/>
+      <text class="body" x="184" y="58">产品页面截图</text>
+      <text class="meta" x="94" y="118">预览　09-01 15:18　复制 3 次</text>
+    </g>
+
+    <g transform="translate(22 356)" filter="url(#shadow)">
+      <rect class="card" width="608" height="148" rx="18"/>
+      <g transform="translate(20 48)">
+        <rect class="appIcon" width="54" height="54" rx="13"/>
+        <path d="M15 13h20l8 8v26H15z" fill="#e7edf1"/>
+        <path d="M35 13v9h8" fill="#c4d1d9"/>
+      </g>
+      <g transform="translate(541 18)">
+        <rect width="48" height="22" rx="11" fill="#ecfdf5"/>
+        <text class="label" x="13" y="15" fill="#0f9f8f">文件</text>
+      </g>
+      <text class="body" x="94" y="57">Passte-交互设计-v4.pdf</text>
+      <text class="meta" x="94" y="90">Finder　09-01 15:12　复制 2 次</text>
+    </g>
+  </g>
+
+  <line class="divider" x1="54" y1="790" x2="1386" y2="790"/>
+  <text class="subheading" x="54" y="836">对比结论</text>
+  <text class="annotation" x="54" y="873">方案 1：紧凑，但 16–18pt 角标既遮挡来源 App，又依赖用户记住图形和颜色；混合内容也很难表达。</text>
+  <text class="annotation" x="54" y="906">方案 2：文字 + 颜色双重编码，来源 App 图标保持完整；标签区固定宽度，超长内容在进入标签区前截断。</text>
+  <rect x="54" y="936" width="1332" height="72" rx="16" fill="#f2eafd" stroke="#d8b4fe" stroke-width="1.5"/>
+  <text class="verdict" x="78" y="966">推荐方案 2</text>
+  <text class="annotation" x="178" y="966">信息辨识更直接，也更符合 VoiceOver 和非颜色识别要求。标签只在快捷面板展示，资料库仍可使用类型筛选。</text>
+  <text class="annotation" x="78" y="991">实现约束：固定 48pt 标签区；文字最多 4 个汉字；使用浅色背景 + 较深文字，避免“浅色字放白底”导致对比度不足。</text>
+</svg>
