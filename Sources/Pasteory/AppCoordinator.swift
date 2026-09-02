@@ -71,6 +71,11 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
     }
 
     func start() {
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--debug-theme-pink") {
+            settings.themeColor = .pink
+        }
+#endif
         configureStatusItem()
 #if DEBUG
         if !ProcessInfo.processInfo.arguments.contains("--debug-disable-hotkey") {
@@ -326,7 +331,9 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
             let view = OnboardingView(settings: settings, onStart: { [weak self] in
                 self?.onboardingWindow?.close(); self?.onboardingWindow = nil; self?.quickPanel.show()
             }, onTestShortcut: { [weak self] in self?.quickPanel.show() })
-            let window = NSWindow(contentViewController: NSHostingController(rootView: view))
+            let hostingController = NSHostingController(rootView: view)
+            hostingController.sizingOptions = []
+            let window = NSWindow(contentViewController: hostingController)
             window.title = "欢迎使用 Pasteory"; window.styleMask = [.titled, .closable, .miniaturizable]
             window.setContentSize(NSSize(width: 780, height: 590)); window.center(); window.isReleasedWhenClosed = false
             onboardingWindow = window

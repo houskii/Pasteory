@@ -76,35 +76,38 @@ struct SettingsView: View {
     @State private var shortcutError: String?
 
     var body: some View {
-        HStack(spacing: 0) {
-            settingsSidebar
-                .frame(width: 224)
-            Rectangle()
-                .fill(Color(nsColor: .separatorColor).opacity(0.55))
-                .frame(width: 1)
-            VStack(spacing: 0) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(selectedDestination.title)
-                            .font(.system(size: 22, weight: .bold))
-                        Text(selectedDestination.subtitle)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                }
-                .padding(.horizontal, 22)
-                .padding(.vertical, 16)
-
+        GeometryReader { geometry in
+            HStack(spacing: 0) {
+                settingsSidebar
+                    .frame(width: 224, height: geometry.size.height, alignment: .top)
                 Rectangle()
                     .fill(Color(nsColor: .separatorColor).opacity(0.55))
-                    .frame(height: 1)
+                    .frame(width: 1, height: geometry.size.height)
+                VStack(spacing: 0) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(selectedDestination.title)
+                                .font(.system(size: 22, weight: .bold))
+                            Text(selectedDestination.subtitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 16)
 
-                destinationContent
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .clipped()
+                    Rectangle()
+                        .fill(Color(nsColor: .separatorColor).opacity(0.55))
+                        .frame(height: 1)
+
+                    destinationContent
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .clipped()
+                }
+                .frame(width: geometry.size.width - 225, height: geometry.size.height, alignment: .top)
+                .clipped()
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(width: 940, height: 660)
         .background(Color(nsColor: .windowBackgroundColor))
@@ -114,7 +117,6 @@ struct SettingsView: View {
         }
 #if DEBUG
         .onAppear {
-            if ProcessInfo.processInfo.arguments.contains("--debug-theme-pink") { settings.themeColor = .pink }
             if ProcessInfo.processInfo.arguments.contains("--debug-settings-privacy") { selectedDestination = .privacy }
             if ProcessInfo.processInfo.arguments.contains("--debug-settings-open") { selectedDestination = .openBehavior }
             if ProcessInfo.processInfo.arguments.contains("--debug-settings-links") { selectedDestination = .linkResolution }
