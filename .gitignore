@@ -8,3 +8,4 @@ xcuserdata/
 Pasteory.local/
 *.pasteorybackup
 *.dmg
+!release/beta/*.dmg
