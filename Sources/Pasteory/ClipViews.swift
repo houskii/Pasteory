@@ -15,6 +15,7 @@ enum ClipRowMetrics {
 }
 
 struct ClipRowView: View {
+    @Environment(\.pasteoryAccentColor) private var pasteoryAccentColor
     let clip: Clip
     let attachments: AttachmentStore?
     var compact = false
@@ -50,9 +51,9 @@ struct ClipRowView: View {
                     Text("复制 \(clip.copyCount) 次")
                         .fixedSize()
                         .layoutPriority(2)
-                    if clip.isPinned { Image(systemName: "pin.fill").foregroundStyle(Color.accentColor).help("已置顶") }
+                    if clip.isPinned { Image(systemName: "pin.fill").foregroundStyle(pasteoryAccentColor).help("已置顶") }
                     if clip.isFavorite { Image(systemName: "star.fill").foregroundStyle(.yellow) }
-                    if clip.priority > 0 { Text("P\(clip.priority)").font(.caption2.bold()).foregroundStyle(Color.accentColor) }
+                    if clip.priority > 0 { Text("P\(clip.priority)").font(.caption2.bold()).foregroundStyle(pasteoryAccentColor) }
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -170,7 +171,7 @@ struct ClipRowView: View {
                 .truncationMode(.tail)
                 .layoutPriority(1)
         }
-        .foregroundStyle(Color.accentColor)
+        .foregroundStyle(pasteoryAccentColor)
         .help(String(clip.displayTitle.prefix(500)))
     }
 
@@ -303,6 +304,7 @@ private struct ClipRowAccessibility: ViewModifier {
 }
 
 private struct ClipLeadingVisual: View {
+    @Environment(\.pasteoryAccentColor) private var pasteoryAccentColor
     let clip: Clip
     var showsTypeBadge = ClipTypeMarkerPreview.overlaysSourceIcon
 
@@ -315,8 +317,8 @@ private struct ClipLeadingVisual: View {
                 ) {
                     Image(nsImage: appIcon).resizable().scaledToFit().padding(3)
                 } else {
-                    RoundedRectangle(cornerRadius: 9).fill(Color.accentColor.opacity(0.12))
-                    Image(systemName: clip.primaryKind.symbolName).foregroundStyle(Color.accentColor)
+                    RoundedRectangle(cornerRadius: 9).fill(pasteoryAccentColor.opacity(0.12))
+                    Image(systemName: clip.primaryKind.symbolName).foregroundStyle(pasteoryAccentColor)
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 9))

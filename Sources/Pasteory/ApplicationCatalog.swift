@@ -343,6 +343,7 @@ private final class ApplicationDataCache {
 }
 
 struct ApplicationPickerSheet: View {
+    @Environment(\.pasteoryAccentColor) private var pasteoryAccentColor
     let title: String
     let selectedBundleIdentifiers: Set<String>
     var additionalApplications: [ApplicationReference] = []
@@ -374,7 +375,7 @@ struct ApplicationPickerSheet: View {
                         ApplicationIdentityView(application: application)
                         Spacer(minLength: 8)
                         if selectedBundleIdentifiers.contains(application.bundleIdentifier) {
-                            Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor)
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(pasteoryAccentColor)
                         }
                     }
                     .contentShape(Rectangle())

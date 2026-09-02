@@ -2,6 +2,7 @@ import PasteoryCore
 import SwiftUI
 
 struct LinkResolutionSettingsView: View {
+    @Environment(\.pasteoryAccentColor) private var pasteoryAccentColor
     @ObservedObject var state: AppState
     @ObservedObject var settings: AppSettings
     let onPrepareChrome: () -> Void
@@ -128,7 +129,7 @@ struct LinkResolutionSettingsView: View {
 
     private func metric(_ title: String, value: Int, symbol: String) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: symbol).foregroundStyle(Color.accentColor)
+            Image(systemName: symbol).foregroundStyle(pasteoryAccentColor)
             VStack(alignment: .leading, spacing: 1) {
                 Text("\(value)").font(.headline.monospacedDigit())
                 Text(title).font(.caption2).foregroundStyle(.secondary)
@@ -233,7 +234,7 @@ struct LinkResolutionSettingsView: View {
                 ForEach(LinkAuthenticationSite.allCases) { site in
                     HStack(alignment: .center, spacing: 12) {
                         Image(systemName: "person.crop.circle.badge.key")
-                            .foregroundStyle(Color.accentColor)
+                            .foregroundStyle(pasteoryAccentColor)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(site.title).font(.headline)
                             Text(site.domainDescription).font(.caption.monospaced()).foregroundStyle(.secondary)
@@ -365,6 +366,7 @@ private struct ManualLinkEditorSheet: View {
 }
 
 private struct LinkFailureGroupRow: View {
+    @Environment(\.pasteoryAccentColor) private var pasteoryAccentColor
     let group: LinkFailureGroup
     let isRetrying: Bool
     let onRetry: () -> Void
@@ -394,7 +396,7 @@ private struct LinkFailureGroupRow: View {
                     .font(.caption2)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 2)
-                    .background(Color.accentColor.opacity(0.1), in: Capsule())
+                    .background(pasteoryAccentColor.opacity(0.1), in: Capsule())
                 Spacer()
                 Button(isRetrying ? "解析中…" : "重新解析", action: onRetry).disabled(isRetrying)
                 if let onAuthenticate {
@@ -410,13 +412,14 @@ private struct LinkFailureGroupRow: View {
     private var statusColor: Color {
         switch group.latestRequestState {
         case .needsAuthentication, .verificationRequired, .forbidden: .orange
-        case .genericTitle, .missingTitle: Color.accentColor
+        case .genericTitle, .missingTitle: pasteoryAccentColor
         default: .red
         }
     }
 }
 
 private struct ResolvedLinkRow: View {
+    @Environment(\.pasteoryAccentColor) private var pasteoryAccentColor
     let summary: ResolvedLinkSummary
     let isRetrying: Bool
     let onRetry: () -> Void
@@ -445,7 +448,7 @@ private struct ResolvedLinkRow: View {
                     .font(.caption2.weight(.medium))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(Color.accentColor.opacity(0.1), in: Capsule())
+                    .background(pasteoryAccentColor.opacity(0.1), in: Capsule())
                 Text("\(summary.clipCount) 条记录 · 复制 \(summary.copyCount) 次 · 解析 \(resource.attemptCount) 次")
                     .font(.caption)
                     .foregroundStyle(.secondary)

@@ -10,6 +10,9 @@ struct LibraryView: View {
     @State private var editingNormalCollection: ClipCollection?
     @State private var editingSmartCollection: ClipCollection?
 
+    private var accentColor: Color { state.settings.themeColor.accentColor }
+    private var brandGradient: LinearGradient { state.settings.themeColor.gradient }
+
     var body: some View {
         GeometryReader { geometry in
             HStack(spacing: 0) {
@@ -23,7 +26,7 @@ struct LibraryView: View {
             }
             .background {
                 LinearGradient(
-                    colors: [LibraryTheme.canvasTop, LibraryTheme.canvasBottom],
+                    colors: [LibraryTheme.canvasTop, accentColor.opacity(0.055)],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
@@ -31,7 +34,7 @@ struct LibraryView: View {
             }
         }
         .frame(minWidth: 900, maxWidth: .infinity, minHeight: 600, maxHeight: .infinity)
-        .tint(state.settings.themeColor.accentColor)
+        .pasteoryTheme(state.settings.themeColor)
         .sheet(isPresented: $showNewNormalCollection) { CollectionNameEditor(state: state, existing: nil) }
         .sheet(item: $editingNormalCollection) { CollectionNameEditor(state: state, existing: $0) }
         .sheet(item: $editingSmartCollection) { SmartCollectionEditor(state: state, existing: $0) }
@@ -48,7 +51,7 @@ struct LibraryView: View {
             HStack(spacing: 10) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(LibraryTheme.brandGradient)
+                        .fill(brandGradient)
                     Image(nsImage: PasteoryBrand.menuBarImage())
                         .renderingMode(.template)
                         .foregroundStyle(.white)
@@ -132,7 +135,7 @@ struct LibraryView: View {
             .padding(.horizontal, 10)
             .frame(height: 34)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(selected ? AnyShapeStyle(LibraryTheme.brandGradient) : AnyShapeStyle(Color.clear), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .background(selected ? AnyShapeStyle(brandGradient) : AnyShapeStyle(Color.clear), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -163,7 +166,7 @@ struct LibraryView: View {
             .padding(.horizontal, 10)
             .frame(height: 34)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(selected ? AnyShapeStyle(LibraryTheme.brandGradient) : AnyShapeStyle(Color.clear), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .background(selected ? AnyShapeStyle(brandGradient) : AnyShapeStyle(Color.clear), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -195,7 +198,7 @@ struct LibraryView: View {
                 Spacer()
             }
             .font(.system(size: 12.5, weight: .medium))
-            .foregroundStyle(LibraryTheme.accent)
+            .foregroundStyle(accentColor)
             .padding(.horizontal, 10)
             .frame(height: 32)
             .contentShape(Rectangle())
@@ -308,9 +311,9 @@ struct LibraryView: View {
                     Spacer()
                     Image(systemName: clip.primaryKind.symbolName)
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(LibraryTheme.accent)
+                        .foregroundStyle(accentColor)
                         .frame(width: 30, height: 30)
-                        .background(LibraryTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+                        .background(accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 14)
@@ -401,7 +404,7 @@ struct LibraryView: View {
                                     } label: {
                                         HStack(spacing: 8) {
                                             Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                                                .foregroundStyle(selected ? LibraryTheme.accent : Color.secondary)
+                                                .foregroundStyle(selected ? accentColor : Color.secondary)
                                             Text(collection.name).lineLimit(1)
                                             Spacer()
                                         }
@@ -461,10 +464,10 @@ struct LibraryView: View {
                 Text(title)
             }
             .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(active ? LibraryTheme.accent : Color.secondary)
+            .foregroundStyle(active ? accentColor : Color.secondary)
             .frame(maxWidth: .infinity)
             .frame(height: 32)
-            .background(active ? LibraryTheme.accent.opacity(0.13) : LibraryTheme.inputBackground, in: RoundedRectangle(cornerRadius: 8))
+            .background(active ? accentColor.opacity(0.13) : LibraryTheme.inputBackground, in: RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
     }
@@ -533,6 +536,7 @@ struct LibraryView: View {
 }
 
 private struct LibraryClipCard: View {
+    @Environment(\.pasteoryAccentColor) private var pasteoryAccentColor
     let clip: Clip
     let attachments: AttachmentStore
     let selected: Bool
@@ -542,12 +546,12 @@ private struct LibraryClipCard: View {
             .padding(.horizontal, 12)
             .frame(height: ClipRowMetrics.height(for: clip, compact: false))
             .background(
-                clip.isPinned ? LibraryTheme.pinnedBackground : LibraryTheme.cardBackground,
+                clip.isPinned ? pasteoryAccentColor.opacity(0.10) : LibraryTheme.cardBackground,
                 in: RoundedRectangle(cornerRadius: 14, style: .continuous)
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(selected ? LibraryTheme.accent : LibraryTheme.divider, lineWidth: selected ? 2 : 1)
+                    .stroke(selected ? pasteoryAccentColor : LibraryTheme.divider, lineWidth: selected ? 2 : 1)
             }
             .shadow(color: .black.opacity(selected ? 0.09 : 0.04), radius: selected ? 8 : 4, y: 2)
             .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -568,15 +572,16 @@ private struct LibrarySectionLabel: View {
 }
 
 private struct LibraryEmptyState: View {
+    @Environment(\.pasteoryAccentColor) private var pasteoryAccentColor
     let query: String
 
     var body: some View {
         VStack(spacing: 10) {
             Image(systemName: query.isEmpty ? "tray" : "magnifyingglass")
                 .font(.system(size: 28, weight: .light))
-                .foregroundStyle(LibraryTheme.accent)
+                .foregroundStyle(pasteoryAccentColor)
                 .frame(width: 58, height: 58)
-                .background(LibraryTheme.accent.opacity(0.11), in: RoundedRectangle(cornerRadius: 18))
+                .background(pasteoryAccentColor.opacity(0.11), in: RoundedRectangle(cornerRadius: 18))
             Text(query.isEmpty ? "这里还没有内容" : "没有找到匹配内容")
                 .font(.system(size: 16, weight: .semibold))
             Text(query.isEmpty ? "复制新的内容后，它会自动出现在资料库。" : "可以换个关键词，或选择其他资料范围。")
@@ -617,17 +622,9 @@ private struct LibraryDivider: View {
 }
 
 private enum LibraryTheme {
-    static let accent = Color.accentColor
-    static let brandGradient = LinearGradient(
-        colors: [accent, accent.opacity(0.72)],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
     static let canvasTop = Color(nsColor: .windowBackgroundColor)
-    static let canvasBottom = Color.accentColor.opacity(0.055)
     static let cardBackground = Color(nsColor: .controlBackgroundColor).opacity(0.90)
     static let inputBackground = Color(nsColor: .textBackgroundColor).opacity(0.82)
-    static let pinnedBackground = Color.accentColor.opacity(0.10)
     static let divider = Color(nsColor: .separatorColor).opacity(0.55)
 }
 

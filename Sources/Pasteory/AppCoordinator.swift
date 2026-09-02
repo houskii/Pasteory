@@ -378,7 +378,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
             )
             let window = NSWindow(contentViewController: NSHostingController(rootView: view))
             window.title = "Pasteory 设置"; window.styleMask = [.titled, .closable]
-            window.setContentSize(NSSize(width: 720, height: 560)); window.center(); window.isReleasedWhenClosed = false
+            window.setContentSize(NSSize(width: 940, height: 660)); window.center(); window.isReleasedWhenClosed = false
             settingsWindow = window
         }
         activateAndShow(settingsWindow)

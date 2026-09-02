@@ -42,7 +42,7 @@ struct QuickPanelView: View {
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(.quaternary, lineWidth: 1))
         .frame(minWidth: 340, idealWidth: 380, maxWidth: 520, minHeight: 480, idealHeight: 660, maxHeight: 760)
-        .tint(state.settings.themeColor.accentColor)
+        .pasteoryTheme(state.settings.themeColor)
         .onAppear {
             searchFocused = false
             state.quickSearchFocused = false
@@ -87,7 +87,7 @@ struct QuickPanelView: View {
         HStack(spacing: 10) {
             Button { state.quickPanelPinned.toggle() } label: {
                 Image(systemName: state.quickPanelPinned ? "pin.fill" : "pin")
-                    .foregroundStyle(state.quickPanelPinned ? Color.accentColor : Color.secondary)
+                    .foregroundStyle(state.quickPanelPinned ? state.settings.themeColor.accentColor : Color.secondary)
             }
             .buttonStyle(.plain).help(state.quickPanelPinned ? "取消固定" : "固定面板")
 
@@ -124,8 +124,8 @@ struct QuickPanelView: View {
                                 Text(tab.title)
                                     .font(.system(size: 13, weight: state.quickScope == tab.scope ? .semibold : .regular))
                                     .padding(.horizontal, 11).padding(.vertical, 7)
-                                    .foregroundStyle(state.quickScope == tab.scope ? Color.accentColor : Color.primary)
-                                    .background(state.quickScope == tab.scope ? Color.accentColor.opacity(0.16) : Color.clear, in: RoundedRectangle(cornerRadius: 9))
+                                    .foregroundStyle(state.quickScope == tab.scope ? state.settings.themeColor.accentColor : Color.primary)
+                                    .background(state.quickScope == tab.scope ? state.settings.themeColor.accentColor.opacity(0.16) : Color.clear, in: RoundedRectangle(cornerRadius: 9))
                             }
                             .buttonStyle(.plain)
                             .id(tab.scope)
@@ -311,7 +311,7 @@ struct QuickCommandHelpView: View {
         HStack(spacing: 5) {
             Text(shortcut)
                 .font(.system(size: 10.5, weight: .semibold, design: .rounded))
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(settings.themeColor.accentColor)
                 .frame(minWidth: 42, alignment: .trailing)
             Text(title)
                 .font(.system(size: 10.5))
@@ -361,10 +361,10 @@ private struct QuickClipCard: View {
             .frame(height: ClipRowMetrics.height(for: clip, compact: true))
             .clipped()
             .background(
-                clip.isPinned ? Color.accentColor.opacity(0.10) : Color(nsColor: .controlBackgroundColor).opacity(0.82),
+                clip.isPinned ? state.settings.themeColor.accentColor.opacity(0.10) : Color(nsColor: .controlBackgroundColor).opacity(0.82),
                 in: RoundedRectangle(cornerRadius: 14)
             )
-            .overlay { RoundedRectangle(cornerRadius: 14).stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2) }
+            .overlay { RoundedRectangle(cornerRadius: 14).stroke(isSelected ? state.settings.themeColor.accentColor : Color.clear, lineWidth: 2) }
             .contentShape(RoundedRectangle(cornerRadius: 14))
             .onTapGesture { state.quickSelectionID = clip.id }
             .onHover { hovering in
@@ -503,7 +503,7 @@ private struct QuickCollectionPicker: View {
                             } label: {
                                 HStack {
                                     Image(systemName: selectedCollectionIDs.contains(collection.id) ? "checkmark.circle.fill" : "circle")
-                                        .foregroundStyle(selectedCollectionIDs.contains(collection.id) ? Color.accentColor : Color.secondary)
+                                        .foregroundStyle(selectedCollectionIDs.contains(collection.id) ? state.settings.themeColor.accentColor : Color.secondary)
                                     Text(collection.name).lineLimit(1)
                                     Spacer()
                                 }
@@ -582,7 +582,7 @@ private struct QuickMetadataEditor: View {
                     .overlay {
                         RoundedRectangle(cornerRadius: 7)
                             .stroke(
-                                focusedField == .note ? Color.accentColor : Color(nsColor: .quaternaryLabelColor),
+                                focusedField == .note ? state.settings.themeColor.accentColor : Color(nsColor: .quaternaryLabelColor),
                                 lineWidth: focusedField == .note ? 2 : 1
                             )
                     }

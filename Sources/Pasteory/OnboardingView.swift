@@ -33,12 +33,12 @@ struct OnboardingView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
-        .padding(36).frame(minWidth: 760, minHeight: 560).tint(settings.themeColor.accentColor)
+        .padding(36).frame(minWidth: 760, minHeight: 560).pasteoryTheme(settings.themeColor)
     }
 
     private func feature(_ title: String, _ detail: String, _ symbol: String) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Image(systemName: symbol).font(.title2).foregroundStyle(Color.accentColor)
+            Image(systemName: symbol).font(.title2).foregroundStyle(settings.themeColor.accentColor)
             Text(title).font(.headline)
             Text(detail).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }.padding(16).frame(maxWidth: .infinity, minHeight: 140, alignment: .topLeading).background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 14))

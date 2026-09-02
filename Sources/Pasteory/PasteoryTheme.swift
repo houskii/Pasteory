@@ -1,5 +1,23 @@
 import SwiftUI
 
+private struct PasteoryAccentColorKey: EnvironmentKey {
+    static let defaultValue = PasteoryThemeColor.blueViolet.accentColor
+}
+
+extension EnvironmentValues {
+    var pasteoryAccentColor: Color {
+        get { self[PasteoryAccentColorKey.self] }
+        set { self[PasteoryAccentColorKey.self] = newValue }
+    }
+}
+
+extension View {
+    func pasteoryTheme(_ theme: PasteoryThemeColor) -> some View {
+        environment(\.pasteoryAccentColor, theme.accentColor)
+            .tint(theme.accentColor)
+    }
+}
+
 extension PasteoryThemeColor {
     var accentColor: Color {
         switch self {

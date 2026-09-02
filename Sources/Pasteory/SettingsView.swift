@@ -5,55 +5,208 @@ import ServiceManagement
 import SwiftUI
 
 struct SettingsView: View {
+    private enum Destination: String, CaseIterable, Identifiable {
+        case general
+        case privacy
+        case shortcuts
+        case openBehavior
+        case linkResolution
+        case storage
+        case advanced
+        case about
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .general: "通用"
+            case .privacy: "采集与隐私"
+            case .shortcuts: "快捷键"
+            case .openBehavior: "打开方式"
+            case .linkResolution: "链接解析"
+            case .storage: "存储与清理"
+            case .advanced: "高级诊断"
+            case .about: "关于"
+            }
+        }
+
+        var subtitle: String {
+            switch self {
+            case .general: "外观、启动和应用状态"
+            case .privacy: "剪贴板检测、来源详情和排除应用"
+            case .shortcuts: "快捷面板和内容操作"
+            case .openBehavior: "浏览器、编辑器和文件规则"
+            case .linkResolution: "网页标题、登录连接和兜底规则"
+            case .storage: "归档、备份和恢复"
+            case .advanced: "权限、插件连接和搜索索引"
+            case .about: "版本和产品信息"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .general: "gearshape"
+            case .privacy: "hand.raised"
+            case .shortcuts: "command"
+            case .openBehavior: "arrow.up.forward.app"
+            case .linkResolution: "link"
+            case .storage: "externaldrive"
+            case .advanced: "stethoscope"
+            case .about: "info.circle"
+            }
+        }
+    }
+
+    private struct DestinationGroup: Identifiable {
+        let title: String
+        let destinations: [Destination]
+        var id: String { title }
+    }
+
     @ObservedObject var state: AppState
     @ObservedObject var settings: AppSettings
     let pasteCoordinator: PasteCoordinator
     let onShortcutChange: () -> Void
     let onExport: () -> Void
     let onImport: () -> Void
-    @State private var selectedTab = "general"
+    @State private var selectedDestination: Destination = .general
     @State private var knownApplications = [ApplicationReference]()
     @State private var showingExcludedApplicationPicker = false
     @State private var loginEnabled = SMAppService.mainApp.status == .enabled
     @State private var shortcutError: String?
 
     var body: some View {
-        Group {
-            if ProcessInfo.processInfo.arguments.contains("--debug-settings-shortcuts") {
-                shortcuts
-            } else {
-                settingsTabs
+        HStack(spacing: 0) {
+            settingsSidebar
+                .frame(width: 224)
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor).opacity(0.55))
+                .frame(width: 1)
+            VStack(spacing: 0) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(selectedDestination.title)
+                            .font(.system(size: 22, weight: .bold))
+                        Text(selectedDestination.subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 22)
+                .padding(.vertical, 16)
+
+                Rectangle()
+                    .fill(Color(nsColor: .separatorColor).opacity(0.55))
+                    .frame(height: 1)
+
+                destinationContent
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .clipped()
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 760, height: 560)
-        .padding(20)
+        .frame(width: 940, height: 660)
         .background(Color(nsColor: .windowBackgroundColor))
-        .tint(settings.themeColor.accentColor)
+        .pasteoryTheme(settings.themeColor)
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             settings.reloadSourceCapturePreferences()
         }
 #if DEBUG
         .onAppear {
-            if ProcessInfo.processInfo.arguments.contains("--debug-settings-privacy") { selectedTab = "privacy" }
-            if ProcessInfo.processInfo.arguments.contains("--debug-settings-open") { selectedTab = "open" }
-            if ProcessInfo.processInfo.arguments.contains("--debug-settings-links") { selectedTab = "links" }
-            if ProcessInfo.processInfo.arguments.contains("--debug-settings-advanced") { selectedTab = "advanced" }
-            if ProcessInfo.processInfo.arguments.contains("--debug-settings-about") { selectedTab = "about" }
+            if ProcessInfo.processInfo.arguments.contains("--debug-theme-pink") { settings.themeColor = .pink }
+            if ProcessInfo.processInfo.arguments.contains("--debug-settings-privacy") { selectedDestination = .privacy }
+            if ProcessInfo.processInfo.arguments.contains("--debug-settings-open") { selectedDestination = .openBehavior }
+            if ProcessInfo.processInfo.arguments.contains("--debug-settings-links") { selectedDestination = .linkResolution }
+            if ProcessInfo.processInfo.arguments.contains("--debug-settings-shortcuts") { selectedDestination = .shortcuts }
+            if ProcessInfo.processInfo.arguments.contains("--debug-settings-advanced") { selectedDestination = .advanced }
+            if ProcessInfo.processInfo.arguments.contains("--debug-settings-about") { selectedDestination = .about }
         }
 #endif
     }
 
-    private var settingsTabs: some View {
-        TabView(selection: $selectedTab) {
-            general.tabItem { Label("通用", systemImage: "gearshape") }.tag("general")
-            openBehavior.tabItem { Label("打开方式", systemImage: "arrow.up.forward.app") }.tag("open")
-            privacy.tabItem { Label("采集与隐私", systemImage: "hand.raised") }.tag("privacy")
-            linkResolution.tabItem { Label("链接解析", systemImage: "link") }.tag("links")
-            shortcuts.tabItem { Label("快捷键", systemImage: "command") }.tag("shortcuts")
-            storage.tabItem { Label("存储与清理", systemImage: "externaldrive") }.tag("storage")
-            advanced.tabItem { Label("高级诊断", systemImage: "stethoscope") }.tag("advanced")
-            about.tabItem { Label("关于", systemImage: "info.circle") }.tag("about")
+    private var settingsSidebar: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(settings.themeColor.gradient)
+                    Image(nsImage: PasteoryBrand.menuBarImage())
+                        .renderingMode(.template)
+                        .foregroundStyle(.white)
+                }
+                .frame(width: 34, height: 34)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Pasteory").font(.system(size: 15, weight: .semibold))
+                    Text("设置").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 14)
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 4) {
+                    ForEach(destinationGroups) { group in
+                        Text(group.title.uppercased())
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 10)
+                            .padding(.top, 10)
+                            .padding(.bottom, 3)
+                        ForEach(group.destinations) { destination in
+                            Button {
+                                selectedDestination = destination
+                            } label: {
+                                HStack(spacing: 9) {
+                                    Image(systemName: destination.symbol)
+                                        .frame(width: 18)
+                                    Text(destination.title)
+                                    Spacer()
+                                }
+                                .font(.system(size: 12.5, weight: selectedDestination == destination ? .semibold : .medium))
+                                .foregroundStyle(selectedDestination == destination ? settings.themeColor.accentColor : Color.primary)
+                                .padding(.horizontal, 10)
+                                .frame(height: 34)
+                                .background(
+                                    selectedDestination == destination ? settings.themeColor.accentColor.opacity(0.14) : Color.clear,
+                                    in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                )
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 14)
+            }
         }
+        .frame(maxHeight: .infinity)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.52))
+    }
+
+    @ViewBuilder
+    private var destinationContent: some View {
+        switch selectedDestination {
+        case .general: general
+        case .privacy: privacy
+        case .shortcuts: shortcuts
+        case .openBehavior: openBehavior
+        case .linkResolution: linkResolution
+        case .storage: storage
+        case .advanced: advanced
+        case .about: about
+        }
+    }
+
+    private var destinationGroups: [DestinationGroup] {
+        [
+            DestinationGroup(title: "基础设置", destinations: [.general, .privacy]),
+            DestinationGroup(title: "交互与内容", destinations: [.shortcuts, .openBehavior, .linkResolution]),
+            DestinationGroup(title: "数据与支持", destinations: [.storage, .advanced, .about])
+        ]
     }
 
     private var linkResolution: some View {
@@ -62,6 +215,7 @@ struct SettingsView: View {
             settings: settings,
             onPrepareChrome: prepareChromeExtension
         )
+        .padding(20)
     }
 
     private var openBehavior: some View {
@@ -449,7 +603,7 @@ struct SettingsView: View {
                     LabeledContent("最近连接", value: "尚未连接")
                 }
                 settingsActionRow {
-                    Button("前往链接解析设置") { selectedTab = "links" }
+                    Button("前往链接解析设置") { selectedDestination = .linkResolution }
                 }
                 Text("插件安装、浏览器连接和网站解析授权统一在“链接解析”中管理。这里仅保留连接诊断。")
                     .font(.caption)
