@@ -4,33 +4,88 @@ set -euo pipefail
 SCRIPT_DIR=${0:A:h}
 PROJECT_DIR=${SCRIPT_DIR:h}
 DIST_DIR="$PROJECT_DIR/dist"
-APP_DIR="$DIST_DIR/Passte.app"
+BUILD_VARIANT=${PASTEORY_BUILD_VARIANT:-production}
+case "$BUILD_VARIANT" in
+  production)
+    APP_FILE_NAME="Pasteory"
+    APP_DISPLAY_NAME="Pasteory"
+    APP_BUNDLE_IDENTIFIER="app.pasteory.Pasteory"
+    APP_SUPPORT_DIRECTORY="Pasteory"
+    NATIVE_MESSAGING_HOST="app.pasteory.web_context"
+    CHROME_INTEGRATION_ENABLED=true
+    BUILD_CONFIGURATION=${PASTEORY_BUILD_CONFIGURATION:-release}
+    ;;
+  qa)
+    APP_FILE_NAME="Pasteory-QA"
+    APP_DISPLAY_NAME="Pasteory QA"
+    APP_BUNDLE_IDENTIFIER="app.pasteory.Pasteory.qa"
+    APP_SUPPORT_DIRECTORY="Pasteory QA"
+    NATIVE_MESSAGING_HOST="app.pasteory.qa.web_context"
+    CHROME_INTEGRATION_ENABLED=false
+    BUILD_CONFIGURATION=${PASTEORY_BUILD_CONFIGURATION:-debug}
+    ;;
+  *)
+    echo "未知的 PASTEORY_BUILD_VARIANT：$BUILD_VARIANT（仅支持 production 或 qa）。" >&2
+    exit 1
+    ;;
+esac
+APP_DIR="$DIST_DIR/$APP_FILE_NAME.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
-LOCAL_SIGNING_DIR="$HOME/Library/Application Support/Passte/Signing"
-LOCAL_SIGNING_KEYCHAIN="$LOCAL_SIGNING_DIR/PassteBuild.keychain-db"
+LOCAL_SIGNING_DIR="$HOME/Library/Application Support/Pasteory/Signing"
+LOCAL_SIGNING_KEYCHAIN="$LOCAL_SIGNING_DIR/PasteoryBuild.keychain-db"
 LOCAL_SIGNING_PASSWORD_FILE="$LOCAL_SIGNING_DIR/keychain-password"
 CODESIGN_KEYCHAIN_ARGS=()
-if [[ -n ${PASSTE_SIGN_IDENTITY:-} ]]; then
-  SIGN_IDENTITY=$PASSTE_SIGN_IDENTITY
-elif [[ -f "$LOCAL_SIGNING_KEYCHAIN" && -f "$LOCAL_SIGNING_PASSWORD_FILE" ]]; then
+if [[ -n ${PASTEORY_SIGN_IDENTITY:-} ]]; then
+  [[ "$PASTEORY_SIGN_IDENTITY" != "-" ]] || {
+    echo "PASTEORY_SIGN_IDENTITY 不允许使用 ad-hoc 身份 '-'。" >&2
+    exit 1
+  }
+  SIGN_IDENTITY=$PASTEORY_SIGN_IDENTITY
+else
+  SIGN_IDENTITY=$($SCRIPT_DIR/ensure_local_signing_identity.sh)
+  [[ -f "$LOCAL_SIGNING_KEYCHAIN" && -f "$LOCAL_SIGNING_PASSWORD_FILE" ]] || {
+    echo "Pasteory 稳定签名身份初始化后文件仍不完整。" >&2
+    exit 1
+  }
   LOCAL_SIGNING_PASSWORD=$(<"$LOCAL_SIGNING_PASSWORD_FILE")
   security unlock-keychain -p "$LOCAL_SIGNING_PASSWORD" "$LOCAL_SIGNING_KEYCHAIN"
-  SIGN_IDENTITY=$(security find-identity -v -p codesigning "$LOCAL_SIGNING_KEYCHAIN" | awk '/Passte Local Build/{print $2; exit}')
-  [[ -n "$SIGN_IDENTITY" ]] || { echo "Passte Local Build 签名身份不可用" >&2; exit 1; }
   CODESIGN_KEYCHAIN_ARGS=(--keychain "$LOCAL_SIGNING_KEYCHAIN")
-else
-  SIGN_IDENTITY="-"
 fi
 
-arch -arm64 /usr/bin/swift build --package-path "$PROJECT_DIR" -c release --arch arm64
-BIN_DIR=$(arch -arm64 /usr/bin/swift build --package-path "$PROJECT_DIR" -c release --arch arm64 --show-bin-path)
+arch -arm64 /usr/bin/swift build --package-path "$PROJECT_DIR" -c "$BUILD_CONFIGURATION" --arch arm64
+BIN_DIR=$(arch -arm64 /usr/bin/swift build --package-path "$PROJECT_DIR" -c "$BUILD_CONFIGURATION" --arch arm64 --show-bin-path)
 
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
-ditto "$BIN_DIR/Passte" "$MACOS_DIR/Passte"
+ditto "$BIN_DIR/Pasteory" "$MACOS_DIR/Pasteory"
 ditto "$PROJECT_DIR/Config/Info.plist" "$CONTENTS_DIR/Info.plist"
+ditto "$PROJECT_DIR/ChromeExtension" "$RESOURCES_DIR/ChromeExtension"
+/usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $APP_DISPLAY_NAME" "$CONTENTS_DIR/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleName $APP_DISPLAY_NAME" "$CONTENTS_DIR/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $APP_BUNDLE_IDENTIFIER" "$CONTENTS_DIR/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :PasteoryBuildVariant $BUILD_VARIANT" "$CONTENTS_DIR/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :PasteoryApplicationSupportDirectory $APP_SUPPORT_DIRECTORY" "$CONTENTS_DIR/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :PasteoryNativeMessagingHostName $NATIVE_MESSAGING_HOST" "$CONTENTS_DIR/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :PasteoryChromeIntegrationEnabled $CHROME_INTEGRATION_ENABLED" "$CONTENTS_DIR/Info.plist"
+
+SOURCE_APP_ICONS_DIR="$RESOURCES_DIR/SourceAppIcons"
+mkdir -p "$SOURCE_APP_ICONS_DIR"
+SOURCE_APP_ICON_SPECS=(
+  "chrome.icns|/Applications/Google Chrome.app/Contents/Resources/app.icns"
+  "wechat.icns|/Applications/WeChat.app/Contents/Resources/AppIcon.icns"
+  "lark.icns|/Applications/Lark.app/Contents/Resources/app.icns"
+)
+for spec in "${SOURCE_APP_ICON_SPECS[@]}"; do
+  target_name=${spec%%|*}
+  source_path=${spec#*|}
+  if [[ -f "$source_path" ]]; then
+    ditto "$source_path" "$SOURCE_APP_ICONS_DIR/$target_name"
+  else
+    echo "未找到来源应用图标：$source_path" >&2
+  fi
+done
 
 ICON_WORK=$(mktemp -d)
 trap 'rm -rf "$ICON_WORK"' EXIT
@@ -43,5 +98,15 @@ for entry in "16 icon_16x16.png" "32 icon_16x16@2x.png" "32 icon_32x32.png" "64 
 done
 iconutil -c icns "$ICON_WORK/AppIcon.iconset" -o "$RESOURCES_DIR/AppIcon.icns"
 
+arch -arm64 /usr/bin/swift "$PROJECT_DIR/scripts/generate_menu_bar_icon.swift" \
+  "$RESOURCES_DIR/MenuBarIcon.png" \
+  "$RESOURCES_DIR/MenuBarIcon@2x.png"
+
+[[ -x "$MACOS_DIR/Pasteory" ]] || { echo "应用可执行文件在签名前丢失：$MACOS_DIR/Pasteory" >&2; exit 1; }
+[[ -f "$CONTENTS_DIR/Info.plist" ]] || { echo "Info.plist 在签名前丢失：$CONTENTS_DIR/Info.plist" >&2; exit 1; }
+[[ -d "$RESOURCES_DIR/ChromeExtension" ]] || { echo "Chrome 扩展资源在签名前丢失：$RESOURCES_DIR/ChromeExtension" >&2; exit 1; }
+plutil -lint "$CONTENTS_DIR/Info.plist" >/dev/null
+
 codesign --force --deep --sign "$SIGN_IDENTITY" "${CODESIGN_KEYCHAIN_ARGS[@]}" "$APP_DIR"
+"$SCRIPT_DIR/verify_signing.sh" "$APP_DIR" "$APP_BUNDLE_IDENTIFIER" >/dev/null
 echo "$APP_DIR"

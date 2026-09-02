@@ -2,36 +2,37 @@
 import PackageDescription
 
 let package = Package(
-    name: "Passte",
+    name: "Pasteory",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "Passte", targets: ["Passte"]),
-        .library(name: "PassteCore", targets: ["PassteCore"])
+        .executable(name: "Pasteory", targets: ["Pasteory"]),
+        .library(name: "PasteoryCore", targets: ["PasteoryCore"])
     ],
     targets: [
         .target(
-            name: "PassteCore",
+            name: "PasteoryCore",
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         .executableTarget(
-            name: "Passte",
-            dependencies: ["PassteCore"],
+            name: "Pasteory",
+            dependencies: ["PasteoryCore"],
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("Carbon"),
                 .linkedFramework("ApplicationServices"),
                 .linkedFramework("ServiceManagement"),
-                .linkedFramework("QuickLookUI")
+                .linkedFramework("QuickLookUI"),
+                .linkedFramework("WebKit")
             ]
         ),
         .executableTarget(
-            name: "PassteBenchmark",
-            dependencies: ["PassteCore"],
+            name: "PasteoryBenchmark",
+            dependencies: ["PasteoryCore"],
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         .testTarget(
-            name: "PassteCoreTests",
-            dependencies: ["PassteCore"]
+            name: "PasteoryCoreTests",
+            dependencies: ["PasteoryCore"]
         )
     ]
 )

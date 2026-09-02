@@ -18,7 +18,7 @@
     </style>
   </defs>
   <rect class="bg" width="1500" height="1040" rx="28"/>
-  <text class="heading" x="54" y="54">Passte 快捷面板 · Item 信息层级</text>
+  <text class="heading" x="54" y="54">Pasteory 快捷面板 · Item 信息层级</text>
   <text class="annotation" x="54" y="84">固定 72pt 行高。原复制内容始终保持相同字号和主色；标题、备注只增加信息，不替换正文视觉。</text>
 
   <text class="column" x="170" y="130">只有原内容</text>
@@ -88,7 +88,7 @@
     <rect class="icon" x="18" y="34" width="48" height="48" rx="12"/>
     <rect x="84" y="26" width="42" height="52" rx="6" fill="#e8e5ec"/>
     <path d="M112 26 L126 40 L112 40 Z" fill="#c5bfcb"/>
-    <text class="content" x="140" y="58">Passte-Design-v3.pdf</text>
+    <text class="content" x="140" y="58">Pasteory-Design-v3.pdf</text>
     <text class="meta" x="84" y="104">Finder　09-01 14:44　复制 1 次</text>
   </g>
   <g transform="translate(565 546)">
@@ -97,7 +97,7 @@
     <rect x="84" y="26" width="42" height="52" rx="6" fill="#e8e5ec"/>
     <path d="M112 26 L126 40 L112 40 Z" fill="#c5bfcb"/>
     <text class="title" x="140" y="42">设计交付稿</text>
-    <text class="content" x="140" y="67">Passte-Design-v3.pdf</text>
+    <text class="content" x="140" y="67">Pasteory-Design-v3.pdf</text>
     <text class="meta" x="84" y="104">Finder　09-01 14:44　复制 5 次</text>
   </g>
   <g transform="translate(1010 546)">
@@ -106,7 +106,7 @@
     <rect x="84" y="26" width="42" height="52" rx="6" fill="#e8e5ec"/>
     <path d="M112 26 L126 40 L112 40 Z" fill="#c5bfcb"/>
     <text class="title" x="140" y="36">设计交付稿</text>
-    <text class="content" x="140" y="60">Passte-Design-v3.pdf</text>
+    <text class="content" x="140" y="60">Pasteory-Design-v3.pdf</text>
     <text class="note" x="140" y="82">▤ 发给团队前复核</text>
     <text class="meta" x="84" y="106">Finder　09-01 14:44　复制 28 次　📌</text>
   </g>

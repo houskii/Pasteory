@@ -5,23 +5,31 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>zh_CN</string>
     <key>CFBundleDisplayName</key>
-    <string>Passte</string>
+    <string>Pasteory</string>
     <key>CFBundleExecutable</key>
-    <string>Passte</string>
+    <string>Pasteory</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
-    <string>app.passte.Passte</string>
+    <string>app.pasteory.Pasteory</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>Passte</string>
+    <string>Pasteory</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.1</string>
+    <string>0.1.13</string>
     <key>CFBundleVersion</key>
-    <string>2</string>
+    <string>17</string>
+    <key>PasteoryBuildVariant</key>
+    <string>production</string>
+    <key>PasteoryApplicationSupportDirectory</key>
+    <string>Pasteory</string>
+    <key>PasteoryNativeMessagingHostName</key>
+    <string>app.pasteory.web_context</string>
+    <key>PasteoryChromeIntegrationEnabled</key>
+    <true/>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>LSUIElement</key>
@@ -31,6 +39,6 @@
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
     <key>NSHumanReadableCopyright</key>
-    <string>Copyright © 2026 Passte</string>
+    <string>Copyright © 2026 Pasteory</string>
 </dict>
 </plist>

@@ -21,7 +21,7 @@
   </defs>
 
   <rect class="bg" width="1440" height="1050" rx="28"/>
-  <text class="heading" x="54" y="58">Passte · 内容类型标识方案对比</text>
+  <text class="heading" x="54" y="58">Pasteory · 内容类型标识方案对比</text>
   <text class="annotation" x="54" y="88">两侧使用同一组 Item。来源 App、正文、时间与复制次数完全相同，只改变类型标识的位置与表达方式。</text>
 
   <text class="subheading" x="72" y="138">方案 1 · App Icon 右下角彩色类型角标</text>
@@ -73,7 +73,7 @@
         <circle cx="50" cy="50" r="12" fill="#14b8a6" stroke="#fff" stroke-width="2"/>
         <path d="M44 43h8l4 4v10H44zM52 43v4h4" fill="none" stroke="#fff" stroke-width="1.4"/>
       </g>
-      <text class="body" x="94" y="57">Passte-交互设计-v4.pdf</text>
+      <text class="body" x="94" y="57">Pasteory-交互设计-v4.pdf</text>
       <text class="meta" x="94" y="90">Finder　09-01 15:12　复制 2 次</text>
     </g>
   </g>
@@ -128,7 +128,7 @@
         <rect width="48" height="22" rx="11" fill="#ecfdf5"/>
         <text class="label" x="13" y="15" fill="#0f9f8f">文件</text>
       </g>
-      <text class="body" x="94" y="57">Passte-交互设计-v4.pdf</text>
+      <text class="body" x="94" y="57">Pasteory-交互设计-v4.pdf</text>
       <text class="meta" x="94" y="90">Finder　09-01 15:12　复制 2 次</text>
     </g>
   </g>

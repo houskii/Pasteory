@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Pasteory Web Context",
+  "version": "0.1.0",
+  "description": "把复制内容与网页链接、标题和附近元素关联后保存到 Pasteory。",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAymU5nFxCy2LvKI0kLZxFa4/J+K+BIq0zeW/cvy3jY/GRoI4HY92b5h+DvlS/HtkQCwz6LlCI9lltUuJlMSXcH/u+ikgrUOpqNiVmPF9HCv0tC+0L9ZUifhSZcojQFVEXelsQGKBXNeWtZTzNYwLrJ6DkIMnfhSe7kDB74GA74c+NtAm8fqrMJhp83dkAx2a5AMpRGPDWGzOgO2yPE9zVNVMjCD49W+mRJ9vc6paFzrVw9w8U6nE938gnYpPmhsMwpX91JI7KCwsSgTAiHC8Dbll8CkXLDT7VcL6IBUdnUQZc3S/pEgJo2JsLEtGhI81sVYgKGIFjg34YEFfk0VtWTwIDAQAB",
+  "permissions": ["nativeMessaging", "tabs", "storage"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Pasteory 网页来源采集",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ]
+}

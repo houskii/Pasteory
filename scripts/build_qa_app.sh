@@ -1,0 +1,7 @@
+#!/bin/zsh
+set -euo pipefail
+
+SCRIPT_DIR=${0:A:h}
+PASTEORY_BUILD_VARIANT=qa \
+PASTEORY_BUILD_CONFIGURATION=${PASTEORY_BUILD_CONFIGURATION:-debug} \
+    "$SCRIPT_DIR/build_app.sh"

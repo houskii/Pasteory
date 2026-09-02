@@ -1,6 +1,6 @@
 # 资料库页面设计与实现
 
-资料库页面已经从系统 `List` 拼装界面改为 Passte 自己的三栏布局。视觉样式沿用快捷面板已经落地的圆角卡片、轻材质背景和蓝紫强调色，搜索、筛选、分组管理、双击粘贴和详情编辑能力保持不变。
+资料库页面已经从系统 `List` 拼装界面改为 Pasteory 自己的三栏布局。视觉样式沿用快捷面板已经落地的圆角卡片、轻材质背景和蓝紫强调色，搜索、筛选、分组管理、双击粘贴和详情编辑能力保持不变。
 
 ## 设计基准
 
@@ -50,10 +50,10 @@
 
 ## 代码位置
 
-- `Sources/Passte/LibraryView.swift`：资料库三栏布局、页面组件、设计颜色和交互绑定。
-- `Sources/Passte/ClipViews.swift`：快捷面板与资料库共用的内容行、来源应用图标、类型角标和预览组件。
-- `Sources/Passte/AppState.swift`：搜索、筛选、选中项和资料编辑状态。
-- `Sources/Passte/AppCoordinator.swift`：资料库窗口和调试截图入口。
+- `Sources/Pasteory/LibraryView.swift`：资料库三栏布局、页面组件、设计颜色和交互绑定。
+- `Sources/Pasteory/ClipViews.swift`：快捷面板与资料库共用的内容行、来源应用图标、类型角标和预览组件。
+- `Sources/Pasteory/AppState.swift`：搜索、筛选、选中项和资料编辑状态。
+- `Sources/Pasteory/AppCoordinator.swift`：资料库窗口和调试截图入口。
 
 `LibraryTheme` 集中保存资料库页面使用的强调色、渐变、卡片背景、输入框背景和分隔线颜色。后续调整品牌色时，应先修改这里，再检查快捷面板是否需要同步。
 
@@ -68,9 +68,9 @@ arch -arm64 /usr/bin/swift test --arch arm64
 生成带隔离数据的资料库验收截图：
 
 ```bash
-QA_DATA_ROOT=$(mktemp -d /tmp/passte-library-qa.XXXXXX)
+QA_DATA_ROOT=$(mktemp -d /tmp/pasteory-library-qa.XXXXXX)
 arch -arm64 /usr/bin/swift build --arch arm64
-.build/arm64-apple-macosx/debug/Passte \
+.build/arm64-apple-macosx/debug/Pasteory \
   --debug-data-root "$QA_DATA_ROOT" \
   --debug-open-library \
   --debug-seed \
