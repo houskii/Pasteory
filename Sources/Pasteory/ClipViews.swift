@@ -332,6 +332,7 @@ private struct ClipLeadingVisual: View {
 }
 
 private struct ClipTypeBadge: View {
+    @Environment(\.pasteoryAccentColor) private var pasteoryAccentColor
     let kind: ClipKind
 
     private let diameter: CGFloat = 18
@@ -341,7 +342,7 @@ private struct ClipTypeBadge: View {
             Circle()
                 .fill(.white)
             Circle()
-                .fill(kind.markerColor)
+                .fill(pasteoryAccentColor)
                 .padding(1.5)
             Image(systemName: kind.symbolName)
                 .font(.system(size: 8, weight: .bold))
@@ -355,17 +356,18 @@ private struct ClipTypeBadge: View {
 }
 
 private struct ClipKindLabel: View {
+    @Environment(\.pasteoryAccentColor) private var pasteoryAccentColor
     let clip: Clip
 
     var body: some View {
         Text(clip.codeMetadata?.displayName ?? clip.primaryKind.displayName)
             .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(clip.primaryKind.markerColor)
+            .foregroundStyle(pasteoryAccentColor)
             .lineLimit(1)
             .fixedSize()
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
-            .background(clip.primaryKind.markerColor.opacity(0.10), in: Capsule())
+            .background(pasteoryAccentColor.opacity(0.10), in: Capsule())
             .accessibilityHidden(true)
     }
 }
