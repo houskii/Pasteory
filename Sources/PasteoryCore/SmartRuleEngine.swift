@@ -14,7 +14,7 @@ public enum SmartRuleError: LocalizedError {
             switch field {
             case .createdAt: "时间必须填写大于或等于 0 的天数"
             case .byteSize: "大小必须填写大于或等于 0 的字节数"
-            case .copyCount: "使用次数必须填写大于或等于 0 的整数"
+            case .copyCount: "复制次数必须填写大于或等于 0 的整数"
             case .priority: "优先级必须是无、P1、P2 或 P3"
             case .favorite: "收藏状态无效"
             case .kind: "内容类型无效"

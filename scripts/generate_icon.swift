@@ -166,35 +166,22 @@ private func renderAppIcon() -> NSImage {
     return image
 }
 
-private func menuPPath(offsetX: CGFloat = 0, offsetY: CGFloat = 0) -> NSBezierPath {
-    let path = NSBezierPath()
-    path.move(to: NSPoint(x: 3.4 + offsetX, y: 2.0 + offsetY))
-    path.line(to: NSPoint(x: 3.4 + offsetX, y: 15.7 + offsetY))
-    path.line(to: NSPoint(x: 9.1 + offsetX, y: 15.7 + offsetY))
-    path.curve(to: NSPoint(x: 14.8 + offsetX, y: 11.8 + offsetY), controlPoint1: NSPoint(x: 12.8 + offsetX, y: 15.7 + offsetY), controlPoint2: NSPoint(x: 14.8 + offsetX, y: 14.0 + offsetY))
-    path.curve(to: NSPoint(x: 9.1 + offsetX, y: 7.8 + offsetY), controlPoint1: NSPoint(x: 14.8 + offsetX, y: 9.5 + offsetY), controlPoint2: NSPoint(x: 12.8 + offsetX, y: 7.8 + offsetY))
-    path.line(to: NSPoint(x: 6.3 + offsetX, y: 7.8 + offsetY))
-    path.line(to: NSPoint(x: 6.3 + offsetX, y: 2.0 + offsetY))
-    path.close()
-    path.appendRoundedRect(NSRect(x: 6.5 + offsetX, y: 10.4 + offsetY, width: 4.4, height: 2.6), xRadius: 1.1, yRadius: 1.1)
-    path.windingRule = .evenOdd
-    return path
-}
-
 private func drawMenuMark(in rect: NSRect, color: NSColor) {
-    NSGraphicsContext.saveGraphicsState()
-    let transform = NSAffineTransform()
-    transform.translateX(by: rect.minX, yBy: rect.minY)
-    transform.scaleX(by: rect.width / 18, yBy: rect.height / 18)
-    transform.concat()
-
-    color.withAlphaComponent(0.22).setFill()
-    menuPPath(offsetX: 1.3, offsetY: 0.7).fill()
-    color.withAlphaComponent(0.48).setFill()
-    menuPPath(offsetX: 0.65, offsetY: 0.35).fill()
-    color.setFill()
-    menuPPath().fill()
-    NSGraphicsContext.restoreGraphicsState()
+    let iconURL = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("docs/brand/pasteory-menu-bar-icon@2x.png")
+    guard let source = NSImage(contentsOf: iconURL) else { return }
+    let tinted = NSImage(size: NSSize(width: 18, height: 18))
+    tinted.lockFocus()
+    source.draw(in: NSRect(x: 0, y: 0, width: 18, height: 18))
+    if let context = NSGraphicsContext.current?.cgContext {
+        context.setBlendMode(.sourceIn)
+        context.setFillColor(color.cgColor)
+        context.fill(CGRect(x: 0, y: 0, width: 18, height: 18))
+    }
+    tinted.unlockFocus()
+    tinted.draw(in: rect)
 }
 
 private func renderMenuBarPreview() -> NSImage {

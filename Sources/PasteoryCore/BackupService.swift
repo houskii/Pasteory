@@ -8,6 +8,7 @@ public struct BackupManifest: Codable, Sendable {
     public var clipCount: Int
     public var captureEventCount: Int?
     public var fallbackRuleCount: Int?
+    public var aggregationCount: Int?
     public var fileChecksums: [String: String]
 }
 
@@ -32,6 +33,7 @@ public actor BackupService {
         let clips = try await repository.allClips()
         let captureEvents = try await repository.allCaptureEvents()
         let fallbackRules = try await repository.userFallbackRules()
+        let aggregations = try await repository.aggregations()
         let clipsURL = destination.appendingPathComponent("clips.jsonl")
         var lines = Data()
         for clip in clips {
@@ -53,6 +55,13 @@ public actor BackupService {
         }
         try ruleLines.write(to: rulesURL, options: .atomic)
         checksums["url-fallback-rules.jsonl"] = digest(ruleLines)
+        let aggregationsURL = destination.appendingPathComponent("aggregations.jsonl")
+        var aggregationLines = Data()
+        for aggregation in aggregations {
+            aggregationLines.append(try encoder.encode(aggregation)); aggregationLines.append(Data("\n".utf8))
+        }
+        try aggregationLines.write(to: aggregationsURL, options: .atomic)
+        checksums["aggregations.jsonl"] = digest(aggregationLines)
         let dataFolder = destination.appendingPathComponent("data", isDirectory: true)
         for clip in clips {
             for item in clip.items {
@@ -72,12 +81,13 @@ public actor BackupService {
             }
         }
         let manifest = BackupManifest(
-            formatVersion: 3,
+            formatVersion: 4,
             appVersion: "0.1.6",
             exportedAt: Date(),
             clipCount: clips.count,
             captureEventCount: captureEvents.count,
             fallbackRuleCount: fallbackRules.count,
+            aggregationCount: aggregations.count,
             fileChecksums: checksums
         )
         try encoder.encode(manifest).write(to: destination.appendingPathComponent("manifest.json"), options: .atomic)
@@ -86,7 +96,7 @@ public actor BackupService {
     @discardableResult
     public func importBackup(from source: URL) async throws -> Int {
         let manifest = try decoder.decode(BackupManifest.self, from: Data(contentsOf: source.appendingPathComponent("manifest.json")))
-        guard (1...3).contains(manifest.formatVersion) else { throw StorageError.invalidArchive }
+        guard (1...4).contains(manifest.formatVersion) else { throw StorageError.invalidArchive }
         for (relative, expected) in manifest.fileChecksums {
             let data = try Data(contentsOf: source.appendingPathComponent(relative))
             guard digest(data) == expected else { throw StorageError.checksumMismatch }
@@ -129,6 +139,15 @@ public actor BackupService {
                 try decoder.decode(URLFallbackRule.self, from: Data($0.utf8))
             }
             for rule in rules { try await repository.saveFallbackRule(rule) }
+        }
+        _ = try await repository.consolidateDuplicateClips()
+        if manifest.formatVersion >= 4 {
+            let aggregationData = try Data(contentsOf: source.appendingPathComponent("aggregations.jsonl"))
+            guard let aggregationContent = String(data: aggregationData, encoding: .utf8) else { throw StorageError.invalidArchive }
+            let aggregations = try aggregationContent.split(separator: "\n").map {
+                try decoder.decode(ClipAggregation.self, from: Data($0.utf8))
+            }
+            for aggregation in aggregations { _ = try await repository.saveAggregation(aggregation) }
         }
         return clips.count
     }

@@ -25,19 +25,8 @@ identity_hash() {
 
 configure_keychain() {
   local password=$1
-  local keychain
-  local -a user_keychains
   security unlock-keychain -p "$password" "$BUILD_KEYCHAIN"
   security set-keychain-settings -lut 21600 "$BUILD_KEYCHAIN"
-  user_keychains=()
-  while IFS= read -r keychain; do
-    keychain=${keychain#*\"}
-    keychain=${keychain%\"*}
-    [[ -n "$keychain" ]] && user_keychains+=("$keychain")
-  done < <(security list-keychains -d user)
-  if (( ${user_keychains[(Ie)$BUILD_KEYCHAIN]} == 0 )); then
-    security list-keychains -d user -s "${user_keychains[@]}" "$BUILD_KEYCHAIN"
-  fi
 }
 
 import_recovery_identity() {

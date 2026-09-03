@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import PasteoryCore
 import SwiftUI
 
@@ -9,7 +10,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
     private let pasteCoordinator: PasteCoordinator
     private let monitor: ClipboardMonitor
     private let hotKeyManager = GlobalHotKeyManager()
-    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private var libraryWindow: NSWindow?
     private var settingsWindow: NSWindow?
     private var onboardingWindow: NSWindow?
@@ -26,10 +27,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
         targetProvider: { [weak self] in self?.lastExternalApplication },
         onOpenLibrary: { [weak self] in self?.openLibrary() },
         onOpenSettings: { [weak self] in self?.openSettings() },
-        onCreateTextClip: { [weak self] in self?.createManualTextClip() },
-        onCreateCollection: { [weak self] smart in self?.promptCreateCollection(smart: smart) },
-        onEditCollection: { [weak self] collection in self?.editCollection(collection) },
-        onDeleteCollection: { [weak self] collection in self?.confirmDeleteCollection(collection) }
+        onCreateTextClip: { [weak self] in self?.createManualTextClip() }
     )
 
     init(state: AppState, settings: AppSettings, attachments: AttachmentStore) {
@@ -55,6 +53,26 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
         windowCloseKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
             if TextEditingCommands.handle(event, in: NSApp.keyWindow) { return nil }
+            if self.libraryWindow?.isKeyWindow == true,
+               self.libraryWindow?.attachedSheet == nil {
+                let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+                let action = self.settings.quickAction(
+                    keyCode: UInt32(event.keyCode),
+                    modifiers: self.carbonModifiers(from: modifiers)
+                )
+                switch action {
+                case .aggregateContent:
+                    Task { self.state.libraryAggregationDraft = await self.state.makeLibraryAggregationDraft() }
+                    return nil
+                case .expandAggregation where !(self.libraryWindow?.firstResponder is NSTextView):
+                    self.state.expandSelectedLibraryAggregation()
+                    return nil
+                case .collapseAggregation where !(self.libraryWindow?.firstResponder is NSTextView):
+                    self.state.collapseSelectedLibraryAggregation()
+                    return nil
+                default: break
+                }
+            }
             guard event.keyCode == 13,
                   event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command else { return event }
             let window: NSWindow?
@@ -122,7 +140,12 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
             }
         }
         if ProcessInfo.processInfo.arguments.contains("--debug-open-settings") {
-            DispatchQueue.main.async { [weak self] in self?.openSettings() }
+            Task { [weak self] in
+                guard let self else { return }
+                if ProcessInfo.processInfo.arguments.contains("--debug-seed") { await seedDebugData() }
+                try? await Task.sleep(for: .milliseconds(300))
+                openSettings()
+            }
         }
 #endif
     }
@@ -138,10 +161,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
             onCopy: { _, _, _ in },
             onOpenLibrary: {},
             onOpenSettings: {},
-            onCreateTextClip: {},
-            onCreateCollection: { _ in },
-            onEditCollection: { _ in },
-            onDeleteCollection: { _ in }
+            onCreateTextClip: {}
         )
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 380, height: 660),
@@ -159,6 +179,18 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
         NSApp.activate(ignoringOtherApps: true)
         Task {
             await state.prepareQuickPanel()
+            if ProcessInfo.processInfo.arguments.contains("--debug-open-aggregation-editor"),
+               let aggregation = state.aggregations.first {
+                state.quickSelectedAggregationID = aggregation.id
+                state.quickSelectionID = nil
+                await state.prepareQuickAggregation()
+                try? await Task.sleep(for: .milliseconds(150))
+            }
+            if ProcessInfo.processInfo.arguments.contains("--debug-select-quick-image") {
+                state.quickClips = state.quickClips.filter { $0.primaryKind == .image }
+                state.quickSelectionID = state.quickClips.first?.id
+                try? await Task.sleep(for: .milliseconds(150))
+            }
             if ProcessInfo.processInfo.arguments.contains("--debug-open-metadata-editor") {
                 state.quickSelectionID = state.quickClips.first(where: {
                     $0.source.bundleIdentifier == "com.google.Chrome"
@@ -176,8 +208,16 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
             }
             let arguments = ProcessInfo.processInfo.arguments
             if let index = arguments.firstIndex(of: "--debug-snapshot-path"), arguments.indices.contains(index + 1) {
-                try? await Task.sleep(for: .milliseconds(300))
-                saveDebugSnapshot(of: window, to: arguments[index + 1])
+                try? await Task.sleep(for: .milliseconds(500))
+                let popoverWindow = NSApp.windows.first {
+                    $0 !== window
+                        && $0.isVisible
+                        && NSStringFromClass(type(of: $0)).localizedCaseInsensitiveContains("popover")
+                }
+                let snapshotWindow = arguments.contains("--debug-show-collection-overview")
+                    ? (popoverWindow ?? window.childWindows?.last ?? window)
+                    : window
+                saveDebugSnapshot(of: snapshotWindow, to: arguments[index + 1])
             }
         }
     }
@@ -217,11 +257,13 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
             }
             metadataSample.isPinned = true
             metadataSample.copyCount = 128
+            metadataSample.pasteCount = 37
             state.update(metadataSample)
         }
         if let longSampleIndex = state.quickClips.firstIndex(where: { $0.source.appName.contains("名称同样非常长") }) {
             var longSample = state.quickClips[longSampleIndex]
             longSample.copyCount = 9_999
+            longSample.pasteCount = 888
             state.update(longSample)
         }
         let colorCapture = PasteboardCapture(
@@ -249,8 +291,20 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
             source: ClipSource(appName: "Xcode", bundleIdentifier: "com.apple.dt.Xcode", confidence: .high)
         )
         await state.accept(codeCapture)
+        let debugFileDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("Pasteory-File-Preview-QA", isDirectory: true)
+        try? FileManager.default.createDirectory(at: debugFileDirectory, withIntermediateDirectories: true)
+        let debugFileURL = debugFileDirectory.appendingPathComponent("mac_lock_screen.txt")
+        try? Data("⌃⌘Q\n".utf8).write(to: debugFileURL, options: .atomic)
+        var debugFileRepresentations = [
+            CapturedRepresentation(uti: "public.file-url", data: Data(debugFileURL.absoluteString.utf8)),
+            CapturedRepresentation(uti: "public.utf8-plain-text", data: Data(debugFileURL.lastPathComponent.utf8))
+        ]
+        if let icon = NSImage(systemSymbolName: "doc.text.fill", accessibilityDescription: nil),
+           let iconData = icon.tiffRepresentation {
+            debugFileRepresentations.insert(CapturedRepresentation(uti: "com.apple.icns", data: iconData), at: 0)
+        }
         let fileCapture = PasteboardCapture(
-            items: [CapturedItem(order: 0, representations: [CapturedRepresentation(uti: "public.file-url", data: Data("file:///tmp/Pasteory-%E4%BA%A4%E4%BA%92%E8%AE%BE%E8%AE%A1-v4.pdf".utf8))])],
+            items: [CapturedItem(order: 0, representations: debugFileRepresentations)],
             source: ClipSource(appName: "访达", bundleIdentifier: "com.apple.finder", confidence: .high)
         )
         await state.accept(fileCapture)
@@ -280,6 +334,39 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
             sourceContext: sourceContext
         )
         await state.accept(contextCapture)
+        if ProcessInfo.processInfo.arguments.contains("--debug-seed-aggregation") {
+            let members = Array(state.quickClips.prefix(3).map(\.id))
+            if members.count >= 2 {
+                let aggregation = ClipAggregation(
+                    title: "abmock 相关内容",
+                    note: "",
+                    memberClipIDs: members,
+                    origin: .search(query: "abmock")
+                )
+                _ = try? await state.repository.saveAggregation(aggregation)
+                await state.refreshAggregations()
+                state.quickExpandedAggregationIDs.insert(aggregation.id)
+                state.libraryExpandedAggregationIDs.insert(aggregation.id)
+            }
+        }
+        if ProcessInfo.processInfo.arguments.contains("--debug-settings-storage")
+            || ProcessInfo.processInfo.arguments.contains("--debug-settings-storage-thirty-days") {
+            let calendar = Calendar.autoupdatingCurrent
+            let todayStart = calendar.startOfDay(for: Date())
+            let distributed = state.quickClips.enumerated().map { index, clip in
+                var value = clip
+                let dayOffset = -(index % 7)
+                value.lastCopiedAt = calendar.date(
+                    byAdding: .hour,
+                    value: 10,
+                    to: calendar.date(byAdding: .day, value: dayOffset, to: todayStart) ?? todayStart
+                ) ?? value.lastCopiedAt
+                return value
+            }
+            try? await state.repository.saveBatch(distributed)
+            await state.refreshQuick()
+            await state.refreshLibrary()
+        }
         state.quickSelectionID = state.quickClips.first?.id
     }
 #endif
@@ -287,6 +374,8 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
     private func configureStatusItem() {
         if let button = statusItem.button {
             button.image = PasteoryBrand.menuBarImage()
+            button.imagePosition = .imageOnly
+            button.imageScaling = .scaleProportionallyDown
             button.toolTip = PasteoryBrand.name
         }
         let menu = NSMenu(); menu.delegate = self
@@ -309,6 +398,15 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
 
     private func menuItem(_ title: String, action: Selector, key: String) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: key); item.target = self; return item
+    }
+
+    private func carbonModifiers(from modifiers: NSEvent.ModifierFlags) -> UInt32 {
+        var value: UInt32 = 0
+        if modifiers.contains(.command) { value |= UInt32(cmdKey) }
+        if modifiers.contains(.shift) { value |= UInt32(shiftKey) }
+        if modifiers.contains(.option) { value |= UInt32(optionKey) }
+        if modifiers.contains(.control) { value |= UInt32(controlKey) }
+        return value
     }
 
     @objc private func toggleQuickPanel() { quickPanel.toggle() }
@@ -367,6 +465,27 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
                 if arguments.contains("--debug-select-code") {
                     state.selectedClipID = state.clips.first(where: { $0.primaryKind == .code })?.id
                 }
+                if arguments.contains("--debug-select-source-context") {
+                    state.selectedClipID = state.clips.first(where: {
+                        $0.source.bundleIdentifier == "com.google.Chrome"
+                            && $0.previewText.contains("abmock-kmp-manager-optimize")
+                    })?.id
+                }
+                if arguments.contains("--debug-select-link") {
+                    state.selectedClipID = state.clips.first(where: { $0.primaryKind == .link })?.id
+                }
+                if arguments.contains("--debug-select-color") {
+                    state.selectedClipID = state.clips.first(where: { $0.primaryKind == .color })?.id
+                }
+                if arguments.contains("--debug-select-aggregation"), let aggregation = state.aggregations.first {
+                    state.selectedAggregationID = aggregation.id
+                    state.selectedClipID = nil
+                }
+                if arguments.contains("--debug-select-image") {
+                    state.libraryFilter = .kind(.image)
+                    await state.refreshLibrary()
+                    state.selectedClipID = state.clips.first(where: { $0.primaryKind == .image })?.id
+                }
                 try? await Task.sleep(for: .milliseconds(200))
                 window.makeFirstResponder(nil)
                 saveDebugSnapshot(of: window, to: arguments[index + 1])
@@ -395,7 +514,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
            let index = arguments.firstIndex(of: "--debug-snapshot-path"), arguments.indices.contains(index + 1) {
             Task {
                 try? await Task.sleep(for: .milliseconds(800))
-                saveDebugSnapshot(of: window, to: arguments[index + 1])
+                saveDebugSnapshot(of: window.attachedSheet ?? window, to: arguments[index + 1])
             }
         }
 #endif
@@ -408,64 +527,14 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
         }
     }
 
-    private func promptCreateCollection(smart: Bool) {
-        let alert = NSAlert()
-        alert.messageText = smart ? "创建智能列表" : "创建普通列表"
-        alert.informativeText = smart ? "新列表默认不匹配任何内容，需要再配置规则。" : "列表会直接显示在快捷面板的横向标签中。"
-        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
-        input.placeholderString = smart ? "智能列表名称" : "列表名称"
-        alert.accessoryView = input
-        alert.addButton(withTitle: "创建"); alert.addButton(withTitle: "取消")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let name = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let message = state.collectionNameValidationMessage(name) {
-            state.presentStatus(message, kind: .error, dismissAfter: 4)
-            let errorAlert = NSAlert()
-            errorAlert.alertStyle = .warning
-            errorAlert.messageText = "无法创建分组"
-            errorAlert.informativeText = message == "分组名称已经存在" ? "“\(name)”已经存在，请换一个名称。" : message
-            errorAlert.addButton(withTitle: "知道了")
-            errorAlert.runModal()
-            quickPanel.show()
-            return
-        }
-        Task {
-            guard let collection = await state.addCollection(name: name, smart: smart) else {
-                quickPanel.show()
-                return
-            }
-            state.quickScope = .collection(collection.id)
-            await state.refreshQuick(resetSelection: true)
-            quickPanel.show()
-        }
-    }
-
-    private func editCollection(_ collection: ClipCollection) {
-        state.requestedCollectionEditorID = collection.id
-        openLibrary()
-    }
-
-    private func confirmDeleteCollection(_ collection: ClipCollection) {
-        let alert = NSAlert()
-        alert.messageText = "删除“\(collection.name)”？"
-        alert.informativeText = "剪贴板内容不会被删除。"
-        alert.addButton(withTitle: "删除")
-        alert.addButton(withTitle: "取消")
-        guard alert.runModal() == .alertFirstButtonReturn else { quickPanel.show(); return }
-        Task {
-            await state.deleteCollection(collection)
-            quickPanel.show()
-        }
-    }
-
     private func performFromLibrary(_ clip: Clip, plainText: Bool, paste: Bool) {
         let target = lastExternalApplication
         Task {
             do {
                 let result = try await pasteCoordinator.perform(clip, plainText: plainText, paste: paste, target: target)
-                var updated = clip; updated.lastCopiedAt = Date(); updated.copyCount += 1; state.update(updated)
                 switch result {
-                case .pasted: state.presentStatus("已粘贴")
+                case .pasted:
+                    if await state.recordPaste(clip) { state.presentStatus("已粘贴") }
                 case .copied: state.presentStatus("已复制")
                 case .copiedFallback: state.presentStatus("已复制，请手动粘贴", kind: .warning, dismissAfter: 5)
                 case .copiedPermissionRequired: state.presentStatus("已复制；请允许 Pasteory 使用辅助功能后重试", kind: .warning, dismissAfter: 5)

@@ -72,12 +72,13 @@ final class ClipOpenCoordinator {
             guard let url = await firstURL(in: clip, acceptedUTIs: ["public.file-url", "NSFilenamesPboardType"]), url.isFileURL else {
                 throw ClipOpenError.contentUnavailable
             }
-            let fileExtension = url.pathExtension.lowercased()
+            let resolvedURL = PasteboardFileURLDecoder.resolvedPathURL(url)
+            let fileExtension = resolvedURL.pathExtension.lowercased()
             guard !fileExtension.isEmpty else { throw ClipOpenError.fileHasNoExtension }
             guard let bundleIdentifier = settings.applicationBundleIdentifier(forFileExtension: fileExtension) else {
                 throw ClipOpenError.fileRuleNotConfigured(fileExtension)
             }
-            try await open(url, withBundleIdentifier: bundleIdentifier)
+            try await open(resolvedURL, withBundleIdentifier: bundleIdentifier)
 
         case .text, .color, .mixed:
             throw ClipOpenError.unsupportedKind(clip.primaryKind)

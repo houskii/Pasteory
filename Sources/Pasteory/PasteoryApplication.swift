@@ -66,6 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let attachments = AttachmentStore(directories: directories)
             let archive = ArchiveService(repository: repository, directories: directories)
             let backup = BackupService(repository: repository, directories: directories)
+            let storageAnalyticsService = StorageAnalyticsService(repository: repository, directories: directories)
             let settings = AppSettings()
             let linkResolutionService = LinkResolutionService(repository: repository)
             ApplicationCatalog.configure(cacheDirectory: directories.applicationCache)
@@ -77,6 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 attachments: attachments,
                 archive: archive,
                 backup: backup,
+                storageAnalyticsService: storageAnalyticsService,
                 settings: settings,
                 linkResolutionService: linkResolutionService
             )

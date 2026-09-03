@@ -223,6 +223,15 @@ public struct URLFallbackRule: Codable, Hashable, Identifiable, Sendable {
             priority: 10
         ),
         URLFallbackRule(
+            id: UUID(uuidString: "A8A1E9AC-2C16-47F2-AC45-C970F38BA107")!,
+            name: "Codebase Merge Request",
+            origin: .builtIn,
+            hostPattern: "code.byted.org",
+            pathTemplate: "/{group}/{project}/merge_requests/{mergeRequestID}",
+            titleTemplate: "{{path.project}} MR · !{{path.mergeRequestID}}",
+            priority: 10
+        ),
+        URLFallbackRule(
             id: UUID(uuidString: "A8A1E9AC-2C16-47F2-AC45-C970F38BA102")!,
             name: "BITS 报告流水线",
             origin: .builtIn,
@@ -314,6 +323,7 @@ public enum LinkResolutionSource: String, Codable, CaseIterable, Sendable {
 public struct LinkResource: Codable, Hashable, Identifiable, Sendable {
     public var id: UUID
     public var normalizedURL: String
+    public var canonicalResourceKey: String?
     public var host: String
     public var routeSignature: URLRouteSignature
     public var fallbackTitle: String
@@ -327,12 +337,14 @@ public struct LinkResource: Codable, Hashable, Identifiable, Sendable {
     public var createdAt: Date
     public var updatedAt: Date
     public var lastAttemptAt: Date?
+    public var lastResolvedAt: Date?
     public var attemptCount: Int
     public var failedAttemptCount: Int
 
     public init(
         id: UUID = UUID(),
         normalizedURL: String,
+        canonicalResourceKey: String? = nil,
         host: String,
         routeSignature: URLRouteSignature,
         fallbackTitle: String,
@@ -346,11 +358,14 @@ public struct LinkResource: Codable, Hashable, Identifiable, Sendable {
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
         lastAttemptAt: Date? = nil,
+        lastResolvedAt: Date? = nil,
         attemptCount: Int = 0,
         failedAttemptCount: Int = 0
     ) {
         self.id = id
         self.normalizedURL = normalizedURL
+        self.canonicalResourceKey = canonicalResourceKey
+            ?? URLFallbackEngine.normalizedWebURL(normalizedURL).map(URLFallbackEngine.canonicalResourceKey(for:))
         self.host = host
         self.routeSignature = routeSignature
         self.fallbackTitle = fallbackTitle
@@ -364,11 +379,18 @@ public struct LinkResource: Codable, Hashable, Identifiable, Sendable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.lastAttemptAt = lastAttemptAt
+        self.lastResolvedAt = lastResolvedAt
         self.attemptCount = attemptCount
         self.failedAttemptCount = failedAttemptCount
     }
 
     public var displayTitle: String { resolvedTitle ?? fallbackTitle }
+
+    public var effectiveCanonicalResourceKey: String {
+        canonicalResourceKey
+            ?? URLFallbackEngine.normalizedWebURL(normalizedURL).map(URLFallbackEngine.canonicalResourceKey(for:))
+            ?? normalizedURL
+    }
 }
 
 public struct ResolvedLinkSummary: Hashable, Identifiable, Sendable {
@@ -383,6 +405,22 @@ public struct ResolvedLinkSummary: Hashable, Identifiable, Sendable {
     }
 
     public var id: UUID { resource.id }
+}
+
+public enum LinkCacheRefreshPolicy {
+    public static let resolvedCacheLifetime: TimeInterval = 24 * 60 * 60
+    public static let scanLimit = 100
+    public static let resourceLimit = 10
+
+    public static func maintenanceCandidates(from orderedClips: [Clip]) -> [Clip] {
+        var seen = Set<String>()
+        return Array(orderedClips.prefix(scanLimit).compactMap { clip -> Clip? in
+            guard clip.primaryKind == .link,
+                  let url = URLFallbackEngine.normalizedWebURL(clip.previewText),
+                  seen.insert(URLFallbackEngine.canonicalResourceKey(for: url)).inserted else { return nil }
+            return clip
+        }.prefix(resourceLimit))
+    }
 }
 
 public struct LinkResolutionAttempt: Codable, Hashable, Identifiable, Sendable {
@@ -449,6 +487,36 @@ public struct LinkFailureGroup: Codable, Hashable, Identifiable, Sendable {
     public var lastSeenAt: Date
     public var lastAttemptAt: Date?
 
+    public init(
+        routeSignature: URLRouteSignature,
+        uniqueURLCount: Int,
+        clipCount: Int,
+        copyCount: Int,
+        attemptCount: Int,
+        failedAttemptCount: Int,
+        latestRequestState: LinkRequestState,
+        latestTitleQuality: LinkTitleQuality,
+        currentFallbackTitle: String,
+        currentFallbackState: LinkFallbackState,
+        sampleURL: String,
+        lastSeenAt: Date,
+        lastAttemptAt: Date?
+    ) {
+        self.routeSignature = routeSignature
+        self.uniqueURLCount = uniqueURLCount
+        self.clipCount = clipCount
+        self.copyCount = copyCount
+        self.attemptCount = attemptCount
+        self.failedAttemptCount = failedAttemptCount
+        self.latestRequestState = latestRequestState
+        self.latestTitleQuality = latestTitleQuality
+        self.currentFallbackTitle = currentFallbackTitle
+        self.currentFallbackState = currentFallbackState
+        self.sampleURL = sampleURL
+        self.lastSeenAt = lastSeenAt
+        self.lastAttemptAt = lastAttemptAt
+    }
+
     public var id: String { routeSignature.key }
 }
 
@@ -468,6 +536,14 @@ public enum URLFallbackEngine {
         components.fragment = nil
         if components.path.isEmpty { components.path = "/" }
         return components.url
+    }
+
+    public static func canonicalResourceKey(for url: URL) -> String {
+        let host = url.host?.lowercased() ?? ""
+        let rawPath = URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedPath ?? url.path
+        var path = rawPath.isEmpty ? "/" : rawPath
+        while path.count > 1, path.hasSuffix("/") { path.removeLast() }
+        return "\(host):\(path)"
     }
 
     public static func fallback(for url: URL, rules userRules: [URLFallbackRule]) -> URLFallbackResult {

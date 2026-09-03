@@ -1,6 +1,11 @@
 import PasteoryCore
 import SwiftUI
 
+private struct AuthenticationRuleEditorRequest: Identifiable {
+    let id = UUID()
+    let group: LinkFailureGroup?
+}
+
 struct LinkResolutionSettingsView: View {
     @Environment(\.pasteoryAccentColor) private var pasteoryAccentColor
     @ObservedObject var state: AppState
@@ -10,8 +15,10 @@ struct LinkResolutionSettingsView: View {
     @State private var selectedSection: LinkSettingsSection = .unresolved
     @State private var editingGroup: LinkFailureGroup?
     @State private var authenticationRequest: LinkAuthenticationRequest?
-    @State private var showingManualLinkEditor = false
+    @State private var authenticationRuleEditorRequest: AuthenticationRuleEditorRequest?
+    @State private var pendingAuthenticationTarget: LinkAuthenticationTarget?
     @State private var rulePendingRemoval: URLFallbackRule?
+    @State private var authenticatedRulePendingRemoval: AuthenticatedLinkRule?
     @State private var sessionRevision = UUID()
 
     private enum LinkSettingsSection: String, CaseIterable, Identifiable {
@@ -56,7 +63,9 @@ struct LinkResolutionSettingsView: View {
                     ForEach(LinkSettingsSection.allCases) { section in Text(section.title).tag(section) }
                 }
                 .pickerStyle(.segmented)
-                Button("添加链接…") { showingManualLinkEditor = true }
+                Button("添加登录解析…") {
+                    authenticationRuleEditorRequest = AuthenticationRuleEditorRequest(group: nil)
+                }
             }
 
             Group {
@@ -70,6 +79,36 @@ struct LinkResolutionSettingsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .task { await state.refreshLinkResolutionData() }
+        .onAppear {
+#if DEBUG
+            let arguments = ProcessInfo.processInfo.arguments
+            if arguments.contains("--debug-link-connections") {
+                selectedSection = .connections
+            }
+            if arguments.contains("--debug-link-auth-editor") {
+                let sampleURL = "https://code.byted.org/ugc-android/ByteX/merge_requests/912"
+                let group = LinkFailureGroup(
+                    routeSignature: URLRouteSignature(
+                        host: "code.byted.org",
+                        pathTemplate: "/ugc-android/ByteX/merge_requests/{segment4}"
+                    ),
+                    uniqueURLCount: 3,
+                    clipCount: 4,
+                    copyCount: 7,
+                    attemptCount: 5,
+                    failedAttemptCount: 5,
+                    latestRequestState: .needsAuthentication,
+                    latestTitleQuality: .loginOrError,
+                    currentFallbackTitle: "ByteX MR · !912",
+                    currentFallbackState: .matchedBuiltInRule,
+                    sampleURL: sampleURL,
+                    lastSeenAt: Date(),
+                    lastAttemptAt: Date()
+                )
+                authenticationRuleEditorRequest = AuthenticationRuleEditorRequest(group: group)
+            }
+#endif
+        }
         .sheet(item: $editingGroup) { group in
             FallbackRuleEditorSheet(group: group) { name, title in
                 await state.createFallbackRule(for: group, name: name, titleTemplate: title)
@@ -80,15 +119,32 @@ struct LinkResolutionSettingsView: View {
                 sessionRevision = UUID()
                 authenticationRequest = nil
                 if let group = request.group {
-                    Task { await state.retryAuthenticatedLinkResolution(group) }
+                    Task { await state.retryAuthenticatedLinkResolution(group, using: request.target) }
                 } else {
-                    Task { await state.retryAuthenticatedLinkResolutions(for: request.site) }
+                    Task { await state.retryAuthenticatedLinkResolutions(for: request.target) }
                 }
             }
         }
-        .sheet(isPresented: $showingManualLinkEditor) {
-            ManualLinkEditorSheet { value, mode in
-                await state.addManualLink(value, mode: mode)
+        .sheet(
+            item: $authenticationRuleEditorRequest,
+            onDismiss: {
+                if let target = pendingAuthenticationTarget {
+                    pendingAuthenticationTarget = nil
+                    authenticationRequest = LinkAuthenticationRequest(target: target, group: nil)
+                }
+            }
+        ) { request in
+            AuthenticationRuleEditorSheet(
+                seedGroup: request.group,
+                groups: state.linkFailureGroups
+            ) { name, pattern, startURL in
+                guard let target = state.addAuthenticatedLinkRule(
+                    name: name,
+                    pattern: pattern,
+                    startURL: startURL
+                ) else { return false }
+                pendingAuthenticationTarget = target
+                return true
             }
         }
         .confirmationDialog(
@@ -107,6 +163,23 @@ struct LinkResolutionSettingsView: View {
             Button("取消", role: .cancel) { rulePendingRemoval = nil }
         } message: { _ in
             Text("受影响的链接会恢复为内置规则或通用 URL 兜底标题。")
+        }
+        .confirmationDialog(
+            "移除登录解析规则？",
+            isPresented: Binding(
+                get: { authenticatedRulePendingRemoval != nil },
+                set: { if !$0 { authenticatedRulePendingRemoval = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: authenticatedRulePendingRemoval
+        ) { rule in
+            Button("移除“\(rule.name)”", role: .destructive) {
+                state.removeAuthenticatedLinkRule(rule)
+                authenticatedRulePendingRemoval = nil
+            }
+            Button("取消", role: .cancel) { authenticatedRulePendingRemoval = nil }
+        } message: { _ in
+            Text("以后命中的链接不会再自动使用登录会话，已保存的剪贴板记录不会删除。")
         }
     }
 
@@ -147,12 +220,21 @@ struct LinkResolutionSettingsView: View {
                 )
             } else {
                 List(state.linkFailureGroups) { group in
+                    let target = URLFallbackEngine.normalizedWebURL(group.sampleURL).flatMap {
+                        LinkAuthenticationTarget.matching(
+                            url: $0,
+                            customRules: settings.authenticatedLinkRules
+                        )
+                    }
                     LinkFailureGroupRow(
                         group: group,
                         isRetrying: state.linkResolutionBusyRouteKeys.contains(group.routeSignature.key),
                         onRetry: { state.retryLinkResolution(group) },
-                        onAuthenticate: LinkAuthenticationSite.matching(host: group.routeSignature.host).map { site in
-                            { authenticationRequest = LinkAuthenticationRequest(site: site, group: group) }
+                        onAuthenticate: target.map { target in
+                            { authenticationRequest = LinkAuthenticationRequest(target: target, group: group) }
+                        },
+                        onConfigureAuthentication: {
+                            authenticationRuleEditorRequest = AuthenticationRuleEditorRequest(group: group)
                         },
                         onConfigureFallback: { editingGroup = group }
                     )
@@ -228,17 +310,18 @@ struct LinkResolutionSettingsView: View {
 
     private var connections: some View {
         let chromeStatus = ChromeExtensionIntegration.status()
+        let authenticationTargets = LinkAuthenticationTarget.all(customRules: settings.authenticatedLinkRules)
         _ = sessionRevision
         return Form {
             Section("Pasteory 登录会话") {
-                ForEach(LinkAuthenticationSite.allCases) { site in
+                ForEach(authenticationTargets) { target in
                     HStack(alignment: .center, spacing: 12) {
                         Image(systemName: "person.crop.circle.badge.key")
                             .foregroundStyle(pasteoryAccentColor)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(site.title).font(.headline)
-                            Text(site.domainDescription).font(.caption.monospaced()).foregroundStyle(.secondary)
-                            if let updatedAt = LinkAuthenticationSession.lastUpdatedAt(site) {
+                            Text(target.title).font(.headline)
+                            Text(target.domainDescription).font(.caption.monospaced()).foregroundStyle(.secondary)
+                            if let updatedAt = LinkAuthenticationSession.lastUpdatedAt(target) {
                                 Text("最近更新：\(updatedAt.formatted(date: .abbreviated, time: .shortened))")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
@@ -249,11 +332,23 @@ struct LinkResolutionSettingsView: View {
                             }
                         }
                         Spacer()
-                        Button(LinkAuthenticationSession.lastUpdatedAt(site) == nil ? "登录…" : "更新登录…") {
-                            authenticationRequest = LinkAuthenticationRequest(site: site, group: nil)
+                        Button(LinkAuthenticationSession.lastUpdatedAt(target) == nil ? "登录…" : "更新登录…") {
+                            authenticationRequest = LinkAuthenticationRequest(target: target, group: nil)
+                        }
+                        if let rule = target.customRule {
+                            Button(role: .destructive) { authenticatedRulePendingRemoval = rule } label: {
+                                Image(systemName: "trash")
+                            }
+                            .buttonStyle(.borderless)
                         }
                     }
                     .padding(.vertical, 3)
+                }
+                HStack {
+                    Spacer(minLength: 0)
+                    Button("添加登录解析…") {
+                        authenticationRuleEditorRequest = AuthenticationRuleEditorRequest(group: nil)
+                    }
                 }
                 Text("登录发生在 Pasteory 独立的 WebKit 会话中，不读取 Chrome Cookie。登录数据和 WebCrypto 钥匙串账户按 Bundle ID 隔离，正式包与 QA 包互不共享。")
                     .font(.caption)
@@ -278,7 +373,7 @@ struct LinkResolutionSettingsView: View {
                     .foregroundStyle(.secondary)
             }
             Section("访问边界") {
-                Label("普通请求不携带 Cookie；只有主动选择“登录并解析”才使用 WebKit 会话", systemImage: "lock.shield")
+                Label("普通请求不携带 Cookie；命中登录解析规则且已有会话时才使用 WebKit", systemImage: "lock.shield")
                 Label("登录解析只保存 URL、标题候选和诊断状态，不保存网页正文", systemImage: "doc.badge.ellipsis")
                 Label("localhost、局域网 IP 和高风险操作路径会被拦截", systemImage: "network.badge.shield.half.filled")
             }
@@ -299,67 +394,120 @@ struct LinkResolutionSettingsView: View {
     }
 }
 
-enum ManualLinkResolutionMode: String, CaseIterable, Identifiable {
-    case saveOnly
-    case anonymous
-    case authenticated
-
-    var id: String { rawValue }
-}
-
-private struct ManualLinkEditorSheet: View {
-    let onSave: (String, ManualLinkResolutionMode) async -> Bool
+private struct AuthenticationRuleEditorSheet: View {
+    let seedGroup: LinkFailureGroup?
+    let groups: [LinkFailureGroup]
+    let onSave: (String, String, String) async -> Bool
 
     @Environment(\.dismiss) private var dismiss
-    @State private var value = ""
+    @State private var name: String
+    @State private var pattern: String
+    @State private var startURL: String
+    @State private var lastSuggestedStartURL: String
     @State private var isSaving = false
 
-    private var normalizedURL: URL? { URLFallbackEngine.normalizedWebURL(value) }
-    private var site: LinkAuthenticationSite? {
-        normalizedURL.flatMap { LinkAuthenticationSite.matching(host: $0.host ?? "") }
+    init(
+        seedGroup: LinkFailureGroup?,
+        groups: [LinkFailureGroup],
+        onSave: @escaping (String, String, String) async -> Bool
+    ) {
+        self.seedGroup = seedGroup
+        self.groups = groups
+        self.onSave = onSave
+        let suggestedPattern = seedGroup.map {
+            AuthenticatedLinkPattern.suggestedPattern(for: $0.routeSignature)
+        } ?? ""
+        let samples = groups.map(\.sampleURL)
+        let suggestedStartURL = AuthenticatedLinkPattern.inferredStartURL(
+            pattern: suggestedPattern,
+            sampleURLs: samples
+        )?.absoluteString ?? ""
+        _name = State(initialValue: seedGroup?.routeSignature.host ?? "")
+        _pattern = State(initialValue: suggestedPattern)
+        _startURL = State(initialValue: suggestedStartURL)
+        _lastSuggestedStartURL = State(initialValue: suggestedStartURL)
     }
-    private var hasAuthenticatedSession: Bool {
-        site.flatMap(LinkAuthenticationSession.lastUpdatedAt) != nil
+
+    private var availableGroups: [LinkFailureGroup] {
+        guard let seedGroup,
+              !groups.contains(where: { $0.routeSignature.key == seedGroup.routeSignature.key }) else { return groups }
+        return [seedGroup] + groups
+    }
+    private var sampleURLs: [String] { availableGroups.map(\.sampleURL) }
+    private var matchingGroups: [LinkFailureGroup] {
+        availableGroups.filter { group in
+            guard let url = URLFallbackEngine.normalizedWebURL(group.sampleURL) else { return false }
+            return AuthenticatedLinkPattern.matches(pattern, url: url)
+        }
+    }
+    private var matchingURLCount: Int { matchingGroups.reduce(0) { $0 + $1.uniqueURLCount } }
+    private var patternError: String? { AuthenticatedLinkPattern.validationError(pattern) }
+    private var normalizedStartURL: URL? { URLFallbackEngine.normalizedWebURL(startURL) }
+    private var canSave: Bool {
+        !isSaving
+            && !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && patternError == nil
+            && normalizedStartURL != nil
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("添加链接").font(.title2.bold())
-            Text("不需要先放进系统剪贴板。Pasteory 会把链接保存到资料库，再按你选择的方式解析标题。")
+            Text("添加登录解析").font(.title2.bold())
+            Text("这里只配置需要登录的网站。普通网页仍会自动匿名解析，不需要逐条添加。")
                 .font(.callout)
                 .foregroundStyle(.secondary)
-            TextField("https://example.com/path", text: $value)
-                .textFieldStyle(.roundedBorder)
-            if let site {
-                Label(
-                    hasAuthenticatedSession ? "可以使用 \(site.title) 登录会话" : "\(site.title) 尚未建立登录会话",
-                    systemImage: hasAuthenticatedSession ? "checkmark.shield" : "person.crop.circle.badge.exclamationmark"
-                )
-                .font(.caption)
-                .foregroundStyle(hasAuthenticatedSession ? Color.secondary : Color.orange)
+            Form {
+                TextField("规则名称", text: $name)
+                VStack(alignment: .leading, spacing: 5) {
+                    LabeledContent("匹配正则") {
+                        TextField("^code\\.byted\\.org/.+$", text: $pattern)
+                            .font(.system(.callout, design: .monospaced))
+                            .frame(minWidth: 440)
+                    }
+                    Text("匹配范围是 host + path，可以直接写正则，不需要输入 https://。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if let patternError, !pattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text(patternError).font(.caption).foregroundStyle(.red)
+                    }
+                }
+                TextField("登录入口", text: $startURL)
+                LabeledContent("当前覆盖", value: "\(matchingGroups.count) 组，\(matchingURLCount) 个链接")
+                if let sample = matchingGroups.first?.sampleURL {
+                    LabeledContent("命中示例", value: sample)
+                }
             }
+            .formStyle(.grouped)
             HStack {
                 Spacer()
                 Button("取消") { dismiss() }
-                Button("仅保存") { save(.saveOnly) }
-                    .disabled(isSaving || normalizedURL == nil)
-                Button("匿名解析") { save(.anonymous) }
-                    .disabled(isSaving || normalizedURL == nil)
-                if site != nil {
-                    Button("使用登录会话") { save(.authenticated) }
-                        .disabled(isSaving || !hasAuthenticatedSession)
-                        .keyboardShortcut(.defaultAction)
-                }
+                Button("保存并登录") { save() }
+                    .disabled(!canSave)
+                    .keyboardShortcut(.defaultAction)
             }
         }
         .padding(22)
-        .frame(width: 620)
+        .frame(width: 760, height: 450)
+        .onChange(of: pattern) { _, value in
+            let suggested = AuthenticatedLinkPattern.inferredStartURL(
+                pattern: value,
+                sampleURLs: sampleURLs
+            )?.absoluteString ?? ""
+            if startURL.isEmpty || startURL == lastSuggestedStartURL {
+                startURL = suggested
+            }
+            lastSuggestedStartURL = suggested
+            if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               let host = URLFallbackEngine.normalizedWebURL(suggested)?.host {
+                name = host
+            }
+        }
     }
 
-    private func save(_ mode: ManualLinkResolutionMode) {
+    private func save() {
         isSaving = true
         Task {
-            if await onSave(value, mode) { dismiss() }
+            if await onSave(name, pattern, startURL) { dismiss() }
             isSaving = false
         }
     }
@@ -371,6 +519,7 @@ private struct LinkFailureGroupRow: View {
     let isRetrying: Bool
     let onRetry: () -> Void
     let onAuthenticate: (() -> Void)?
+    let onConfigureAuthentication: () -> Void
     let onConfigureFallback: () -> Void
 
     var body: some View {
@@ -401,6 +550,8 @@ private struct LinkFailureGroupRow: View {
                 Button(isRetrying ? "解析中…" : "重新解析", action: onRetry).disabled(isRetrying)
                 if let onAuthenticate {
                     Button("登录并解析", action: onAuthenticate).disabled(isRetrying)
+                } else {
+                    Button("添加登录解析", action: onConfigureAuthentication).disabled(isRetrying)
                 }
                 Button("配置兜底", action: onConfigureFallback)
             }

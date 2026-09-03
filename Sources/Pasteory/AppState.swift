@@ -43,6 +43,22 @@ final class AppState: ObservableObject {
     @Published var requestedCollectionEditorID: UUID?
     @Published var selectedClipID: UUID?
     @Published var quickSelectionID: UUID?
+    @Published var aggregations: [ClipAggregation] = []
+    @Published var aggregationMembers: [UUID: [Clip]] = [:]
+    @Published var quickExpandedAggregationIDs = Set<UUID>()
+    @Published var libraryExpandedAggregationIDs = Set<UUID>()
+    @Published var quickLastSelectedChildIDs: [UUID: UUID] = [:]
+    @Published var libraryLastSelectedChildIDs: [UUID: UUID] = [:]
+    @Published var quickSelectedAggregationID: UUID?
+    @Published var selectedAggregationID: UUID?
+    @Published var libraryAggregationDraft: AggregationDraft?
+    @Published var quickMultiSelectActive = false
+    @Published var quickMultiSelectionIDs = Set<UUID>()
+    @Published var quickMultiSelectionAnchorID: UUID?
+    @Published var quickAggregationDraft: AggregationDraft?
+    @Published var quickAggregationCommitRequestID: UUID?
+    @Published var quickAggregationDismissRequestID: UUID?
+    @Published var undoableAggregation: ClipAggregation?
     var quickHoveredClipID: UUID?
     @Published var quickMetadataEditorActive = false
     @Published var quickMetadataEditorOpenRequestID: UUID?
@@ -51,6 +67,7 @@ final class AppState: ObservableObject {
     @Published var quickCollectionPickerActive = false
     @Published var quickCollectionPickerOpenRequestID: UUID?
     @Published var quickCollectionPickerDismissRequestID: UUID?
+    @Published var quickCollectionManagerActive = false
     @Published var statusMessage: String?
     @Published var statusKind: AppStatusKind = .info
     @Published var isBusy = false
@@ -59,12 +76,15 @@ final class AppState: ObservableObject {
     @Published var fallbackRules: [URLFallbackRule] = []
     @Published var linkResolutionBusyRouteKeys = Set<String>()
     @Published var linkResolutionBusyResourceIDs = Set<UUID>()
+    @Published var storageAnalyticsSnapshot: StorageAnalyticsSnapshot?
+    @Published var storageAnalyticsLoading = false
 
     let settings: AppSettings
     let repository: any ClipRepository
     let attachments: AttachmentStore
     let archive: ArchiveService
     let backup: BackupService
+    let storageAnalyticsService: StorageAnalyticsService
     let linkResolutionService: LinkResolutionService
     private let authenticatedLinkResolver: AuthenticatedLinkResolver
     private var quickSearchTask: Task<Void, Never>?
@@ -78,6 +98,7 @@ final class AppState: ObservableObject {
         attachments: AttachmentStore,
         archive: ArchiveService,
         backup: BackupService,
+        storageAnalyticsService: StorageAnalyticsService,
         settings: AppSettings,
         linkResolutionService: LinkResolutionService
     ) {
@@ -85,6 +106,7 @@ final class AppState: ObservableObject {
         self.attachments = attachments
         self.archive = archive
         self.backup = backup
+        self.storageAnalyticsService = storageAnalyticsService
         self.settings = settings
         self.linkResolutionService = linkResolutionService
         self.authenticatedLinkResolver = AuthenticatedLinkResolver()
@@ -95,6 +117,8 @@ final class AppState: ObservableObject {
 
     var selectedClip: Clip? { clips.first(where: { $0.id == selectedClipID }) ?? quickClips.first(where: { $0.id == selectedClipID }) }
     var quickSelectedClip: Clip? { quickClips.first(where: { $0.id == quickSelectionID }) }
+    var selectedAggregation: ClipAggregation? { aggregations.first { $0.id == selectedAggregationID } }
+    var quickSelectedAggregation: ClipAggregation? { aggregations.first { $0.id == quickSelectedAggregationID } }
     var quickTabs: [QuickTab] {
         [QuickTab(scope: .all, title: "全部", symbol: "clock")] + collections.map {
             QuickTab(scope: .collection($0.id), title: $0.name, symbol: $0.kind == .smart ? "sparkles" : "folder")
@@ -102,13 +126,21 @@ final class AppState: ObservableObject {
     }
 
     func bootstrap() async {
+        do {
+            let merged = try await repository.consolidateDuplicateClips()
+            if merged > 0 { presentStatus("已合并 \(merged) 条重复内容") }
+        } catch { show(error) }
         await refreshCollections()
         await refreshLibrary()
         await refreshQuick()
+        await refreshAggregations()
         await refreshQuickStats()
         await refreshLinkResolutionData()
         Task.detached(priority: .utility) { [archive] in _ = try? await archive.run() }
-        Task { [weak self] in await self?.prepareExistingLinkFallbacks() }
+        Task { [weak self] in
+            await self?.prepareExistingLinkFallbacks()
+            await self?.refreshRecentLinkCaches()
+        }
     }
 
     func accept(_ capture: PasteboardCapture) async {
@@ -117,6 +149,7 @@ final class AppState: ObservableObject {
         do {
             clip = try await attachments.externalize(clip)
             let stored = try await repository.saveCaptured(clip, context: capture.sourceContext)
+            replaceLocal(stored)
             quickClips.removeAll { $0.id == stored.id }
             quickClips.insert(stored, at: 0)
             if quickClips.count > 500 { quickClips.removeLast(quickClips.count - 500) }
@@ -163,6 +196,20 @@ final class AppState: ObservableObject {
         } catch { show(error) }
     }
 
+    private func refreshRecentLinkCaches() async {
+        guard settings.linkResolutionEnabled else { return }
+        do {
+            let recent = try await repository.list(filter: .all, query: "", limit: LinkCacheRefreshPolicy.scanLimit)
+            for clip in LinkCacheRefreshPolicy.maintenanceCandidates(from: recent) {
+                await linkResolutionService.resolve(clip: clip, allowNetwork: true)
+                await resolveUsingAuthenticatedSessionIfAvailable(clip)
+            }
+            await refreshLibrary()
+            await refreshQuick()
+            await refreshLinkResolutionData()
+        } catch { show(error) }
+    }
+
     func retryLinkResolution(_ group: LinkFailureGroup) {
         guard !linkResolutionBusyRouteKeys.contains(group.routeSignature.key) else { return }
         linkResolutionBusyRouteKeys.insert(group.routeSignature.key)
@@ -185,9 +232,9 @@ final class AppState: ObservableObject {
             defer { self.linkResolutionBusyResourceIDs.remove(resource.id) }
             let previousTitle = resource.resolvedTitle
 
-            if let site = LinkAuthenticationSite.matching(host: resource.host),
-               LinkAuthenticationSession.lastUpdatedAt(site) != nil,
-               let url = URLFallbackEngine.normalizedWebURL(resource.normalizedURL) {
+            if let url = URLFallbackEngine.normalizedWebURL(resource.normalizedURL),
+               let target = LinkAuthenticationTarget.matching(url: url, customRules: settings.authenticatedLinkRules),
+               LinkAuthenticationSession.lastUpdatedAt(target) != nil {
                 do {
                     let snapshot = try await self.authenticatedLinkResolver.resolve(url: url)
                     await linkResolutionService.recordAuthenticatedResult(resource: resource, snapshot: snapshot)
@@ -221,11 +268,18 @@ final class AppState: ObservableObject {
         }
     }
 
-    func retryAuthenticatedLinkResolution(_ group: LinkFailureGroup) async {
+    func retryAuthenticatedLinkResolution(
+        _ group: LinkFailureGroup,
+        using requestedTarget: LinkAuthenticationTarget? = nil
+    ) async {
         let routeKey = group.routeSignature.key
         guard !linkResolutionBusyRouteKeys.contains(routeKey) else { return }
-        guard LinkAuthenticationSite.matching(host: group.routeSignature.host) != nil else {
-            presentStatus("当前网站还没有登录会话适配器", kind: .warning)
+        let sampleURL = URLFallbackEngine.normalizedWebURL(group.sampleURL)
+        let target = requestedTarget ?? sampleURL.flatMap {
+            LinkAuthenticationTarget.matching(url: $0, customRules: settings.authenticatedLinkRules)
+        }
+        guard let target else {
+            presentStatus("当前链接还没有匹配的登录解析规则", kind: .warning)
             return
         }
         linkResolutionBusyRouteKeys.insert(routeKey)
@@ -234,7 +288,7 @@ final class AppState: ObservableObject {
             let resources = try await repository.unresolvedLinkResources(routeKey: routeKey)
             var resolvedCount = 0
             for resource in resources {
-                guard let url = URLFallbackEngine.normalizedWebURL(resource.normalizedURL) else { continue }
+                guard let url = URLFallbackEngine.normalizedWebURL(resource.normalizedURL), target.matches(url) else { continue }
                 do {
                     let snapshot = try await authenticatedLinkResolver.resolve(url: url)
                     await linkResolutionService.recordAuthenticatedResult(resource: resource, snapshot: snapshot)
@@ -257,24 +311,27 @@ final class AppState: ObservableObject {
         } catch { show(error) }
     }
 
-    func retryAuthenticatedLinkResolutions(for site: LinkAuthenticationSite) async {
+    func retryAuthenticatedLinkResolutions(for target: LinkAuthenticationTarget) async {
         do {
             let groups = try await repository.unresolvedLinkGroups(limit: 500)
-                .filter { site.matches(host: $0.routeSignature.host) }
+                .filter {
+                    guard let url = URLFallbackEngine.normalizedWebURL($0.sampleURL) else { return false }
+                    return target.matches(url)
+                }
             guard !groups.isEmpty else {
-                presentStatus("\(site.title) 登录会话已保存，没有待重试链接")
+                presentStatus("\(target.title) 登录会话已保存，没有待重试链接")
                 return
             }
             for group in groups {
-                await retryAuthenticatedLinkResolution(group)
+                await retryAuthenticatedLinkResolution(group, using: target)
             }
         } catch { show(error) }
     }
 
     private func resolveUsingAuthenticatedSessionIfAvailable(_ clip: Clip) async {
         guard let url = URLFallbackEngine.normalizedWebURL(clip.previewText),
-              let site = LinkAuthenticationSite.matching(host: url.host ?? ""),
-              LinkAuthenticationSession.lastUpdatedAt(site) != nil else { return }
+              let target = LinkAuthenticationTarget.matching(url: url, customRules: settings.authenticatedLinkRules),
+              LinkAuthenticationSession.lastUpdatedAt(target) != nil else { return }
         do {
             guard let resource = try await repository.linkResource(normalizedURL: url.absoluteString),
                   resource.requestState.needsAttention else { return }
@@ -290,63 +347,44 @@ final class AppState: ObservableObject {
         }
     }
 
-    func addManualLink(_ rawValue: String, mode: ManualLinkResolutionMode) async -> Bool {
-        guard let url = URLFallbackEngine.normalizedWebURL(rawValue) else {
-            presentStatus("请输入合法的 HTTP 或 HTTPS 链接", kind: .error)
-            return false
+    func addAuthenticatedLinkRule(
+        name: String,
+        pattern: String,
+        startURL: String
+    ) -> LinkAuthenticationTarget? {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedPattern = AuthenticatedLinkPattern.normalized(pattern)
+        guard !trimmedName.isEmpty else {
+            presentStatus("规则名称不能为空", kind: .error)
+            return nil
         }
-        let data = Data(url.absoluteString.utf8)
-        guard let clip = await classificationPipeline.makeClip(from: PasteboardCapture(
-            items: [CapturedItem(order: 0, representations: [
-                CapturedRepresentation(uti: "public.url", data: data),
-                CapturedRepresentation(uti: "public.utf8-plain-text", data: data)
-            ])],
-            source: ClipSource(
-                appName: PasteoryRuntimeIdentity.current.displayName,
-                bundleIdentifier: PasteoryRuntimeIdentity.current.bundleIdentifier,
-                confidence: .high
-            )
-        )) else {
-            presentStatus("无法创建链接记录", kind: .error)
-            return false
+        if let message = AuthenticatedLinkPattern.validationError(normalizedPattern) {
+            presentStatus(message, kind: .error)
+            return nil
         }
-        do {
-            let stored = try await repository.saveCaptured(clip)
-            await linkResolutionService.resolve(clip: stored, allowNetwork: false, force: true)
-            switch mode {
-            case .saveOnly:
-                break
-            case .anonymous:
-                await linkResolutionService.resolve(clip: stored, allowNetwork: true, force: true)
-            case .authenticated:
-                guard LinkAuthenticationSite.matching(host: url.host ?? "") != nil,
-                      let resource = try await repository.linkResource(normalizedURL: url.absoluteString) else {
-                    presentStatus("当前网站还没有可用的登录会话", kind: .warning)
-                    return false
-                }
-                do {
-                    let snapshot = try await authenticatedLinkResolver.resolve(url: url)
-                    await linkResolutionService.recordAuthenticatedResult(resource: resource, snapshot: snapshot)
-                } catch {
-                    await linkResolutionService.recordAuthenticatedFailure(
-                        resource: resource,
-                        errorCode: "webkit_navigation_failed"
-                    )
-                    presentStatus("登录会话未能加载这个链接", kind: .warning)
-                }
-            }
-            libraryFilter = .all
-            selectedClipID = stored.id
-            await refreshLibrary()
-            await refreshQuick()
-            await refreshQuickStats()
-            await refreshLinkResolutionData()
-            presentStatus("链接已添加到资料库")
-            return true
-        } catch {
-            show(error)
-            return false
+        guard let loginURL = URLFallbackEngine.normalizedWebURL(startURL) else {
+            presentStatus("登录入口必须是合法的 HTTP 或 HTTPS 地址", kind: .error)
+            return nil
         }
+        guard !settings.authenticatedLinkRules.contains(where: { $0.pattern == normalizedPattern }) else {
+            presentStatus("相同的登录解析规则已经存在", kind: .warning)
+            return nil
+        }
+        let rule = AuthenticatedLinkRule(
+            name: trimmedName,
+            pattern: normalizedPattern,
+            startURL: loginURL.absoluteString
+        )
+        settings.saveAuthenticatedLinkRule(rule)
+        presentStatus("登录解析规则已添加")
+        return .custom(rule)
+    }
+
+    func removeAuthenticatedLinkRule(_ rule: AuthenticatedLinkRule) {
+        let target = LinkAuthenticationTarget.custom(rule)
+        settings.removeAuthenticatedLinkRule(id: rule.id)
+        LinkAuthenticationSession.clear(target)
+        presentStatus("登录解析规则已移除")
     }
 
     func createFallbackRule(for group: LinkFailureGroup, name: String, titleTemplate: String) async -> Bool {
@@ -418,7 +456,13 @@ final class AppState: ObservableObject {
                 }
                 guard !Task.isCancelled else { return }
                 quickClips = SearchRanker.rank(result, query: query)
-                if resetSelection || !quickClips.contains(where: { $0.id == quickSelectionID }) { quickSelectionID = quickClips.first?.id }
+                if resetSelection {
+                    quickSelectedAggregationID = nil
+                    quickSelectionID = quickClips.first?.id
+                } else if quickSelectedAggregationID == nil,
+                          !quickClips.contains(where: { $0.id == quickSelectionID }) {
+                    quickSelectionID = quickClips.first?.id
+                }
             } catch { show(error) }
         }
         await quickSearchTask?.value
@@ -427,24 +471,47 @@ final class AppState: ObservableObject {
     func prepareQuickPanel() async {
         await refreshCollections()
         await refreshQuick(resetSelection: true)
+        await refreshAggregations()
+        if let first = quickListEntries.first { selectQuickEntry(first) }
         await refreshQuickStats()
         quickPresentationID = UUID()
     }
 
     func refreshQuickStats(now: Date = Date()) async {
         do {
-            async let day = repository.recentClipCount(since: now.addingTimeInterval(-86_400))
-            async let week = repository.recentClipCount(since: now.addingTimeInterval(-7 * 86_400))
+            let range = NaturalDayRange(containing: now)
+            async let day = repository.recentClipCount(since: range.todayStart)
+            async let week = repository.recentClipCount(since: range.sevenDayStart)
             quickDayCount = try await day
             quickWeekCount = try await week
         } catch { show(error) }
     }
 
+    func refreshStorageAnalytics(period: StorageAnalyticsPeriod, now: Date = Date()) async {
+        storageAnalyticsLoading = true
+        defer { storageAnalyticsLoading = false }
+        do {
+            storageAnalyticsSnapshot = try await storageAnalyticsService.snapshot(period: period, now: now)
+        } catch {
+            show(error)
+        }
+    }
+
     func moveQuickSelection(by offset: Int) {
-        guard !quickClips.isEmpty else { quickSelectionID = nil; return }
-        let current = quickClips.firstIndex(where: { $0.id == quickSelectionID }) ?? 0
-        let next = min(max(current + offset, 0), quickClips.count - 1)
-        quickSelectionID = quickClips[next].id
+        let entries = quickListEntries
+        guard !entries.isEmpty else {
+            quickSelectionID = nil
+            quickSelectedAggregationID = nil
+            return
+        }
+        let current = entries.firstIndex { entry in
+            switch entry.content {
+            case .aggregation(let aggregation): aggregation.id == quickSelectedAggregationID
+            case .clip(let clip, _): quickSelectedAggregationID == nil && clip.id == quickSelectionID
+            }
+        } ?? 0
+        let next = min(max(current + offset, 0), entries.count - 1)
+        selectQuickEntry(entries[next])
 #if DEBUG
         print("quick-selection-index=\(next)")
 #endif
@@ -482,7 +549,10 @@ final class AppState: ObservableObject {
                 }
                 guard !Task.isCancelled else { return }
                 clips = SearchRanker.rank(result, query: query)
-                if !clips.contains(where: { $0.id == selectedClipID }) { selectedClipID = clips.first?.id }
+                if selectedAggregationID == nil,
+                   !clips.contains(where: { $0.id == selectedClipID }) {
+                    selectedClipID = clips.first?.id
+                }
             } catch { show(error) }
         }
         await librarySearchTask?.value
@@ -529,6 +599,32 @@ final class AppState: ObservableObject {
         }
     }
 
+    func recordPaste(_ clip: Clip) async -> Bool {
+        do {
+            guard let updated = try await repository.recordPaste(id: clip.id, at: Date()) else {
+                presentStatus("已粘贴，但没有找到对应的资料库记录", kind: .warning, dismissAfter: 5)
+                return false
+            }
+            replaceLocal(updated)
+            await refreshLibrary()
+            await refreshQuick()
+            await refreshAggregations()
+            if updated.primaryKind == .link, settings.linkResolutionEnabled {
+                Task { [weak self, linkResolutionService] in
+                    await linkResolutionService.resolve(clip: updated, allowNetwork: true)
+                    await self?.resolveUsingAuthenticatedSessionIfAvailable(updated)
+                    await self?.refreshLibrary()
+                    await self?.refreshQuick()
+                    await self?.refreshLinkResolutionData()
+                }
+            }
+            return true
+        } catch {
+            presentStatus("已粘贴，但粘贴次数保存失败：\(error.localizedDescription)", kind: .warning, dismissAfter: 5)
+            return false
+        }
+    }
+
     func mutateSelected(_ mutation: (inout Clip) -> Void) {
         guard var clip = selectedClip else { return }
         mutation(&clip); clip.updatedAt = Date(); update(clip)
@@ -570,18 +666,24 @@ final class AppState: ObservableObject {
         catch { show(error); return [] }
     }
 
+    func linkResource(for clip: Clip) async -> LinkResource? {
+        guard clip.primaryKind == .link,
+              let url = URLFallbackEngine.normalizedWebURL(clip.previewText) else { return nil }
+        return try? await repository.linkResource(normalizedURL: url.absoluteString)
+    }
+
     func moveToTrash(_ clip: Clip) {
         var value = clip; value.deletedAt = Date(); value.updatedAt = Date(); update(value)
-        Task { await refreshLibrary(); await refreshQuick(); await refreshQuickStats() }
+        Task { await refreshLibrary(); await refreshQuick(); await refreshAggregations(); await refreshQuickStats() }
     }
 
     func restore(_ clip: Clip) {
         var value = clip; value.deletedAt = nil; value.updatedAt = Date(); update(value)
-        Task { await refreshLibrary(); await refreshQuick(); await refreshQuickStats() }
+        Task { await refreshLibrary(); await refreshQuick(); await refreshAggregations(); await refreshQuickStats() }
     }
 
     func permanentlyDelete(_ clip: Clip) async {
-        do { try await repository.removePermanently(id: clip.id); await refreshLibrary(); await refreshQuick(); await refreshQuickStats() }
+        do { try await repository.removePermanently(id: clip.id); await refreshLibrary(); await refreshQuick(); await refreshAggregations(); await refreshQuickStats() }
         catch { show(error) }
     }
 
@@ -664,45 +766,36 @@ final class AppState: ObservableObject {
     }
 
     func reorderCollections(kind: CollectionKind, fromOffsets: IndexSet, toOffset: Int) async {
-        var target = collections.filter { $0.kind == kind }
-        let moving = fromOffsets.sorted().compactMap { target.indices.contains($0) ? target[$0] : nil }
-        for index in fromOffsets.sorted(by: >) where target.indices.contains(index) { target.remove(at: index) }
-        let removedBeforeDestination = fromOffsets.filter { $0 < toOffset }.count
-        let destination = min(max(toOffset - removedBeforeDestination, 0), target.count)
-        target.insert(contentsOf: moving, at: destination)
-        var normal = kind == .normal ? target : collections.filter { $0.kind == .normal }
-        var smart = kind == .smart ? target : collections.filter { $0.kind == .smart }
-        if kind != .normal { normal.sort { $0.sortOrder < $1.sortOrder } }
-        if kind != .smart { smart.sort { $0.sortOrder < $1.sortOrder } }
-        let ordered = normal + smart
-        do {
-            for (index, var collection) in ordered.enumerated() {
-                collection.sortOrder = index
-                try await repository.saveCollection(collection)
-            }
-            await refreshCollections()
-        } catch { show(error) }
+        let ordered = CollectionOrdering.moving(
+            kind: kind,
+            fromOffsets: fromOffsets,
+            toOffset: toOffset,
+            in: collections
+        )
+        await persistCollectionOrder(ordered)
     }
 
     func moveCollection(id: UUID, before targetID: UUID) async {
-        guard id != targetID,
-              let source = collections.first(where: { $0.id == id }),
-              let target = collections.first(where: { $0.id == targetID }),
-              source.kind == target.kind else { return }
-        var sameKind = collections.filter { $0.kind == source.kind }
-        guard let sourceIndex = sameKind.firstIndex(where: { $0.id == id }) else { return }
-        let moved = sameKind.remove(at: sourceIndex)
-        guard let targetIndex = sameKind.firstIndex(where: { $0.id == targetID }) else { return }
-        sameKind.insert(moved, at: targetIndex)
-        let normal = source.kind == .normal ? sameKind : collections.filter { $0.kind == .normal }.sorted { $0.sortOrder < $1.sortOrder }
-        let smart = source.kind == .smart ? sameKind : collections.filter { $0.kind == .smart }.sorted { $0.sortOrder < $1.sortOrder }
+        await persistCollectionOrder(CollectionOrdering.moving(id: id, before: targetID, in: collections))
+    }
+
+    func moveCollectionToEnd(id: UUID) async {
+        await persistCollectionOrder(CollectionOrdering.movingToEnd(id: id, in: collections))
+    }
+
+    private func persistCollectionOrder(_ ordered: [ClipCollection]) async {
+        guard ordered.map(\.id) != collections.map(\.id) else { return }
+        let previous = collections
+        collections = ordered
         do {
-            for (index, var collection) in (normal + smart).enumerated() {
-                collection.sortOrder = index
+            for collection in ordered {
                 try await repository.saveCollection(collection)
             }
             await refreshCollections()
-        } catch { show(error) }
+        } catch {
+            collections = previous
+            show(error)
+        }
     }
 
     func collectionNameValidationMessage(_ name: String, excluding id: UUID? = nil) -> String? {
@@ -741,6 +834,7 @@ final class AppState: ObservableObject {
 
     func presentStatus(_ message: String, kind: AppStatusKind = .info, dismissAfter seconds: Double = 3) {
         statusDismissTask?.cancel()
+        if !message.hasPrefix("已聚合 ") { undoableAggregation = nil }
         statusMessage = message
         statusKind = kind
         guard seconds > 0 else { return }
@@ -756,9 +850,14 @@ final class AppState: ObservableObject {
         statusMessage = nil
     }
 
-    private func replaceLocal(_ clip: Clip) {
+    func replaceLocal(_ clip: Clip) {
         if let index = clips.firstIndex(where: { $0.id == clip.id }) { clips[index] = clip }
         if let index = quickClips.firstIndex(where: { $0.id == clip.id }) { quickClips[index] = clip }
+        for aggregationID in aggregationMembers.keys {
+            if let index = aggregationMembers[aggregationID]?.firstIndex(where: { $0.id == clip.id }) {
+                aggregationMembers[aggregationID]?[index] = clip
+            }
+        }
     }
 
     private func canonicalCollectionName(_ name: String) -> String {

@@ -5,10 +5,10 @@ public enum SearchRanker {
         let needle = normalize(query)
         return clips.sorted { lhs, rhs in
             if lhs.isPinned != rhs.isPinned { return lhs.isPinned }
-            if needle.isEmpty { return lhs.lastCopiedAt > rhs.lastCopiedAt }
+            if needle.isEmpty { return lhs.lastUsedAt > rhs.lastUsedAt }
             let lhsScore = score(lhs, needle: needle)
             let rhsScore = score(rhs, needle: needle)
-            return lhsScore == rhsScore ? lhs.lastCopiedAt > rhs.lastCopiedAt : lhsScore > rhsScore
+            return lhsScore == rhsScore ? lhs.lastUsedAt > rhs.lastUsedAt : lhsScore > rhsScore
         }
     }
 

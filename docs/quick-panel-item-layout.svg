@@ -1,122 +1,80 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="1040" viewBox="0 0 1500 1040">
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="1250" viewBox="0 0 1500 1250">
   <defs>
     <style>
-      .bg { fill: #f4f2f5; }
-      .card { fill: #ffffff; stroke: #ded9e2; stroke-width: 1.5; }
-      .pinned { fill: #f7f0ff; stroke: #a855f7; stroke-width: 2; }
-      .icon { fill: #eef2ff; }
-      .badge { fill: #c026d3; }
-      .heading { font: 700 26px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; fill: #211d24; }
-      .column { font: 600 18px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; fill: #55505a; }
-      .row { font: 700 20px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; fill: #211d24; }
-      .title { font: 600 13px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; fill: #7e22ce; }
-      .content { font: 500 16px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; fill: #27232a; }
-      .note { font: 400 11px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; fill: #77717c; }
-      .meta { font: 400 11px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; fill: #8a8490; }
-      .annotation { font: 400 13px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; fill: #5f5964; }
-      .line { stroke: #ddd7e1; stroke-width: 1; }
+      .bg { fill:#f7f5f7; }
+      .panel { fill:#ffffff; stroke:#e3dfe5; stroke-width:2; }
+      .selected { fill:#fffafd; stroke:#e13b91; stroke-width:4; }
+      .soft { fill:#f8e7f0; }
+      .icon { fill:#eef2ff; stroke:#d9deef; stroke-width:1.5; }
+      .badge { fill:#e13b91; }
+      .heading { font:700 30px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif; fill:#241f24; }
+      .subtitle { font:400 16px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif; fill:#716a72; }
+      .section { font:700 21px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif; fill:#2b252b; }
+      .label { font:600 14px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif; fill:#4e474f; }
+      .accent { font:650 14px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif; fill:#d92f87; }
+      .body { font:500 16px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif; fill:#292429; }
+      .code { font:500 15px ui-monospace,SFMono-Regular,Menlo,monospace; fill:#7037d8; }
+      .meta { font:450 12px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif; fill:#817a82; }
+      .tiny { font:450 11px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif; fill:#817a82; }
+      .callout { font:500 13px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif; fill:#5f5860; }
+      .num { font:700 12px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif; fill:white; }
     </style>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#a78b9b" flood-opacity="0.14"/></filter>
   </defs>
-  <rect class="bg" width="1500" height="1040" rx="28"/>
-  <text class="heading" x="54" y="54">Pasteory 快捷面板 · Item 信息层级</text>
-  <text class="annotation" x="54" y="84">固定 72pt 行高。原复制内容始终保持相同字号和主色；标题、备注只增加信息，不替换正文视觉。</text>
-
-  <text class="column" x="170" y="130">只有原内容</text>
-  <text class="column" x="620" y="130">标题 + 原内容</text>
-  <text class="column" x="1065" y="130">标题 + 原内容 + 备注</text>
-
-  <text class="row" x="54" y="218">文字</text>
-  <g transform="translate(120 158)">
-    <rect class="card" width="410" height="132" rx="18"/>
-    <rect class="icon" x="18" y="34" width="48" height="48" rx="12"/>
-    <text class="content" x="84" y="52">原复制内容保持主视觉，可显示两行…</text>
-    <text class="content" x="84" y="75">第二行继续展示正文</text>
-    <text class="meta" x="84" y="104">ChatGPT　09-01 14:44　复制 1 次</text>
+  <rect class="bg" width="1500" height="1250" rx="30"/>
+  <text class="heading" x="54" y="58">Pasteory 内容项设计规范</text>
+  <text class="subtitle" x="54" y="88">快捷面板与资料库共用同一套信息顺序；主题色可变，内容结构不变。</text>
+  <text class="section" x="54" y="138">通用结构</text>
+  <g transform="translate(54 160)" filter="url(#shadow)">
+    <rect class="selected" width="1392" height="172" rx="24"/>
+    <rect class="icon" x="24" y="42" width="64" height="64" rx="16"/>
+    <path d="M44 63h24M44 72h18M44 81h24" stroke="#6d64d9" stroke-width="3" stroke-linecap="round"/>
+    <circle class="badge" cx="84" cy="101" r="15"/><path d="M76 101h16M79 96h10M79 106h10" stroke="white" stroke-width="2" stroke-linecap="round"/>
+    <text class="tiny" x="31" y="128">ChatGPT</text>
+    <text class="accent" x="116" y="36">◆ 自定义标题，单行截断</text>
+    <text class="body" x="116" y="67">原复制内容始终是主信息，可按类型显示文本、链接、图片、代码、颜色或文件。</text>
+    <text class="meta" x="116" y="94">▤ 备注只补充信息，不替换正文。</text>
+    <text class="meta" x="116" y="136">09-03 12:16　复制 ×3 · 粘贴 ×2　● 置顶</text>
+    <rect class="soft" x="1296" y="112" width="66" height="34" rx="12"/><text class="label" x="1312" y="134">⌘ 1</text>
   </g>
-  <g transform="translate(565 158)">
-    <rect class="card" width="410" height="132" rx="18"/>
-    <rect class="icon" x="18" y="34" width="48" height="48" rx="12"/>
-    <text class="title" x="84" y="35">自定义标题</text>
-    <text class="content" x="84" y="62">原复制内容仍是 16px 主色文本…</text>
-    <text class="meta" x="84" y="104">ChatGPT　09-01 14:44　复制 12 次</text>
+  <g>
+    <circle class="badge" cx="82" cy="366" r="14"/><text class="num" x="78" y="371">1</text><text class="callout" x="106" y="371">来源区固定宽度，App 图标、类型角标和来源名称垂直排列。</text>
+    <circle class="badge" cx="510" cy="366" r="14"/><text class="num" x="506" y="371">2</text><text class="callout" x="534" y="371">标题、正文、备注按信息层级排列，各自负责截断。</text>
+    <circle class="badge" cx="914" cy="366" r="14"/><text class="num" x="910" y="371">3</text><text class="callout" x="938" y="371">时间与次数保持单行，不能被正文挤出卡片。</text>
   </g>
-  <g transform="translate(1010 158)">
-    <rect class="pinned" width="410" height="132" rx="18"/>
-    <rect class="icon" x="18" y="34" width="48" height="48" rx="12"/>
-    <text class="title" x="84" y="30">很长的标题在一行内截断…</text>
-    <text class="content" x="84" y="56">原内容字号、颜色保持不变…</text>
-    <text class="note" x="84" y="78">▤ 备注使用单行摘要，超长内容截断…</text>
-    <text class="meta" x="84" y="105">ChatGPT　09-01 14:44　复制 128 次　📌</text>
+  <text class="section" x="54" y="426">内容类型</text>
+  <g transform="translate(54 452)">
+    <rect class="panel" width="670" height="142" rx="20"/><text class="label" x="22" y="29">文字 · 72 / 82 pt</text>
+    <rect class="icon" x="22" y="49" width="52" height="52" rx="13"/><path d="M38 64h22M38 73h18M38 82h22" stroke="#6d64d9" stroke-width="3" stroke-linecap="round"/>
+    <text class="body" x="94" y="67">原复制内容最多显示两行，标题或备注存在时收紧行数。</text><text class="meta" x="94" y="100">09-03 12:16　复制 ×12 · 粘贴 ×5</text>
   </g>
-
-  <line class="line" x1="54" y1="326" x2="1446" y2="326"/>
-  <text class="row" x="54" y="412">图片</text>
-  <g transform="translate(120 352)">
-    <rect class="card" width="410" height="132" rx="18"/>
-    <rect class="icon" x="18" y="34" width="48" height="48" rx="12"/>
-    <rect x="84" y="24" width="64" height="64" rx="8" fill="#d8c8f7"/>
-    <circle cx="125" cy="44" r="8" fill="#fff4b8"/>
-    <path d="M88 82 L106 61 L119 73 L132 54 L145 82 Z" fill="#7c3aed"/>
-    <text class="meta" x="84" y="108">预览　09-01 14:44　复制 1 次</text>
+  <g transform="translate(776 452)">
+    <rect class="panel" width="670" height="142" rx="20"/><text class="label" x="22" y="29">链接 · 86 / 92 pt</text>
+    <rect class="icon" x="22" y="49" width="52" height="52" rx="13"/><path d="M38 78l9-9a9 9 0 0113 13l-5 5M58 72l-9 9a9 9 0 01-13-13l5-5" stroke="#2785dd" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <text class="accent" x="94" y="58">[Feature] Android KMP ABMock 优化</text><text class="body" x="94" y="82" fill="#1673cf">https://bits.bytedance.net/devops/…</text><text class="meta" x="94" y="111">09-03 12:16　复制 ×3 · 粘贴 ×2</text>
   </g>
-  <g transform="translate(565 352)">
-    <rect class="card" width="410" height="132" rx="18"/>
-    <rect class="icon" x="18" y="34" width="48" height="48" rx="12"/>
-    <rect x="84" y="24" width="64" height="64" rx="8" fill="#d8c8f7"/>
-    <circle cx="125" cy="44" r="8" fill="#fff4b8"/>
-    <path d="M88 82 L106 61 L119 73 L132 54 L145 82 Z" fill="#7c3aed"/>
-    <text class="title" x="164" y="48">产品截图</text>
-    <text class="content" x="164" y="72">图片本身仍是主内容</text>
-    <text class="meta" x="84" y="108">预览　09-01 14:44　复制 3 次</text>
+  <g transform="translate(54 618)">
+    <rect class="panel" width="670" height="190" rx="20"/><text class="label" x="22" y="29">图片 · 最低 88 / 96 pt，标题和备注存在时动态增加</text>
+    <rect x="22" y="50" width="108" height="96" rx="14" fill="#d9c9f4"/><circle cx="95" cy="76" r="11" fill="#fff5bd"/><path d="M30 138L57 103L78 122L102 90L124 138Z" fill="#7c3aed"/>
+    <text class="meta" x="154" y="70">图片格式: png</text><text class="meta" x="154" y="96">图片大小: 123 * 1234</text><text class="meta" x="154" y="122">文件大小: 78.0 KB</text><text class="meta" x="154" y="154">09-03 12:16　复制 ×1 · 粘贴 ×0</text>
   </g>
-  <g transform="translate(1010 352)">
-    <rect class="pinned" width="410" height="132" rx="18"/>
-    <rect class="icon" x="18" y="34" width="48" height="48" rx="12"/>
-    <rect x="84" y="24" width="64" height="64" rx="8" fill="#d8c8f7"/>
-    <circle cx="125" cy="44" r="8" fill="#fff4b8"/>
-    <path d="M88 82 L106 61 L119 73 L132 54 L145 82 Z" fill="#7c3aed"/>
-    <text class="title" x="164" y="40">产品截图</text>
-    <text class="content" x="164" y="64">固定缩略图区域</text>
-    <text class="note" x="164" y="84">▤ 用于周报</text>
-    <text class="meta" x="84" y="108">预览　09-01 14:44　复制 16 次　📌</text>
+  <g transform="translate(776 618)">
+    <rect class="panel" width="670" height="190" rx="20"/><text class="label" x="22" y="29">文件 · 96 / 104 pt</text>
+    <path d="M30 51h72l22 22v78H30Z" fill="#f6f8fb" stroke="#bbc4d2" stroke-width="2"/><path d="M102 51v24h22" fill="#dde5f0"/><rect x="42" y="118" width="70" height="24" rx="7" fill="#59708c"/><text class="num" x="61" y="135">TXT</text>
+    <text class="body" x="150" y="73">mac_lock_screen.txt</text><text class="meta" x="150" y="101">~/Downloads</text><text class="meta" x="150" y="127">8.0 B</text><text class="meta" x="150" y="157">09-03 12:16　复制 ×1 · 粘贴 ×0</text>
   </g>
-
-  <line class="line" x1="54" y1="520" x2="1446" y2="520"/>
-  <text class="row" x="54" y="606">文件</text>
-  <g transform="translate(120 546)">
-    <rect class="card" width="410" height="132" rx="18"/>
-    <rect class="icon" x="18" y="34" width="48" height="48" rx="12"/>
-    <rect x="84" y="26" width="42" height="52" rx="6" fill="#e8e5ec"/>
-    <path d="M112 26 L126 40 L112 40 Z" fill="#c5bfcb"/>
-    <text class="content" x="140" y="58">Pasteory-Design-v3.pdf</text>
-    <text class="meta" x="84" y="104">Finder　09-01 14:44　复制 1 次</text>
+  <g transform="translate(54 832)">
+    <rect class="panel" width="670" height="170" rx="20"/><text class="label" x="22" y="29">代码 · 96 / 104 pt</text>
+    <rect x="22" y="51" width="70" height="70" rx="14" fill="#eee7ff"/><text class="code" x="37" y="92">&lt;/&gt;</text><rect x="112" y="49" width="520" height="72" rx="10" fill="#f2edff"/>
+    <text class="code" x="128" y="75">struct CodePreview: View {</text><text class="code" x="144" y="99">var body: some View { … }</text><text class="meta" x="112" y="147">5 行　09-03 12:16　复制 ×1 · 粘贴 ×0</text>
   </g>
-  <g transform="translate(565 546)">
-    <rect class="card" width="410" height="132" rx="18"/>
-    <rect class="icon" x="18" y="34" width="48" height="48" rx="12"/>
-    <rect x="84" y="26" width="42" height="52" rx="6" fill="#e8e5ec"/>
-    <path d="M112 26 L126 40 L112 40 Z" fill="#c5bfcb"/>
-    <text class="title" x="140" y="42">设计交付稿</text>
-    <text class="content" x="140" y="67">Pasteory-Design-v3.pdf</text>
-    <text class="meta" x="84" y="104">Finder　09-01 14:44　复制 5 次</text>
+  <g transform="translate(776 832)">
+    <rect class="panel" width="670" height="170" rx="20"/><text class="label" x="22" y="29">颜色 · 72 / 82 pt</text>
+    <rect x="22" y="51" width="70" height="70" rx="16" fill="#7c3aed" stroke="#5a2db0" stroke-width="2"/><text class="body" x="116" y="83">#7C3AED</text><text class="meta" x="116" y="112">显示真实色块，同时保留原始颜色值</text><text class="meta" x="116" y="147">09-03 12:16　复制 ×1 · 粘贴 ×0</text>
   </g>
-  <g transform="translate(1010 546)">
-    <rect class="pinned" width="410" height="132" rx="18"/>
-    <rect class="icon" x="18" y="34" width="48" height="48" rx="12"/>
-    <rect x="84" y="26" width="42" height="52" rx="6" fill="#e8e5ec"/>
-    <path d="M112 26 L126 40 L112 40 Z" fill="#c5bfcb"/>
-    <text class="title" x="140" y="36">设计交付稿</text>
-    <text class="content" x="140" y="60">Pasteory-Design-v3.pdf</text>
-    <text class="note" x="140" y="82">▤ 发给团队前复核</text>
-    <text class="meta" x="84" y="106">Finder　09-01 14:44　复制 28 次　📌</text>
-  </g>
-
-  <line class="line" x1="54" y1="724" x2="1446" y2="724"/>
-  <text class="heading" x="54" y="774">状态规则</text>
-  <text class="annotation" x="54" y="810">1. 原内容始终使用主文字样式；有标题时只把正文从两行收为一行，不改字号和颜色。</text>
-  <text class="annotation" x="54" y="842">2. 标题使用 11–13px 紫色半粗体；备注使用 10–11px 灰色单行摘要；两者都不参与复制内容。</text>
-  <text class="annotation" x="54" y="874">3. 图片使用固定 52×42pt 区域；文件使用文件图标 + 文件名。标题和备注只占右侧说明区。</text>
-  <text class="annotation" x="54" y="906">4. 底部始终保留来源、MM-DD HH:MM、复制次数和状态图标；来源先截断，其他字段不被挤掉。</text>
-  <text class="annotation" x="54" y="938">5. 置顶项排在最前，使用图钉 + 浅紫底双重提示；右键前先更新选中框。</text>
-  <text class="annotation" x="54" y="970">6. ⌘1～⌘9 只在按住 Command 时出现，固定在卡片右下角，不参与正文排版。</text>
+  <rect class="soft" x="54" y="1034" width="1392" height="162" rx="22"/>
+  <text class="section" x="82" y="1072">必须保持的规则</text>
+  <text class="callout" x="82" y="1105">• 快捷面板与资料库使用同一内容顺序；宽度变化只影响截断，不改变字段。</text>
+  <text class="callout" x="82" y="1135">• 图片元数据固定分三行；文件路径不重复文件名；代码列表只做轻量预览。</text>
+  <text class="callout" x="82" y="1165">• 选中态、置顶态和标题跟随主题色；深色模式使用系统动态背景。</text>
 </svg>

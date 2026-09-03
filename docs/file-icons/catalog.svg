@@ -1,0 +1,1091 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1204" height="1462" viewBox="0 0 1204 1462">
+  <rect width="1204" height="1462" fill="#F8FAFC"/>
+  <style>
+    .heading { font: 700 28px -apple-system, BlinkMacSystemFont, sans-serif; fill: #0F172A; }
+    .subheading { font: 400 15px -apple-system, BlinkMacSystemFont, sans-serif; fill: #64748B; }
+    .title { font: 650 14px -apple-system, BlinkMacSystemFont, sans-serif; fill: #1E293B; }
+    .examples { font: 400 9px -apple-system, BlinkMacSystemFont, sans-serif; fill: #64748B; }
+  </style>
+  <text x="32" y="48" class="heading">Pasteory 文件图标系统</text>
+  <text x="32" y="78" class="subheading">后缀决定标签，文件家族决定图形与颜色；图片只有在文件本身是图片时才显示真实缩略图。</text>
+  <text x="32" y="101" class="subheading">设计稿为 128 × 128 矢量图标，重点检查 32–48 pt 下的标签识别度。</text>
+    <g transform="translate(28 118)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-txt" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#64748B"/>
+    <stop offset="1" stop-color="#475569"/>
+  </linearGradient>
+  <filter id="shadow-catalog-txt" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-txt)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#64748B" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#64748B" fill-opacity=".13" stroke="#64748B" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#64748B" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="5"><path d="M37 36h43M37 49h52M37 62h35"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-txt)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">TXT</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">纯文本</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">txt · text</text>
+  </g>  <g transform="translate(192 118)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-markdown" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#334155"/>
+    <stop offset="1" stop-color="#0F172A"/>
+  </linearGradient>
+  <filter id="shadow-catalog-markdown" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-markdown)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#334155" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#334155" fill-opacity=".13" stroke="#334155" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="59" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="27" font-weight="800" fill="#334155">M↓</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-markdown)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">MD</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">Markdown</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">md · markdown</text>
+  </g>  <g transform="translate(356 118)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-pdf" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#DC2626"/>
+    <stop offset="1" stop-color="#991B1B"/>
+  </linearGradient>
+  <filter id="shadow-catalog-pdf" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-pdf)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#DC2626" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#DC2626" fill-opacity=".13" stroke="#DC2626" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#DC2626" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="5"><path d="M39 37h35M39 49h46M39 61h28"/><path d="M82 36v27" opacity=".32"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-pdf)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">PDF</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">PDF</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">pdf</text>
+  </g>  <g transform="translate(520 118)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-document" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#2563EB"/>
+    <stop offset="1" stop-color="#1D4ED8"/>
+  </linearGradient>
+  <filter id="shadow-catalog-document" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-document)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#2563EB" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#2563EB" fill-opacity=".13" stroke="#2563EB" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#2563EB" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="5"><path d="M37 36h43M37 49h52M37 62h35"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-document)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">DOC</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">文档</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">docx · pages · rtf</text>
+  </g>  <g transform="translate(684 118)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-spreadsheet" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#16A34A"/>
+    <stop offset="1" stop-color="#15803D"/>
+  </linearGradient>
+  <filter id="shadow-catalog-spreadsheet" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-spreadsheet)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#16A34A" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#16A34A" fill-opacity=".13" stroke="#16A34A" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#16A34A" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="3.5"><rect x="36" y="34" width="54" height="33" rx="3"/><path d="M36 45h54M36 56h54M54 34v33M72 34v33"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-spreadsheet)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">XLS</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">表格</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">xlsx · numbers · csv</text>
+  </g>  <g transform="translate(848 118)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-presentation" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#EA580C"/>
+    <stop offset="1" stop-color="#C2410C"/>
+  </linearGradient>
+  <filter id="shadow-catalog-presentation" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-presentation)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#EA580C" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#EA580C" fill-opacity=".13" stroke="#EA580C" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#EA580C" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><rect x="35" y="33" width="56" height="35" rx="5"/><path d="M47 58l9-10 8 7 11-13 8 16"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-presentation)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">PPT</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">演示文稿</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">pptx · key</text>
+  </g>  <g transform="translate(1012 118)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-image" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#DB2777"/>
+    <stop offset="1" stop-color="#BE185D"/>
+  </linearGradient>
+  <filter id="shadow-catalog-image" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-image)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#DB2777" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#DB2777" fill-opacity=".13" stroke="#DB2777" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#DB2777" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><rect x="34" y="31" width="58" height="39" rx="7"/><circle cx="76" cy="42" r="5" fill="#DB2777" stroke="none"/><path d="M39 64l14-15 10 10 8-8 16 13"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-image)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">IMG</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">图片回退</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">png · jpg · heic</text>
+  </g>  <g transform="translate(28 306)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-audio" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#7C3AED"/>
+    <stop offset="1" stop-color="#6D28D9"/>
+  </linearGradient>
+  <filter id="shadow-catalog-audio" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-audio)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#7C3AED" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#7C3AED" fill-opacity=".13" stroke="#7C3AED" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#7C3AED" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="5"><path d="M39 51v-8M49 61V33M59 56V38M69 65V29M79 57V37M89 52V42"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-audio)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">AUD</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">音频</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">mp3 · m4a · wav</text>
+  </g>  <g transform="translate(192 306)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-video" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#9333EA"/>
+    <stop offset="1" stop-color="#7E22CE"/>
+  </linearGradient>
+  <filter id="shadow-catalog-video" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-video)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#9333EA" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#9333EA" fill-opacity=".13" stroke="#9333EA" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#9333EA" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><rect x="34" y="31" width="58" height="40" rx="8"/><path d="M58 43l15 8-15 9z" fill="#9333EA" stroke="none"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-video)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">VID</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">视频</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">mp4 · mov · webm</text>
+  </g>  <g transform="translate(356 306)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-archive" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#CA8A04"/>
+    <stop offset="1" stop-color="#A16207"/>
+  </linearGradient>
+  <filter id="shadow-catalog-archive" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-archive)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#CA8A04" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#CA8A04" fill-opacity=".13" stroke="#CA8A04" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g fill="#CA8A04"><rect x="58" y="29" width="11" height="8" rx="2"/><rect x="58" y="40" width="11" height="8" rx="2"/><rect x="58" y="51" width="11" height="8" rx="2"/><path d="M55 63h17v8H55z"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-archive)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">ZIP</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">压缩包</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">zip · 7z · tar.gz</text>
+  </g>  <g transform="translate(520 306)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-installer" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#0D9488"/>
+    <stop offset="1" stop-color="#0F766E"/>
+  </linearGradient>
+  <filter id="shadow-catalog-installer" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-installer)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#0D9488" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#0D9488" fill-opacity=".13" stroke="#0D9488" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#0D9488" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><path d="M39 42l25-13 25 13-25 14zM39 42v24l25 13 25-13V42M64 56v23"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-installer)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">PKG</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">安装与镜像</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">dmg · pkg · iso</text>
+  </g>  <g transform="translate(684 306)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-font" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#4F46E5"/>
+    <stop offset="1" stop-color="#4338CA"/>
+  </linearGradient>
+  <filter id="shadow-catalog-font" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-font)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#4F46E5" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#4F46E5" fill-opacity=".13" stroke="#4F46E5" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="63" text-anchor="middle" font-family="Georgia,serif" font-size="34" font-weight="700" fill="#4F46E5">Aa</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-font)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="14" font-weight="800" letter-spacing=".3" fill="#FFFFFF">FONT</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">字体</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">ttf · otf · woff2</text>
+  </g>  <g transform="translate(848 306)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-json" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#D97706"/>
+    <stop offset="1" stop-color="#B45309"/>
+  </linearGradient>
+  <filter id="shadow-catalog-json" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-json)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#D97706" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#D97706" fill-opacity=".13" stroke="#D97706" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="61" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="25" font-weight="800" fill="#D97706">&lt;/&gt;</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-json)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="14" font-weight="800" letter-spacing=".3" fill="#FFFFFF">JSON</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">JSON</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">json · json5</text>
+  </g>  <g transform="translate(1012 306)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-yaml" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#C2410C"/>
+    <stop offset="1" stop-color="#9A3412"/>
+  </linearGradient>
+  <filter id="shadow-catalog-yaml" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-yaml)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#C2410C" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#C2410C" fill-opacity=".13" stroke="#C2410C" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#C2410C" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><path d="M38 37h50M38 50h50M38 63h50"/><circle cx="54" cy="37" r="5" fill="white"/><circle cx="75" cy="50" r="5" fill="white"/><circle cx="60" cy="63" r="5" fill="white"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-yaml)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="14" font-weight="800" letter-spacing=".3" fill="#FFFFFF">YAML</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">YAML</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">yaml · yml</text>
+  </g>  <g transform="translate(28 494)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-xml" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#EA580C"/>
+    <stop offset="1" stop-color="#C2410C"/>
+  </linearGradient>
+  <filter id="shadow-catalog-xml" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-xml)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#EA580C" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#EA580C" fill-opacity=".13" stroke="#EA580C" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="61" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="25" font-weight="800" fill="#EA580C">&lt;/&gt;</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-xml)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">XML</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">XML</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">xml</text>
+  </g>  <g transform="translate(192 494)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-config" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#64748B"/>
+    <stop offset="1" stop-color="#475569"/>
+  </linearGradient>
+  <filter id="shadow-catalog-config" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-config)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#64748B" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#64748B" fill-opacity=".13" stroke="#64748B" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#64748B" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><path d="M38 37h50M38 50h50M38 63h50"/><circle cx="54" cy="37" r="5" fill="white"/><circle cx="75" cy="50" r="5" fill="white"/><circle cx="60" cy="63" r="5" fill="white"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-config)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">CFG</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">配置</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">toml · ini · plist · env</text>
+  </g>  <g transform="translate(356 494)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-database" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#0891B2"/>
+    <stop offset="1" stop-color="#0E7490"/>
+  </linearGradient>
+  <filter id="shadow-catalog-database" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-database)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#0891B2" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#0891B2" fill-opacity=".13" stroke="#0891B2" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#0891B2" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><ellipse cx="64" cy="35" rx="25" ry="9"/><path d="M39 35v27c0 5 11 9 25 9s25-4 25-9V35M39 49c0 5 11 9 25 9s25-4 25-9"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-database)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">DB</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">数据库</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">db · sqlite3 · realm</text>
+  </g>  <g transform="translate(520 494)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-shell" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#1F2937"/>
+    <stop offset="1" stop-color="#111827"/>
+  </linearGradient>
+  <filter id="shadow-catalog-shell" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-shell)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#1F2937" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#1F2937" fill-opacity=".13" stroke="#1F2937" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="61" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="27" font-weight="800" fill="#1F2937">&gt;_</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-shell)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">SH</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">Shell</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">sh · zsh · bash</text>
+  </g>  <g transform="translate(684 494)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-api" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#6366F1"/>
+    <stop offset="1" stop-color="#4F46E5"/>
+  </linearGradient>
+  <filter id="shadow-catalog-api" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-api)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#6366F1" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#6366F1" fill-opacity=".13" stroke="#6366F1" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#6366F1" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><path d="M46 39l18 11 18-11M46 39v22l18 10 18-10V39"/><circle cx="46" cy="39" r="5" fill="white"/><circle cx="82" cy="39" r="5" fill="white"/><circle cx="64" cy="71" r="5" fill="white"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-api)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">API</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">接口定义</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">proto · thrift · gql</text>
+  </g>  <g transform="translate(848 494)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-diff" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#D97706"/>
+    <stop offset="1" stop-color="#B45309"/>
+  </linearGradient>
+  <filter id="shadow-catalog-diff" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-diff)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#D97706" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#D97706" fill-opacity=".13" stroke="#D97706" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#D97706" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><path d="M39 39h18M48 30v18M70 39h18M39 61h18M70 61h18"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-diff)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="14" font-weight="800" letter-spacing=".3" fill="#FFFFFF">DIFF</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">补丁与差异</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">patch · diff</text>
+  </g>  <g transform="translate(1012 494)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-log" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F97316"/>
+    <stop offset="1" stop-color="#EA580C"/>
+  </linearGradient>
+  <filter id="shadow-catalog-log" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-log)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#F97316" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#F97316" fill-opacity=".13" stroke="#F97316" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#F97316" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><path d="M35 53h10l6-17 10 31 8-22 7 8h16"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-log)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">LOG</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">日志</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">log · trace</text>
+  </g>  <g transform="translate(28 682)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-lock" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#64748B"/>
+    <stop offset="1" stop-color="#334155"/>
+  </linearGradient>
+  <filter id="shadow-catalog-lock" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-lock)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#64748B" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#64748B" fill-opacity=".13" stroke="#64748B" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#64748B" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><rect x="42" y="46" width="44" height="27" rx="6"/><path d="M50 46v-8c0-9 6-14 14-14s14 5 14 14v8"/><circle cx="64" cy="59" r="4" fill="#64748B" stroke="none"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-lock)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="14" font-weight="800" letter-spacing=".3" fill="#FFFFFF">LOCK</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">依赖锁定</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">lock · resolved</text>
+  </g>  <g transform="translate(192 682)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-swift" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F05138"/>
+    <stop offset="1" stop-color="#D63B27"/>
+  </linearGradient>
+  <filter id="shadow-catalog-swift" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-swift)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#F05138" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#F05138" fill-opacity=".13" stroke="#F05138" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="61" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="25" font-weight="800" fill="#F05138">&lt;/&gt;</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-swift)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="12" font-weight="800" letter-spacing=".3" fill="#FFFFFF">SWIFT</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">Swift</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">swift · interface</text>
+  </g>  <g transform="translate(356 682)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-objc" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#3B82F6"/>
+    <stop offset="1" stop-color="#2563EB"/>
+  </linearGradient>
+  <filter id="shadow-catalog-objc" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-objc)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#3B82F6" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#3B82F6" fill-opacity=".13" stroke="#3B82F6" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="61" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="25" font-weight="800" fill="#3B82F6">&lt;/&gt;</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-objc)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="12" font-weight="800" letter-spacing=".3" fill="#FFFFFF">OBJ-C</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">Objective-C</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">m · mm · h</text>
+  </g>  <g transform="translate(520 682)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-cpp" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#00599C"/>
+    <stop offset="1" stop-color="#004482"/>
+  </linearGradient>
+  <filter id="shadow-catalog-cpp" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-cpp)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#00599C" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#00599C" fill-opacity=".13" stroke="#00599C" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="61" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="25" font-weight="800" fill="#00599C">&lt;/&gt;</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-cpp)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">C++</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">C 与 C++</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">c · cc · cpp · hpp</text>
+  </g>  <g transform="translate(684 682)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-xcode" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#147EFB"/>
+    <stop offset="1" stop-color="#0B65D8"/>
+  </linearGradient>
+  <filter id="shadow-catalog-xcode" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-xcode)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#147EFB" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#147EFB" fill-opacity=".13" stroke="#147EFB" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#147EFB" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><rect x="35" y="32" width="24" height="18" rx="4"/><rect x="69" y="32" width="24" height="18" rx="4"/><rect x="52" y="58" width="24" height="18" rx="4"/><path d="M47 50v4h34v-4M64 54v4"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-xcode)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="12" font-weight="800" letter-spacing=".3" fill="#FFFFFF">XCODE</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">Xcode 工程</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">xcodeproj · workspace</text>
+  </g>  <g transform="translate(848 682)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-ios-package" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#0EA5E9"/>
+    <stop offset="1" stop-color="#0284C7"/>
+  </linearGradient>
+  <filter id="shadow-catalog-ios-package" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-ios-package)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#0EA5E9" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#0EA5E9" fill-opacity=".13" stroke="#0EA5E9" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#0EA5E9" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><path d="M39 42l25-13 25 13-25 14zM39 42v24l25 13 25-13V42M64 56v23"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-ios-package)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">IPA</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">Apple 构建产物</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">ipa · app · archive</text>
+  </g>  <g transform="translate(1012 682)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-certificate" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#B91C1C"/>
+    <stop offset="1" stop-color="#991B1B"/>
+  </linearGradient>
+  <filter id="shadow-catalog-certificate" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-certificate)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#B91C1C" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#B91C1C" fill-opacity=".13" stroke="#B91C1C" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#B91C1C" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><path d="M64 27l24 9v15c0 14-10 23-24 28-14-5-24-14-24-28V36z"/><path d="M53 52l8 8 15-17"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-certificate)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="14" font-weight="800" letter-spacing=".3" fill="#FFFFFF">CERT</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">证书与签名</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">p12 · cer · provision</text>
+  </g>  <g transform="translate(28 870)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-kotlin" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#7F52FF"/>
+    <stop offset="1" stop-color="#5B2FD6"/>
+  </linearGradient>
+  <filter id="shadow-catalog-kotlin" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-kotlin)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#7F52FF" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#7F52FF" fill-opacity=".13" stroke="#7F52FF" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="61" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="25" font-weight="800" fill="#7F52FF">&lt;/&gt;</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-kotlin)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">KT</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">Kotlin</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">kt · kts</text>
+  </g>  <g transform="translate(192 870)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-java" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#E76F00"/>
+    <stop offset="1" stop-color="#C75E00"/>
+  </linearGradient>
+  <filter id="shadow-catalog-java" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-java)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#E76F00" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#E76F00" fill-opacity=".13" stroke="#E76F00" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="61" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="25" font-weight="800" fill="#E76F00">&lt;/&gt;</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-java)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="14" font-weight="800" letter-spacing=".3" fill="#FFFFFF">JAVA</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">Java</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">java</text>
+  </g>  <g transform="translate(356 870)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-android-package" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#3DDC84"/>
+    <stop offset="1" stop-color="#16A763"/>
+  </linearGradient>
+  <filter id="shadow-catalog-android-package" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-android-package)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#3DDC84" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#3DDC84" fill-opacity=".13" stroke="#3DDC84" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#3DDC84" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><path d="M39 42l25-13 25 13-25 14zM39 42v24l25 13 25-13V42M64 56v23"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-android-package)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#123524">APK</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">Android 安装包</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">apk · aab</text>
+  </g>  <g transform="translate(520 870)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-android-library" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#22C55E"/>
+    <stop offset="1" stop-color="#16A34A"/>
+  </linearGradient>
+  <filter id="shadow-catalog-android-library" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-android-library)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#22C55E" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#22C55E" fill-opacity=".13" stroke="#22C55E" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#22C55E" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><rect x="35" y="32" width="24" height="18" rx="4"/><rect x="69" y="32" width="24" height="18" rx="4"/><rect x="52" y="58" width="24" height="18" rx="4"/><path d="M47 50v4h34v-4M64 54v4"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-android-library)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">AAR</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">Android 库</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">aar · jar</text>
+  </g>  <g transform="translate(684 870)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-binary" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#475569"/>
+    <stop offset="1" stop-color="#1E293B"/>
+  </linearGradient>
+  <filter id="shadow-catalog-binary" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-binary)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#475569" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#475569" fill-opacity=".13" stroke="#475569" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="60" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="23" font-weight="800" fill="#475569">01 10</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-binary)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">BIN</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">二进制与原生库</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">so · dex · wasm</text>
+  </g>  <g transform="translate(848 870)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-diagnostic" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F97316"/>
+    <stop offset="1" stop-color="#DC2626"/>
+  </linearGradient>
+  <filter id="shadow-catalog-diagnostic" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-diagnostic)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#F97316" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#F97316" fill-opacity=".13" stroke="#F97316" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#F97316" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><circle cx="64" cy="51" r="19"/><path d="M64 22v10M64 70v9M35 51h10M83 51h10M44 31l7 7M77 64l7 7M84 31l-7 7M51 64l-7 7"/><circle cx="64" cy="51" r="6" fill="#F97316" stroke="none"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-diagnostic)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="12" font-weight="800" letter-spacing=".3" fill="#FFFFFF">DEBUG</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">诊断文件</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">crash · ips · hprof</text>
+  </g>  <g transform="translate(1012 870)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-network" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#06B6D4"/>
+    <stop offset="1" stop-color="#0284C7"/>
+  </linearGradient>
+  <filter id="shadow-catalog-network" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-network)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#06B6D4" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#06B6D4" fill-opacity=".13" stroke="#06B6D4" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#06B6D4" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><path d="M46 39l18 11 18-11M46 39v22l18 10 18-10V39"/><circle cx="46" cy="39" r="5" fill="white"/><circle cx="82" cy="39" r="5" fill="white"/><circle cx="64" cy="71" r="5" fill="white"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-network)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">NET</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">网络抓包</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">har · pcap · pcapng</text>
+  </g>  <g transform="translate(28 1058)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-arkts" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#0A84FF"/>
+    <stop offset="1" stop-color="#006EDC"/>
+  </linearGradient>
+  <filter id="shadow-catalog-arkts" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-arkts)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#0A84FF" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#0A84FF" fill-opacity=".13" stroke="#0A84FF" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="61" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="25" font-weight="800" fill="#0A84FF">&lt;/&gt;</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-arkts)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">ETS</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">ArkTS</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">ets</text>
+  </g>  <g transform="translate(192 1058)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-harmony-package" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#2563EB"/>
+    <stop offset="1" stop-color="#4F46E5"/>
+  </linearGradient>
+  <filter id="shadow-catalog-harmony-package" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-harmony-package)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#2563EB" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#2563EB" fill-opacity=".13" stroke="#2563EB" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#2563EB" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><path d="M39 42l25-13 25 13-25 14zM39 42v24l25 13 25-13V42M64 56v23"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-harmony-package)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">HAP</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">HarmonyOS 包</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">hap · hsp · har</text>
+  </g>  <g transform="translate(356 1058)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-javascript" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F7DF1E"/>
+    <stop offset="1" stop-color="#EAB308"/>
+  </linearGradient>
+  <filter id="shadow-catalog-javascript" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-javascript)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#F7DF1E" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#F7DF1E" fill-opacity=".13" stroke="#F7DF1E" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="61" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="25" font-weight="800" fill="#F7DF1E">&lt;/&gt;</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-javascript)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#2D2D2D">JS</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">JavaScript</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">js · jsx · mjs</text>
+  </g>  <g transform="translate(520 1058)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-typescript" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#3178C6"/>
+    <stop offset="1" stop-color="#235A97"/>
+  </linearGradient>
+  <filter id="shadow-catalog-typescript" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-typescript)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#3178C6" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#3178C6" fill-opacity=".13" stroke="#3178C6" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="61" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="25" font-weight="800" fill="#3178C6">&lt;/&gt;</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-typescript)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">TS</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">TypeScript</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">ts · tsx</text>
+  </g>  <g transform="translate(684 1058)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-web" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#E44D26"/>
+    <stop offset="1" stop-color="#264DE4"/>
+  </linearGradient>
+  <filter id="shadow-catalog-web" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-web)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#E44D26" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#E44D26" fill-opacity=".13" stroke="#E44D26" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#E44D26" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><circle cx="64" cy="51" r="25"/><path d="M39 51h50M64 26c8 7 12 15 12 25S72 69 64 76M64 26c-8 7-12 15-12 25s4 18 12 25"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-web)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">WEB</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">Web 页面与样式</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">html · css · vue</text>
+  </g>  <g transform="translate(848 1058)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-dart" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#0175C2"/>
+    <stop offset="1" stop-color="#02569B"/>
+  </linearGradient>
+  <filter id="shadow-catalog-dart" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-dart)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#0175C2" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#0175C2" fill-opacity=".13" stroke="#0175C2" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="61" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="25" font-weight="800" fill="#0175C2">&lt;/&gt;</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-dart)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="14" font-weight="800" letter-spacing=".3" fill="#FFFFFF">DART</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">Dart 与 Flutter</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">dart</text>
+  </g>  <g transform="translate(1012 1058)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-python" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#3776AB"/>
+    <stop offset="1" stop-color="#FFD43B"/>
+  </linearGradient>
+  <filter id="shadow-catalog-python" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-python)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#3776AB" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#3776AB" fill-opacity=".13" stroke="#3776AB" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="61" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="25" font-weight="800" fill="#3776AB">&lt;/&gt;</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-python)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">PY</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">Python</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">py · pyi</text>
+  </g>  <g transform="translate(28 1246)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-go" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#00ADD8"/>
+    <stop offset="1" stop-color="#007D9C"/>
+  </linearGradient>
+  <filter id="shadow-catalog-go" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-go)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#00ADD8" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#00ADD8" fill-opacity=".13" stroke="#00ADD8" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="61" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="25" font-weight="800" fill="#00ADD8">&lt;/&gt;</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-go)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">GO</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">Go</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">go</text>
+  </g>  <g transform="translate(192 1246)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-rust" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#B7410E"/>
+    <stop offset="1" stop-color="#7C2D12"/>
+  </linearGradient>
+  <filter id="shadow-catalog-rust" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-rust)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#B7410E" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#B7410E" fill-opacity=".13" stroke="#B7410E" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="61" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="25" font-weight="800" fill="#B7410E">&lt;/&gt;</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-rust)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">RS</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">Rust</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">rs</text>
+  </g>  <g transform="translate(356 1246)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-ruby" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#CC342D"/>
+    <stop offset="1" stop-color="#9B1C1C"/>
+  </linearGradient>
+  <filter id="shadow-catalog-ruby" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-ruby)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#CC342D" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#CC342D" fill-opacity=".13" stroke="#CC342D" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="61" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="25" font-weight="800" fill="#CC342D">&lt;/&gt;</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-ruby)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">RB</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">Ruby</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">rb</text>
+  </g>  <g transform="translate(520 1246)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-lua" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#2C2D72"/>
+    <stop offset="1" stop-color="#11124F"/>
+  </linearGradient>
+  <filter id="shadow-catalog-lua" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-lua)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#2C2D72" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#2C2D72" fill-opacity=".13" stroke="#2C2D72" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="61" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="25" font-weight="800" fill="#2C2D72">&lt;/&gt;</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-lua)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">LUA</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">Lua</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">lua</text>
+  </g>  <g transform="translate(684 1246)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-build" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#475569"/>
+    <stop offset="1" stop-color="#0F172A"/>
+  </linearGradient>
+  <filter id="shadow-catalog-build" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-build)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#475569" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#475569" fill-opacity=".13" stroke="#475569" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#475569" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="5"><path d="M44 65l27-27M62 31l10-5 10 10-5 10M40 61l-7 12 12-7"/><path d="M65 64h23" opacity=".45"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-build)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="12" font-weight="800" letter-spacing=".3" fill="#FFFFFF">BUILD</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">构建脚本</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">Makefile · Gradle</text>
+  </g>  <g transform="translate(848 1246)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-git" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F05032"/>
+    <stop offset="1" stop-color="#C93D24"/>
+  </linearGradient>
+  <filter id="shadow-catalog-git" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-git)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#F05032" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#F05032" fill-opacity=".13" stroke="#F05032" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#F05032" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><path d="M49 31v36M49 42h17c9 0 13 5 13 13v12"/><circle cx="49" cy="29" r="6" fill="white"/><circle cx="49" cy="70" r="6" fill="white"/><circle cx="79" cy="70" r="6" fill="white"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-git)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">GIT</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">版本控制</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">.gitignore · Git</text>
+  </g>  <g transform="translate(1012 1246)">
+    <rect x="4" y="3" width="148" height="174" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <svg x="23" y="10" width="110" height="110" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-catalog-generic" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#64748B"/>
+    <stop offset="1" stop-color="#334155"/>
+  </linearGradient>
+  <filter id="shadow-catalog-generic" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-catalog-generic)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#64748B" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#64748B" fill-opacity=".13" stroke="#64748B" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#64748B" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="5"><path d="M39 37h35M39 49h46M39 61h28"/><path d="M82 36v27" opacity=".32"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-catalog-generic)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="14" font-weight="800" letter-spacing=".3" fill="#FFFFFF">FILE</text>
+</g>
+</svg>
+    <text x="78" y="139" text-anchor="middle" class="title">通用文件</text>
+    <text x="78" y="160" text-anchor="middle" class="examples">未知或无后缀</text>
+  </g>
+</svg>

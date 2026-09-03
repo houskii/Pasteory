@@ -36,7 +36,7 @@ RESOURCES_DIR="$CONTENTS_DIR/Resources"
 LOCAL_SIGNING_DIR="$HOME/Library/Application Support/Pasteory/Signing"
 LOCAL_SIGNING_KEYCHAIN="$LOCAL_SIGNING_DIR/PasteoryBuild.keychain-db"
 LOCAL_SIGNING_PASSWORD_FILE="$LOCAL_SIGNING_DIR/keychain-password"
-CODESIGN_KEYCHAIN_ARGS=()
+USE_LOCAL_SIGNING_KEYCHAIN=false
 if [[ -n ${PASTEORY_SIGN_IDENTITY:-} ]]; then
   [[ "$PASTEORY_SIGN_IDENTITY" != "-" ]] || {
     echo "PASTEORY_SIGN_IDENTITY 不允许使用 ad-hoc 身份 '-'。" >&2
@@ -50,9 +50,51 @@ else
     exit 1
   }
   LOCAL_SIGNING_PASSWORD=$(<"$LOCAL_SIGNING_PASSWORD_FILE")
-  security unlock-keychain -p "$LOCAL_SIGNING_PASSWORD" "$LOCAL_SIGNING_KEYCHAIN"
-  CODESIGN_KEYCHAIN_ARGS=(--keychain "$LOCAL_SIGNING_KEYCHAIN")
+  USE_LOCAL_SIGNING_KEYCHAIN=true
 fi
+
+codesign_with_local_keychain() {
+  (
+    set -euo pipefail
+
+    local keychain
+    local default_keychain
+    local -a restore_keychains
+    local -a signing_keychains
+    restore_keychains=()
+
+    while IFS= read -r keychain; do
+      keychain=${keychain#*\"}
+      keychain=${keychain%\"*}
+      [[ -n "$keychain" && -e "$keychain" ]] || continue
+      [[ "$keychain" != "$LOCAL_SIGNING_KEYCHAIN" ]] || continue
+      if (( ${restore_keychains[(Ie)$keychain]} == 0 )); then
+        restore_keychains+=("$keychain")
+      fi
+    done < <(security list-keychains -d user)
+
+    if (( ${#restore_keychains} == 0 )); then
+      default_keychain=$(security default-keychain -d user)
+      default_keychain=${default_keychain#*\"}
+      default_keychain=${default_keychain%\"*}
+      [[ -n "$default_keychain" && -e "$default_keychain" ]] || {
+        echo "找不到可恢复的用户默认钥匙串，已拒绝临时修改搜索列表。" >&2
+        exit 1
+      }
+      restore_keychains+=("$default_keychain")
+    fi
+
+    signing_keychains=("${restore_keychains[@]}" "$LOCAL_SIGNING_KEYCHAIN")
+    restore_user_keychain_search_list() {
+      security list-keychains -d user -s "${restore_keychains[@]}" >/dev/null
+    }
+    trap restore_user_keychain_search_list EXIT
+
+    security list-keychains -d user -s "${signing_keychains[@]}"
+    security unlock-keychain -p "$LOCAL_SIGNING_PASSWORD" "$LOCAL_SIGNING_KEYCHAIN"
+    codesign --force --deep --sign "$SIGN_IDENTITY" --keychain "$LOCAL_SIGNING_KEYCHAIN" "$APP_DIR"
+  )
+}
 
 arch -arm64 /usr/bin/swift build --package-path "$PROJECT_DIR" -c "$BUILD_CONFIGURATION" --arch arm64
 BIN_DIR=$(arch -arm64 /usr/bin/swift build --package-path "$PROJECT_DIR" -c "$BUILD_CONFIGURATION" --arch arm64 --show-bin-path)
@@ -87,6 +129,13 @@ for spec in "${SOURCE_APP_ICON_SPECS[@]}"; do
   fi
 done
 
+FILE_ICONS_SOURCE_DIR="$PROJECT_DIR/Resources/FileIcons"
+FILE_ICONS_TARGET_DIR="$RESOURCES_DIR/FileIcons"
+[[ -d "$FILE_ICONS_SOURCE_DIR" ]] || { echo "文件图标资源目录缺失：$FILE_ICONS_SOURCE_DIR" >&2; exit 1; }
+ditto "$FILE_ICONS_SOURCE_DIR" "$FILE_ICONS_TARGET_DIR"
+FILE_ICON_COUNT=$(find "$FILE_ICONS_TARGET_DIR" -maxdepth 1 -type f -name '*.png' | wc -l | tr -d ' ')
+[[ "$FILE_ICON_COUNT" == "49" ]] || { echo "文件图标数量错误：预期 49，实际 $FILE_ICON_COUNT" >&2; exit 1; }
+
 ICON_WORK=$(mktemp -d)
 trap 'rm -rf "$ICON_WORK"' EXIT
 mkdir -p "$ICON_WORK/AppIcon.iconset"
@@ -101,12 +150,20 @@ iconutil -c icns "$ICON_WORK/AppIcon.iconset" -o "$RESOURCES_DIR/AppIcon.icns"
 arch -arm64 /usr/bin/swift "$PROJECT_DIR/scripts/generate_menu_bar_icon.swift" \
   "$RESOURCES_DIR/MenuBarIcon.png" \
   "$RESOURCES_DIR/MenuBarIcon@2x.png"
+arch -arm64 /usr/bin/swift "$PROJECT_DIR/scripts/verify_menu_bar_icon.swift" \
+  "$RESOURCES_DIR/MenuBarIcon.png" \
+  "$RESOURCES_DIR/MenuBarIcon@2x.png" >/dev/null
 
 [[ -x "$MACOS_DIR/Pasteory" ]] || { echo "应用可执行文件在签名前丢失：$MACOS_DIR/Pasteory" >&2; exit 1; }
 [[ -f "$CONTENTS_DIR/Info.plist" ]] || { echo "Info.plist 在签名前丢失：$CONTENTS_DIR/Info.plist" >&2; exit 1; }
 [[ -d "$RESOURCES_DIR/ChromeExtension" ]] || { echo "Chrome 扩展资源在签名前丢失：$RESOURCES_DIR/ChromeExtension" >&2; exit 1; }
+[[ -d "$RESOURCES_DIR/FileIcons" ]] || { echo "文件图标资源在签名前丢失：$RESOURCES_DIR/FileIcons" >&2; exit 1; }
 plutil -lint "$CONTENTS_DIR/Info.plist" >/dev/null
 
-codesign --force --deep --sign "$SIGN_IDENTITY" "${CODESIGN_KEYCHAIN_ARGS[@]}" "$APP_DIR"
+if [[ "$USE_LOCAL_SIGNING_KEYCHAIN" == true ]]; then
+  codesign_with_local_keychain
+else
+  codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_DIR"
+fi
 "$SCRIPT_DIR/verify_signing.sh" "$APP_DIR" "$APP_BUNDLE_IDENTIFIER" >/dev/null
 echo "$APP_DIR"

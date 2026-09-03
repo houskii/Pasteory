@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-certificate" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#B91C1C"/>
+    <stop offset="1" stop-color="#991B1B"/>
+  </linearGradient>
+  <filter id="shadow-certificate" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-certificate)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#B91C1C" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#B91C1C" fill-opacity=".13" stroke="#B91C1C" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#B91C1C" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><path d="M64 27l24 9v15c0 14-10 23-24 28-14-5-24-14-24-28V36z"/><path d="M53 52l8 8 15-17"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-certificate)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="14" font-weight="800" letter-spacing=".3" fill="#FFFFFF">CERT</text>
+</g>
+</svg>

@@ -4,16 +4,16 @@ import Foundation
 import PasteoryCore
 
 enum ClipboardPollingInterval: Double, CaseIterable, Identifiable {
+    case oneTenthSecond = 0.1
     case halfSecond = 0.5
     case oneSecond = 1
-    case threeSeconds = 3
 
     var id: Double { rawValue }
     var title: String {
         switch self {
+        case .oneTenthSecond: "0.1 秒"
         case .halfSecond: "0.5 秒"
         case .oneSecond: "1 秒"
-        case .threeSeconds: "3 秒"
         }
     }
 }
@@ -118,6 +118,9 @@ enum QuickPanelAction: String, CaseIterable, Codable, Identifiable {
     case togglePinned
     case editMetadata
     case setCollection
+    case aggregateContent
+    case expandAggregation
+    case collapseAggregation
     case moveToTrash
     case openLibrary
     case openSettings
@@ -136,6 +139,9 @@ enum QuickPanelAction: String, CaseIterable, Codable, Identifiable {
         case .togglePinned: "置顶／取消置顶"
         case .editMetadata: "编辑信息"
         case .setCollection: "设置分组"
+        case .aggregateContent: "聚合内容"
+        case .expandAggregation: "展开聚合"
+        case .collapseAggregation: "收起聚合"
         case .moveToTrash: "移到废纸篓"
         case .openLibrary: "打开资料库"
         case .openSettings: "打开设置"
@@ -169,6 +175,7 @@ final class AppSettings: ObservableObject {
         static let browserBundleIdentifier = "browserBundleIdentifier"
         static let codeEditorBundleIdentifier = "codeEditorBundleIdentifier"
         static let fileOpenRules = "fileOpenRules"
+        static let authenticatedLinkRules = "authenticatedLinkRules"
     }
 
     @Published var completedOnboarding: Bool { didSet { defaults.set(completedOnboarding, forKey: Key.completedOnboarding) } }
@@ -189,6 +196,9 @@ final class AppSettings: ObservableObject {
     }
     @Published private(set) var fileOpenRules: [FileOpenRule] {
         didSet { persistFileOpenRules() }
+    }
+    @Published private(set) var authenticatedLinkRules: [AuthenticatedLinkRule] {
+        didSet { persistAuthenticatedLinkRules() }
     }
     @Published var excludedBundleIdentifiers: Set<String> { didSet { defaults.set(Array(excludedBundleIdentifiers).sorted(), forKey: Key.excludedApps) } }
     @Published private(set) var enabledSourceCaptureApplications: Set<SourceCaptureApplication> {
@@ -232,6 +242,12 @@ final class AppSettings: ObservableObject {
         } else {
             fileOpenRules = []
         }
+        if let data = defaults.data(forKey: Key.authenticatedLinkRules),
+           let stored = try? JSONDecoder().decode([AuthenticatedLinkRule].self, from: data) {
+            authenticatedLinkRules = stored
+        } else {
+            authenticatedLinkRules = []
+        }
         excludedBundleIdentifiers = Set(defaults.stringArray(forKey: Key.excludedApps) ?? [])
         enabledSourceCaptureApplications = Set(
             (defaults.stringArray(forKey: SourceCapturePreferenceKey.enabledApplications) ?? [])
@@ -252,7 +268,7 @@ final class AppSettings: ObservableObject {
             shortcutModifiers = UInt32(storedModifiers ?? 768)
         }
         defaults.set(3, forKey: Key.shortcutDefaultVersion)
-        disabledQuickActions = Set(
+        var disabledActions = Set(
             (defaults.stringArray(forKey: Key.disabledQuickActions) ?? []).compactMap(QuickPanelAction.init(rawValue:))
         )
         if let data = defaults.data(forKey: Key.quickActionShortcuts),
@@ -261,10 +277,21 @@ final class AppSettings: ObservableObject {
             for (rawAction, shortcut) in stored {
                 if let action = QuickPanelAction(rawValue: rawAction) { values[action] = shortcut }
             }
+            let newlyAddedActions: [QuickPanelAction] = [.aggregateContent, .expandAggregation, .collapseAggregation]
+            for action in newlyAddedActions where stored[action.rawValue] == nil {
+                guard let proposed = Self.defaultQuickActionShortcuts[action],
+                      stored.contains(where: { rawAction, shortcut in
+                          rawAction != action.rawValue && shortcut == proposed
+                      }) else { continue }
+                values.removeValue(forKey: action)
+                disabledActions.insert(action)
+            }
+            defaults.set(disabledActions.map(\.rawValue).sorted(), forKey: Key.disabledQuickActions)
             quickActionShortcuts = values
         } else {
             quickActionShortcuts = Self.defaultQuickActionShortcuts
         }
+        disabledQuickActions = disabledActions
         defaults.set(
             enabledSourceCaptureApplications.map(\.rawValue).sorted(),
             forKey: SourceCapturePreferenceKey.enabledApplications
@@ -361,6 +388,18 @@ final class AppSettings: ObservableObject {
         fileOpenRules.removeAll { $0.id == id }
     }
 
+    func saveAuthenticatedLinkRule(_ rule: AuthenticatedLinkRule) {
+        if let index = authenticatedLinkRules.firstIndex(where: { $0.id == rule.id }) {
+            authenticatedLinkRules[index] = rule
+        } else {
+            authenticatedLinkRules.append(rule)
+        }
+    }
+
+    func removeAuthenticatedLinkRule(id: UUID) {
+        authenticatedLinkRules.removeAll { $0.id == id }
+    }
+
     func applicationBundleIdentifier(forFileExtension fileExtension: String) -> String? {
         let normalized = Self.normalizedFileExtension(fileExtension)
         guard !normalized.isEmpty else { return nil }
@@ -383,7 +422,11 @@ final class AppSettings: ObservableObject {
             return "与“打开快捷面板”的全局快捷键重复"
         }
         if shortcut.keyCode == 53 { return "Esc 固定用于关闭快捷面板" }
-        if [123, 124, 125, 126, 115].contains(shortcut.keyCode) { return "方向键和 Home 固定用于列表导航" }
+        if [123, 124, 115].contains(shortcut.keyCode) { return "左右方向键和 Home 固定用于列表导航" }
+        if [125, 126].contains(shortcut.keyCode),
+           ![QuickPanelAction.expandAggregation, .collapseAggregation].contains(action) {
+            return "上下方向键只用于聚合展开或收起"
+        }
         let command = UInt32(cmdKey)
         if shortcut.modifiers == command,
            [4, 12, 46, 48, 49, 50].contains(shortcut.keyCode) {
@@ -418,6 +461,12 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    private func persistAuthenticatedLinkRules() {
+        if let data = try? JSONEncoder().encode(authenticatedLinkRules) {
+            defaults.set(data, forKey: Key.authenticatedLinkRules)
+        }
+    }
+
     private static func normalizedFileExtension(_ value: String) -> String {
         value.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "."))
@@ -438,6 +487,9 @@ final class AppSettings: ObservableObject {
             .togglePinned: PasteoryShortcut(keyCode: 35, modifiers: command | shift),
             .editMetadata: PasteoryShortcut(keyCode: 14, modifiers: command | shift),
             .setCollection: PasteoryShortcut(keyCode: 5, modifiers: command | shift),
+            .aggregateContent: PasteoryShortcut(keyCode: 46, modifiers: command | shift),
+            .expandAggregation: PasteoryShortcut(keyCode: 125, modifiers: command),
+            .collapseAggregation: PasteoryShortcut(keyCode: 126, modifiers: command),
             .moveToTrash: PasteoryShortcut(keyCode: 51, modifiers: command),
             .openLibrary: PasteoryShortcut(keyCode: 37, modifiers: command),
             .openSettings: PasteoryShortcut(keyCode: 43, modifiers: command),

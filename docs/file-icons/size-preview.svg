@@ -1,0 +1,837 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="500" viewBox="0 0 1120 500">
+  <style>
+    .heading { font: 700 25px -apple-system, BlinkMacSystemFont, sans-serif; fill: #0F172A; }
+    .caption { font: 500 13px -apple-system, BlinkMacSystemFont, sans-serif; fill: #64748B; }
+    .lightLabel { font: 650 10px -apple-system, BlinkMacSystemFont, sans-serif; fill: #475569; }
+    .darkLabel { font: 650 10px -apple-system, BlinkMacSystemFont, sans-serif; fill: #CBD5E1; }
+  </style>
+  <rect width="1120" height="500" fill="#F8FAFC"/>
+  <text x="34" y="43" class="heading">32 pt / 48 pt 小尺寸检查</text>
+  <text x="34" y="70" class="caption">上半部分为浅色背景，下半部分为深色背景。小尺寸优先保证家族颜色、主图形和短标签可辨认。</text>
+  <rect x="20" y="84" width="1080" height="184" rx="22" fill="#FFFFFF" stroke="#E2E8F0"/>
+  <text x="1063" y="109" text-anchor="end" class="caption">48 pt</text>
+  <text x="1063" y="201" text-anchor="end" class="caption">32 pt</text>
+  <svg x="42" y="104" width="48" height="48" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-light48-txt" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#64748B"/>
+    <stop offset="1" stop-color="#475569"/>
+  </linearGradient>
+  <filter id="shadow-size-light48-txt" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-light48-txt)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#64748B" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#64748B" fill-opacity=".13" stroke="#64748B" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#64748B" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="5"><path d="M37 36h43M37 49h52M37 62h35"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-light48-txt)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">TXT</text>
+</g>
+</svg><text x="66" y="170" text-anchor="middle" class="lightLabel">TXT</text><svg x="128" y="104" width="48" height="48" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-light48-pdf" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#DC2626"/>
+    <stop offset="1" stop-color="#991B1B"/>
+  </linearGradient>
+  <filter id="shadow-size-light48-pdf" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-light48-pdf)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#DC2626" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#DC2626" fill-opacity=".13" stroke="#DC2626" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#DC2626" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="5"><path d="M39 37h35M39 49h46M39 61h28"/><path d="M82 36v27" opacity=".32"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-light48-pdf)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">PDF</text>
+</g>
+</svg><text x="152" y="170" text-anchor="middle" class="lightLabel">PDF</text><svg x="214" y="104" width="48" height="48" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-light48-archive" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#CA8A04"/>
+    <stop offset="1" stop-color="#A16207"/>
+  </linearGradient>
+  <filter id="shadow-size-light48-archive" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-light48-archive)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#CA8A04" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#CA8A04" fill-opacity=".13" stroke="#CA8A04" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g fill="#CA8A04"><rect x="58" y="29" width="11" height="8" rx="2"/><rect x="58" y="40" width="11" height="8" rx="2"/><rect x="58" y="51" width="11" height="8" rx="2"/><path d="M55 63h17v8H55z"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-light48-archive)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">ZIP</text>
+</g>
+</svg><text x="238" y="170" text-anchor="middle" class="lightLabel">ZIP</text><svg x="300" y="104" width="48" height="48" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-light48-swift" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F05138"/>
+    <stop offset="1" stop-color="#D63B27"/>
+  </linearGradient>
+  <filter id="shadow-size-light48-swift" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-light48-swift)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#F05138" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#F05138" fill-opacity=".13" stroke="#F05138" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="61" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="25" font-weight="800" fill="#F05138">&lt;/&gt;</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-light48-swift)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="12" font-weight="800" letter-spacing=".3" fill="#FFFFFF">SWIFT</text>
+</g>
+</svg><text x="324" y="170" text-anchor="middle" class="lightLabel">SWIFT</text><svg x="386" y="104" width="48" height="48" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-light48-xcode" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#147EFB"/>
+    <stop offset="1" stop-color="#0B65D8"/>
+  </linearGradient>
+  <filter id="shadow-size-light48-xcode" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-light48-xcode)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#147EFB" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#147EFB" fill-opacity=".13" stroke="#147EFB" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#147EFB" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><rect x="35" y="32" width="24" height="18" rx="4"/><rect x="69" y="32" width="24" height="18" rx="4"/><rect x="52" y="58" width="24" height="18" rx="4"/><path d="M47 50v4h34v-4M64 54v4"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-light48-xcode)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="12" font-weight="800" letter-spacing=".3" fill="#FFFFFF">XCODE</text>
+</g>
+</svg><text x="410" y="170" text-anchor="middle" class="lightLabel">XCODE</text><svg x="472" y="104" width="48" height="48" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-light48-kotlin" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#7F52FF"/>
+    <stop offset="1" stop-color="#5B2FD6"/>
+  </linearGradient>
+  <filter id="shadow-size-light48-kotlin" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-light48-kotlin)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#7F52FF" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#7F52FF" fill-opacity=".13" stroke="#7F52FF" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="61" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="25" font-weight="800" fill="#7F52FF">&lt;/&gt;</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-light48-kotlin)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">KT</text>
+</g>
+</svg><text x="496" y="170" text-anchor="middle" class="lightLabel">KT</text><svg x="558" y="104" width="48" height="48" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-light48-android-package" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#3DDC84"/>
+    <stop offset="1" stop-color="#16A763"/>
+  </linearGradient>
+  <filter id="shadow-size-light48-android-package" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-light48-android-package)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#3DDC84" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#3DDC84" fill-opacity=".13" stroke="#3DDC84" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#3DDC84" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><path d="M39 42l25-13 25 13-25 14zM39 42v24l25 13 25-13V42M64 56v23"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-light48-android-package)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#123524">APK</text>
+</g>
+</svg><text x="582" y="170" text-anchor="middle" class="lightLabel">APK</text><svg x="644" y="104" width="48" height="48" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-light48-diagnostic" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F97316"/>
+    <stop offset="1" stop-color="#DC2626"/>
+  </linearGradient>
+  <filter id="shadow-size-light48-diagnostic" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-light48-diagnostic)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#F97316" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#F97316" fill-opacity=".13" stroke="#F97316" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#F97316" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><circle cx="64" cy="51" r="19"/><path d="M64 22v10M64 70v9M35 51h10M83 51h10M44 31l7 7M77 64l7 7M84 31l-7 7M51 64l-7 7"/><circle cx="64" cy="51" r="6" fill="#F97316" stroke="none"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-light48-diagnostic)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="12" font-weight="800" letter-spacing=".3" fill="#FFFFFF">DEBUG</text>
+</g>
+</svg><text x="668" y="170" text-anchor="middle" class="lightLabel">DEBUG</text><svg x="730" y="104" width="48" height="48" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-light48-arkts" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#0A84FF"/>
+    <stop offset="1" stop-color="#006EDC"/>
+  </linearGradient>
+  <filter id="shadow-size-light48-arkts" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-light48-arkts)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#0A84FF" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#0A84FF" fill-opacity=".13" stroke="#0A84FF" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="61" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="25" font-weight="800" fill="#0A84FF">&lt;/&gt;</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-light48-arkts)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">ETS</text>
+</g>
+</svg><text x="754" y="170" text-anchor="middle" class="lightLabel">ETS</text><svg x="816" y="104" width="48" height="48" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-light48-harmony-package" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#2563EB"/>
+    <stop offset="1" stop-color="#4F46E5"/>
+  </linearGradient>
+  <filter id="shadow-size-light48-harmony-package" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-light48-harmony-package)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#2563EB" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#2563EB" fill-opacity=".13" stroke="#2563EB" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#2563EB" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><path d="M39 42l25-13 25 13-25 14zM39 42v24l25 13 25-13V42M64 56v23"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-light48-harmony-package)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">HAP</text>
+</g>
+</svg><text x="840" y="170" text-anchor="middle" class="lightLabel">HAP</text><svg x="902" y="104" width="48" height="48" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-light48-certificate" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#B91C1C"/>
+    <stop offset="1" stop-color="#991B1B"/>
+  </linearGradient>
+  <filter id="shadow-size-light48-certificate" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-light48-certificate)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#B91C1C" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#B91C1C" fill-opacity=".13" stroke="#B91C1C" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#B91C1C" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><path d="M64 27l24 9v15c0 14-10 23-24 28-14-5-24-14-24-28V36z"/><path d="M53 52l8 8 15-17"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-light48-certificate)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="14" font-weight="800" letter-spacing=".3" fill="#FFFFFF">CERT</text>
+</g>
+</svg><text x="926" y="170" text-anchor="middle" class="lightLabel">CERT</text><svg x="988" y="104" width="48" height="48" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-light48-git" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F05032"/>
+    <stop offset="1" stop-color="#C93D24"/>
+  </linearGradient>
+  <filter id="shadow-size-light48-git" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-light48-git)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#F05032" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#F05032" fill-opacity=".13" stroke="#F05032" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#F05032" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><path d="M49 31v36M49 42h17c9 0 13 5 13 13v12"/><circle cx="49" cy="29" r="6" fill="white"/><circle cx="49" cy="70" r="6" fill="white"/><circle cx="79" cy="70" r="6" fill="white"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-light48-git)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">GIT</text>
+</g>
+</svg><text x="1012" y="170" text-anchor="middle" class="lightLabel">GIT</text>
+  <svg x="50" y="196" width="32" height="32" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-light32-txt" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#64748B"/>
+    <stop offset="1" stop-color="#475569"/>
+  </linearGradient>
+  <filter id="shadow-size-light32-txt" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-light32-txt)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#64748B" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#64748B" fill-opacity=".13" stroke="#64748B" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#64748B" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="5"><path d="M37 36h43M37 49h52M37 62h35"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-light32-txt)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">TXT</text>
+</g>
+</svg><text x="66" y="245" text-anchor="middle" class="lightLabel">TXT</text><svg x="136" y="196" width="32" height="32" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-light32-pdf" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#DC2626"/>
+    <stop offset="1" stop-color="#991B1B"/>
+  </linearGradient>
+  <filter id="shadow-size-light32-pdf" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-light32-pdf)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#DC2626" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#DC2626" fill-opacity=".13" stroke="#DC2626" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#DC2626" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="5"><path d="M39 37h35M39 49h46M39 61h28"/><path d="M82 36v27" opacity=".32"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-light32-pdf)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">PDF</text>
+</g>
+</svg><text x="152" y="245" text-anchor="middle" class="lightLabel">PDF</text><svg x="222" y="196" width="32" height="32" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-light32-archive" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#CA8A04"/>
+    <stop offset="1" stop-color="#A16207"/>
+  </linearGradient>
+  <filter id="shadow-size-light32-archive" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-light32-archive)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#CA8A04" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#CA8A04" fill-opacity=".13" stroke="#CA8A04" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g fill="#CA8A04"><rect x="58" y="29" width="11" height="8" rx="2"/><rect x="58" y="40" width="11" height="8" rx="2"/><rect x="58" y="51" width="11" height="8" rx="2"/><path d="M55 63h17v8H55z"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-light32-archive)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">ZIP</text>
+</g>
+</svg><text x="238" y="245" text-anchor="middle" class="lightLabel">ZIP</text><svg x="308" y="196" width="32" height="32" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-light32-swift" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F05138"/>
+    <stop offset="1" stop-color="#D63B27"/>
+  </linearGradient>
+  <filter id="shadow-size-light32-swift" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-light32-swift)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#F05138" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#F05138" fill-opacity=".13" stroke="#F05138" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="61" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="25" font-weight="800" fill="#F05138">&lt;/&gt;</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-light32-swift)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="12" font-weight="800" letter-spacing=".3" fill="#FFFFFF">SWIFT</text>
+</g>
+</svg><text x="324" y="245" text-anchor="middle" class="lightLabel">SWIFT</text><svg x="394" y="196" width="32" height="32" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-light32-xcode" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#147EFB"/>
+    <stop offset="1" stop-color="#0B65D8"/>
+  </linearGradient>
+  <filter id="shadow-size-light32-xcode" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-light32-xcode)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#147EFB" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#147EFB" fill-opacity=".13" stroke="#147EFB" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#147EFB" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><rect x="35" y="32" width="24" height="18" rx="4"/><rect x="69" y="32" width="24" height="18" rx="4"/><rect x="52" y="58" width="24" height="18" rx="4"/><path d="M47 50v4h34v-4M64 54v4"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-light32-xcode)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="12" font-weight="800" letter-spacing=".3" fill="#FFFFFF">XCODE</text>
+</g>
+</svg><text x="410" y="245" text-anchor="middle" class="lightLabel">XCODE</text><svg x="480" y="196" width="32" height="32" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-light32-kotlin" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#7F52FF"/>
+    <stop offset="1" stop-color="#5B2FD6"/>
+  </linearGradient>
+  <filter id="shadow-size-light32-kotlin" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-light32-kotlin)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#7F52FF" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#7F52FF" fill-opacity=".13" stroke="#7F52FF" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="61" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="25" font-weight="800" fill="#7F52FF">&lt;/&gt;</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-light32-kotlin)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">KT</text>
+</g>
+</svg><text x="496" y="245" text-anchor="middle" class="lightLabel">KT</text><svg x="566" y="196" width="32" height="32" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-light32-android-package" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#3DDC84"/>
+    <stop offset="1" stop-color="#16A763"/>
+  </linearGradient>
+  <filter id="shadow-size-light32-android-package" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-light32-android-package)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#3DDC84" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#3DDC84" fill-opacity=".13" stroke="#3DDC84" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#3DDC84" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><path d="M39 42l25-13 25 13-25 14zM39 42v24l25 13 25-13V42M64 56v23"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-light32-android-package)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#123524">APK</text>
+</g>
+</svg><text x="582" y="245" text-anchor="middle" class="lightLabel">APK</text><svg x="652" y="196" width="32" height="32" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-light32-diagnostic" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F97316"/>
+    <stop offset="1" stop-color="#DC2626"/>
+  </linearGradient>
+  <filter id="shadow-size-light32-diagnostic" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-light32-diagnostic)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#F97316" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#F97316" fill-opacity=".13" stroke="#F97316" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#F97316" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><circle cx="64" cy="51" r="19"/><path d="M64 22v10M64 70v9M35 51h10M83 51h10M44 31l7 7M77 64l7 7M84 31l-7 7M51 64l-7 7"/><circle cx="64" cy="51" r="6" fill="#F97316" stroke="none"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-light32-diagnostic)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="12" font-weight="800" letter-spacing=".3" fill="#FFFFFF">DEBUG</text>
+</g>
+</svg><text x="668" y="245" text-anchor="middle" class="lightLabel">DEBUG</text><svg x="738" y="196" width="32" height="32" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-light32-arkts" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#0A84FF"/>
+    <stop offset="1" stop-color="#006EDC"/>
+  </linearGradient>
+  <filter id="shadow-size-light32-arkts" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-light32-arkts)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#0A84FF" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#0A84FF" fill-opacity=".13" stroke="#0A84FF" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="61" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="25" font-weight="800" fill="#0A84FF">&lt;/&gt;</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-light32-arkts)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">ETS</text>
+</g>
+</svg><text x="754" y="245" text-anchor="middle" class="lightLabel">ETS</text><svg x="824" y="196" width="32" height="32" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-light32-harmony-package" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#2563EB"/>
+    <stop offset="1" stop-color="#4F46E5"/>
+  </linearGradient>
+  <filter id="shadow-size-light32-harmony-package" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-light32-harmony-package)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#2563EB" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#2563EB" fill-opacity=".13" stroke="#2563EB" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#2563EB" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><path d="M39 42l25-13 25 13-25 14zM39 42v24l25 13 25-13V42M64 56v23"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-light32-harmony-package)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">HAP</text>
+</g>
+</svg><text x="840" y="245" text-anchor="middle" class="lightLabel">HAP</text><svg x="910" y="196" width="32" height="32" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-light32-certificate" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#B91C1C"/>
+    <stop offset="1" stop-color="#991B1B"/>
+  </linearGradient>
+  <filter id="shadow-size-light32-certificate" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-light32-certificate)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#B91C1C" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#B91C1C" fill-opacity=".13" stroke="#B91C1C" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#B91C1C" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><path d="M64 27l24 9v15c0 14-10 23-24 28-14-5-24-14-24-28V36z"/><path d="M53 52l8 8 15-17"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-light32-certificate)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="14" font-weight="800" letter-spacing=".3" fill="#FFFFFF">CERT</text>
+</g>
+</svg><text x="926" y="245" text-anchor="middle" class="lightLabel">CERT</text><svg x="996" y="196" width="32" height="32" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-light32-git" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F05032"/>
+    <stop offset="1" stop-color="#C93D24"/>
+  </linearGradient>
+  <filter id="shadow-size-light32-git" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-light32-git)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#F05032" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#F05032" fill-opacity=".13" stroke="#F05032" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#F05032" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><path d="M49 31v36M49 42h17c9 0 13 5 13 13v12"/><circle cx="49" cy="29" r="6" fill="white"/><circle cx="49" cy="70" r="6" fill="white"/><circle cx="79" cy="70" r="6" fill="white"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-light32-git)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">GIT</text>
+</g>
+</svg><text x="1012" y="245" text-anchor="middle" class="lightLabel">GIT</text>
+  <rect x="20" y="288" width="1080" height="190" rx="22" fill="#111827" stroke="#334155"/>
+  <text x="1063" y="313" text-anchor="end" class="darkLabel">48 pt</text>
+  <text x="1063" y="405" text-anchor="end" class="darkLabel">32 pt</text>
+  <svg x="42" y="312" width="48" height="48" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-dark48-txt" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#64748B"/>
+    <stop offset="1" stop-color="#475569"/>
+  </linearGradient>
+  <filter id="shadow-size-dark48-txt" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-dark48-txt)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#64748B" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#64748B" fill-opacity=".13" stroke="#64748B" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#64748B" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="5"><path d="M37 36h43M37 49h52M37 62h35"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-dark48-txt)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">TXT</text>
+</g>
+</svg><text x="66" y="378" text-anchor="middle" class="darkLabel">TXT</text><svg x="128" y="312" width="48" height="48" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-dark48-pdf" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#DC2626"/>
+    <stop offset="1" stop-color="#991B1B"/>
+  </linearGradient>
+  <filter id="shadow-size-dark48-pdf" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-dark48-pdf)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#DC2626" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#DC2626" fill-opacity=".13" stroke="#DC2626" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#DC2626" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="5"><path d="M39 37h35M39 49h46M39 61h28"/><path d="M82 36v27" opacity=".32"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-dark48-pdf)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">PDF</text>
+</g>
+</svg><text x="152" y="378" text-anchor="middle" class="darkLabel">PDF</text><svg x="214" y="312" width="48" height="48" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-dark48-archive" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#CA8A04"/>
+    <stop offset="1" stop-color="#A16207"/>
+  </linearGradient>
+  <filter id="shadow-size-dark48-archive" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-dark48-archive)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#CA8A04" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#CA8A04" fill-opacity=".13" stroke="#CA8A04" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g fill="#CA8A04"><rect x="58" y="29" width="11" height="8" rx="2"/><rect x="58" y="40" width="11" height="8" rx="2"/><rect x="58" y="51" width="11" height="8" rx="2"/><path d="M55 63h17v8H55z"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-dark48-archive)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">ZIP</text>
+</g>
+</svg><text x="238" y="378" text-anchor="middle" class="darkLabel">ZIP</text><svg x="300" y="312" width="48" height="48" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-dark48-swift" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F05138"/>
+    <stop offset="1" stop-color="#D63B27"/>
+  </linearGradient>
+  <filter id="shadow-size-dark48-swift" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-dark48-swift)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#F05138" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#F05138" fill-opacity=".13" stroke="#F05138" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="61" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="25" font-weight="800" fill="#F05138">&lt;/&gt;</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-dark48-swift)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="12" font-weight="800" letter-spacing=".3" fill="#FFFFFF">SWIFT</text>
+</g>
+</svg><text x="324" y="378" text-anchor="middle" class="darkLabel">SWIFT</text><svg x="386" y="312" width="48" height="48" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-dark48-xcode" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#147EFB"/>
+    <stop offset="1" stop-color="#0B65D8"/>
+  </linearGradient>
+  <filter id="shadow-size-dark48-xcode" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-dark48-xcode)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#147EFB" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#147EFB" fill-opacity=".13" stroke="#147EFB" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#147EFB" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><rect x="35" y="32" width="24" height="18" rx="4"/><rect x="69" y="32" width="24" height="18" rx="4"/><rect x="52" y="58" width="24" height="18" rx="4"/><path d="M47 50v4h34v-4M64 54v4"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-dark48-xcode)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="12" font-weight="800" letter-spacing=".3" fill="#FFFFFF">XCODE</text>
+</g>
+</svg><text x="410" y="378" text-anchor="middle" class="darkLabel">XCODE</text><svg x="472" y="312" width="48" height="48" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-dark48-kotlin" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#7F52FF"/>
+    <stop offset="1" stop-color="#5B2FD6"/>
+  </linearGradient>
+  <filter id="shadow-size-dark48-kotlin" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-dark48-kotlin)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#7F52FF" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#7F52FF" fill-opacity=".13" stroke="#7F52FF" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="61" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="25" font-weight="800" fill="#7F52FF">&lt;/&gt;</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-dark48-kotlin)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">KT</text>
+</g>
+</svg><text x="496" y="378" text-anchor="middle" class="darkLabel">KT</text><svg x="558" y="312" width="48" height="48" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-dark48-android-package" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#3DDC84"/>
+    <stop offset="1" stop-color="#16A763"/>
+  </linearGradient>
+  <filter id="shadow-size-dark48-android-package" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-dark48-android-package)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#3DDC84" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#3DDC84" fill-opacity=".13" stroke="#3DDC84" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#3DDC84" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><path d="M39 42l25-13 25 13-25 14zM39 42v24l25 13 25-13V42M64 56v23"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-dark48-android-package)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#123524">APK</text>
+</g>
+</svg><text x="582" y="378" text-anchor="middle" class="darkLabel">APK</text><svg x="644" y="312" width="48" height="48" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-dark48-diagnostic" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F97316"/>
+    <stop offset="1" stop-color="#DC2626"/>
+  </linearGradient>
+  <filter id="shadow-size-dark48-diagnostic" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-dark48-diagnostic)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#F97316" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#F97316" fill-opacity=".13" stroke="#F97316" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#F97316" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><circle cx="64" cy="51" r="19"/><path d="M64 22v10M64 70v9M35 51h10M83 51h10M44 31l7 7M77 64l7 7M84 31l-7 7M51 64l-7 7"/><circle cx="64" cy="51" r="6" fill="#F97316" stroke="none"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-dark48-diagnostic)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="12" font-weight="800" letter-spacing=".3" fill="#FFFFFF">DEBUG</text>
+</g>
+</svg><text x="668" y="378" text-anchor="middle" class="darkLabel">DEBUG</text><svg x="730" y="312" width="48" height="48" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-dark48-arkts" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#0A84FF"/>
+    <stop offset="1" stop-color="#006EDC"/>
+  </linearGradient>
+  <filter id="shadow-size-dark48-arkts" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-dark48-arkts)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#0A84FF" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#0A84FF" fill-opacity=".13" stroke="#0A84FF" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="61" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="25" font-weight="800" fill="#0A84FF">&lt;/&gt;</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-dark48-arkts)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">ETS</text>
+</g>
+</svg><text x="754" y="378" text-anchor="middle" class="darkLabel">ETS</text><svg x="816" y="312" width="48" height="48" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-dark48-harmony-package" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#2563EB"/>
+    <stop offset="1" stop-color="#4F46E5"/>
+  </linearGradient>
+  <filter id="shadow-size-dark48-harmony-package" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-dark48-harmony-package)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#2563EB" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#2563EB" fill-opacity=".13" stroke="#2563EB" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#2563EB" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><path d="M39 42l25-13 25 13-25 14zM39 42v24l25 13 25-13V42M64 56v23"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-dark48-harmony-package)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">HAP</text>
+</g>
+</svg><text x="840" y="378" text-anchor="middle" class="darkLabel">HAP</text><svg x="902" y="312" width="48" height="48" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-dark48-certificate" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#B91C1C"/>
+    <stop offset="1" stop-color="#991B1B"/>
+  </linearGradient>
+  <filter id="shadow-size-dark48-certificate" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-dark48-certificate)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#B91C1C" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#B91C1C" fill-opacity=".13" stroke="#B91C1C" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#B91C1C" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><path d="M64 27l24 9v15c0 14-10 23-24 28-14-5-24-14-24-28V36z"/><path d="M53 52l8 8 15-17"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-dark48-certificate)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="14" font-weight="800" letter-spacing=".3" fill="#FFFFFF">CERT</text>
+</g>
+</svg><text x="926" y="378" text-anchor="middle" class="darkLabel">CERT</text><svg x="988" y="312" width="48" height="48" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-dark48-git" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F05032"/>
+    <stop offset="1" stop-color="#C93D24"/>
+  </linearGradient>
+  <filter id="shadow-size-dark48-git" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-dark48-git)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#F05032" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#F05032" fill-opacity=".13" stroke="#F05032" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#F05032" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><path d="M49 31v36M49 42h17c9 0 13 5 13 13v12"/><circle cx="49" cy="29" r="6" fill="white"/><circle cx="49" cy="70" r="6" fill="white"/><circle cx="79" cy="70" r="6" fill="white"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-dark48-git)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">GIT</text>
+</g>
+</svg><text x="1012" y="378" text-anchor="middle" class="darkLabel">GIT</text>
+  <svg x="50" y="404" width="32" height="32" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-dark32-txt" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#64748B"/>
+    <stop offset="1" stop-color="#475569"/>
+  </linearGradient>
+  <filter id="shadow-size-dark32-txt" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-dark32-txt)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#64748B" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#64748B" fill-opacity=".13" stroke="#64748B" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#64748B" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="5"><path d="M37 36h43M37 49h52M37 62h35"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-dark32-txt)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">TXT</text>
+</g>
+</svg><text x="66" y="453" text-anchor="middle" class="darkLabel">TXT</text><svg x="136" y="404" width="32" height="32" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-dark32-pdf" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#DC2626"/>
+    <stop offset="1" stop-color="#991B1B"/>
+  </linearGradient>
+  <filter id="shadow-size-dark32-pdf" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-dark32-pdf)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#DC2626" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#DC2626" fill-opacity=".13" stroke="#DC2626" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#DC2626" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="5"><path d="M39 37h35M39 49h46M39 61h28"/><path d="M82 36v27" opacity=".32"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-dark32-pdf)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">PDF</text>
+</g>
+</svg><text x="152" y="453" text-anchor="middle" class="darkLabel">PDF</text><svg x="222" y="404" width="32" height="32" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-dark32-archive" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#CA8A04"/>
+    <stop offset="1" stop-color="#A16207"/>
+  </linearGradient>
+  <filter id="shadow-size-dark32-archive" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-dark32-archive)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#CA8A04" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#CA8A04" fill-opacity=".13" stroke="#CA8A04" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g fill="#CA8A04"><rect x="58" y="29" width="11" height="8" rx="2"/><rect x="58" y="40" width="11" height="8" rx="2"/><rect x="58" y="51" width="11" height="8" rx="2"/><path d="M55 63h17v8H55z"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-dark32-archive)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">ZIP</text>
+</g>
+</svg><text x="238" y="453" text-anchor="middle" class="darkLabel">ZIP</text><svg x="308" y="404" width="32" height="32" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-dark32-swift" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F05138"/>
+    <stop offset="1" stop-color="#D63B27"/>
+  </linearGradient>
+  <filter id="shadow-size-dark32-swift" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-dark32-swift)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#F05138" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#F05138" fill-opacity=".13" stroke="#F05138" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="61" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="25" font-weight="800" fill="#F05138">&lt;/&gt;</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-dark32-swift)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="12" font-weight="800" letter-spacing=".3" fill="#FFFFFF">SWIFT</text>
+</g>
+</svg><text x="324" y="453" text-anchor="middle" class="darkLabel">SWIFT</text><svg x="394" y="404" width="32" height="32" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-dark32-xcode" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#147EFB"/>
+    <stop offset="1" stop-color="#0B65D8"/>
+  </linearGradient>
+  <filter id="shadow-size-dark32-xcode" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-dark32-xcode)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#147EFB" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#147EFB" fill-opacity=".13" stroke="#147EFB" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#147EFB" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><rect x="35" y="32" width="24" height="18" rx="4"/><rect x="69" y="32" width="24" height="18" rx="4"/><rect x="52" y="58" width="24" height="18" rx="4"/><path d="M47 50v4h34v-4M64 54v4"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-dark32-xcode)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="12" font-weight="800" letter-spacing=".3" fill="#FFFFFF">XCODE</text>
+</g>
+</svg><text x="410" y="453" text-anchor="middle" class="darkLabel">XCODE</text><svg x="480" y="404" width="32" height="32" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-dark32-kotlin" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#7F52FF"/>
+    <stop offset="1" stop-color="#5B2FD6"/>
+  </linearGradient>
+  <filter id="shadow-size-dark32-kotlin" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-dark32-kotlin)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#7F52FF" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#7F52FF" fill-opacity=".13" stroke="#7F52FF" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="61" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="25" font-weight="800" fill="#7F52FF">&lt;/&gt;</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-dark32-kotlin)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">KT</text>
+</g>
+</svg><text x="496" y="453" text-anchor="middle" class="darkLabel">KT</text><svg x="566" y="404" width="32" height="32" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-dark32-android-package" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#3DDC84"/>
+    <stop offset="1" stop-color="#16A763"/>
+  </linearGradient>
+  <filter id="shadow-size-dark32-android-package" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-dark32-android-package)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#3DDC84" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#3DDC84" fill-opacity=".13" stroke="#3DDC84" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#3DDC84" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><path d="M39 42l25-13 25 13-25 14zM39 42v24l25 13 25-13V42M64 56v23"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-dark32-android-package)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#123524">APK</text>
+</g>
+</svg><text x="582" y="453" text-anchor="middle" class="darkLabel">APK</text><svg x="652" y="404" width="32" height="32" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-dark32-diagnostic" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F97316"/>
+    <stop offset="1" stop-color="#DC2626"/>
+  </linearGradient>
+  <filter id="shadow-size-dark32-diagnostic" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-dark32-diagnostic)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#F97316" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#F97316" fill-opacity=".13" stroke="#F97316" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#F97316" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><circle cx="64" cy="51" r="19"/><path d="M64 22v10M64 70v9M35 51h10M83 51h10M44 31l7 7M77 64l7 7M84 31l-7 7M51 64l-7 7"/><circle cx="64" cy="51" r="6" fill="#F97316" stroke="none"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-dark32-diagnostic)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="12" font-weight="800" letter-spacing=".3" fill="#FFFFFF">DEBUG</text>
+</g>
+</svg><text x="668" y="453" text-anchor="middle" class="darkLabel">DEBUG</text><svg x="738" y="404" width="32" height="32" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-dark32-arkts" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#0A84FF"/>
+    <stop offset="1" stop-color="#006EDC"/>
+  </linearGradient>
+  <filter id="shadow-size-dark32-arkts" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-dark32-arkts)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#0A84FF" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#0A84FF" fill-opacity=".13" stroke="#0A84FF" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <text x="64" y="61" text-anchor="middle" font-family="SFMono-Regular,Menlo,monospace" font-size="25" font-weight="800" fill="#0A84FF">&lt;/&gt;</text>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-dark32-arkts)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">ETS</text>
+</g>
+</svg><text x="754" y="453" text-anchor="middle" class="darkLabel">ETS</text><svg x="824" y="404" width="32" height="32" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-dark32-harmony-package" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#2563EB"/>
+    <stop offset="1" stop-color="#4F46E5"/>
+  </linearGradient>
+  <filter id="shadow-size-dark32-harmony-package" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-dark32-harmony-package)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#2563EB" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#2563EB" fill-opacity=".13" stroke="#2563EB" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#2563EB" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><path d="M39 42l25-13 25 13-25 14zM39 42v24l25 13 25-13V42M64 56v23"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-dark32-harmony-package)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">HAP</text>
+</g>
+</svg><text x="840" y="453" text-anchor="middle" class="darkLabel">HAP</text><svg x="910" y="404" width="32" height="32" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-dark32-certificate" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#B91C1C"/>
+    <stop offset="1" stop-color="#991B1B"/>
+  </linearGradient>
+  <filter id="shadow-size-dark32-certificate" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-dark32-certificate)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#B91C1C" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#B91C1C" fill-opacity=".13" stroke="#B91C1C" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#B91C1C" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><path d="M64 27l24 9v15c0 14-10 23-24 28-14-5-24-14-24-28V36z"/><path d="M53 52l8 8 15-17"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-dark32-certificate)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="14" font-weight="800" letter-spacing=".3" fill="#FFFFFF">CERT</text>
+</g>
+</svg><text x="926" y="453" text-anchor="middle" class="darkLabel">CERT</text><svg x="996" y="404" width="32" height="32" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-size-dark32-git" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F05032"/>
+    <stop offset="1" stop-color="#C93D24"/>
+  </linearGradient>
+  <filter id="shadow-size-dark32-git" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-size-dark32-git)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#F05032" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#F05032" fill-opacity=".13" stroke="#F05032" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#F05032" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><path d="M49 31v36M49 42h17c9 0 13 5 13 13v12"/><circle cx="49" cy="29" r="6" fill="white"/><circle cx="49" cy="70" r="6" fill="white"/><circle cx="79" cy="70" r="6" fill="white"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-size-dark32-git)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">GIT</text>
+</g>
+</svg><text x="1012" y="453" text-anchor="middle" class="darkLabel">GIT</text>
+</svg>

@@ -9,6 +9,8 @@ struct LibraryView: View {
     @State private var showNewNormalCollection = false
     @State private var editingNormalCollection: ClipCollection?
     @State private var editingSmartCollection: ClipCollection?
+    @State private var inspectorCaptureEvents = [ClipCaptureEvent]()
+    @State private var inspectorLinkResource: LinkResource?
 
     private var accentColor: Color { state.settings.themeColor.accentColor }
     private var brandGradient: LinearGradient { state.settings.themeColor.gradient }
@@ -38,6 +40,9 @@ struct LibraryView: View {
         .sheet(isPresented: $showNewNormalCollection) { CollectionNameEditor(state: state, existing: nil) }
         .sheet(item: $editingNormalCollection) { CollectionNameEditor(state: state, existing: $0) }
         .sheet(item: $editingSmartCollection) { SmartCollectionEditor(state: state, existing: $0) }
+        .sheet(item: $state.libraryAggregationDraft) { draft in
+            LibraryAggregationEditor(state: state, draft: draft) { state.libraryAggregationDraft = nil }
+        }
         .task {
             await state.refreshCollections()
             await state.refreshLibrary()
@@ -49,14 +54,10 @@ struct LibraryView: View {
     private var sidebar: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(brandGradient)
-                    Image(nsImage: PasteoryBrand.menuBarImage())
-                        .renderingMode(.template)
-                        .foregroundStyle(.white)
-                }
-                .frame(width: 34, height: 34)
+                Image(nsImage: PasteoryBrand.appIconImage())
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 40, height: 40)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Pasteory").font(.system(size: 15, weight: .semibold))
                     Text("资料库").font(.caption).foregroundStyle(.secondary)
@@ -215,7 +216,19 @@ struct LibraryView: View {
                         Text(librarySubtitle).font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Text("\(state.clips.count) 条内容")
+                    if !state.libraryQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button {
+                            Task { state.libraryAggregationDraft = await state.makeLibraryAggregationDraft() }
+                        } label: {
+                            Label("聚合结果", systemImage: "square.stack.3d.up")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(!state.libraryCanAggregateCurrentResults)
+                        .help("聚合当前搜索结果（⌘⇧M）")
+                        .quickActionShortcut(state.settings.quickShortcut(for: .aggregateContent))
+                    }
+                    Text("\(state.libraryTopLevelResultCount) 个结果")
                         .font(.caption.weight(.medium).monospacedDigit())
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 10)
@@ -247,20 +260,48 @@ struct LibraryView: View {
 
             LibraryDivider()
 
-            if state.clips.isEmpty {
+            if state.libraryListEntries.isEmpty {
                 LibraryEmptyState(query: state.libraryQuery)
             } else {
                 ScrollView {
                     LazyVStack(spacing: 9) {
-                        ForEach(state.clips) { clip in
-                            LibraryClipCard(
-                                clip: clip,
-                                attachments: state.attachments,
-                                selected: state.selectedClipID == clip.id
-                            )
-                            .onTapGesture { state.selectedClipID = clip.id }
-                            .simultaneousGesture(TapGesture(count: 2).onEnded { onPaste(clip, false, true) })
-                            .contextMenu { contextMenu(for: clip) }
+                        ForEach(state.libraryListEntries) { entry in
+                            switch entry.content {
+                            case .aggregation(let aggregation):
+                                LibraryAggregationCard(
+                                    state: state,
+                                    aggregation: aggregation,
+                                    selected: state.selectedAggregationID == aggregation.id,
+                                    onEdit: { state.libraryAggregationDraft = AggregationDraft(
+                                        aggregationID: aggregation.id,
+                                        memberClipIDs: aggregation.memberClipIDs,
+                                        title: aggregation.title,
+                                        note: aggregation.note,
+                                        origin: aggregation.origin
+                                    ) }
+                                )
+                            case .clip(let clip, let parentID):
+                                LibraryClipCard(
+                                    clip: clip,
+                                    attachments: state.attachments,
+                                    selected: state.selectedAggregationID == nil && state.selectedClipID == clip.id
+                                )
+                                .padding(.leading, parentID == nil ? 0 : 16)
+                                .overlay(alignment: .leading) {
+                                    if parentID != nil {
+                                        AggregationChildMarker(
+                                            accentColor: state.settings.themeColor.accentColor,
+                                            gap: 9,
+                                            isFirst: entry.isFirstChild,
+                                            isLast: entry.isLastChild
+                                        )
+                                        .frame(width: 16)
+                                    }
+                                }
+                                .onTapGesture { state.selectLibraryEntry(entry) }
+                                .simultaneousGesture(TapGesture(count: 2).onEnded { onPaste(clip, false, true) })
+                                .contextMenu { contextMenu(for: clip, parentAggregationID: parentID) }
+                            }
                         }
                     }
                     .padding(.horizontal, 14)
@@ -299,7 +340,19 @@ struct LibraryView: View {
 
     @ViewBuilder
     private var inspector: some View {
-        if let clip = state.selectedClip {
+        if let aggregation = state.selectedAggregation {
+            LibraryAggregationInspector(
+                state: state,
+                aggregation: aggregation,
+                onEdit: { state.libraryAggregationDraft = AggregationDraft(
+                    aggregationID: aggregation.id,
+                    memberClipIDs: aggregation.memberClipIDs,
+                    title: aggregation.title,
+                    note: aggregation.note,
+                    origin: aggregation.origin
+                ) }
+            )
+        } else if let clip = state.selectedClip {
             VStack(spacing: 0) {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
@@ -327,6 +380,16 @@ struct LibraryView: View {
                                 .frame(minHeight: 150, maxHeight: 240)
                                 .padding(10)
                                 .background(LibraryTheme.inputBackground, in: RoundedRectangle(cornerRadius: 10))
+                        }
+
+                        inspectorSection("抓取来源") {
+                            captureSourceDetails(clip)
+                        }
+
+                        if clip.primaryKind == .link {
+                            inspectorSection("链接解析") {
+                                linkResolutionDetails
+                            }
                         }
 
                         inspectorSection("编辑") {
@@ -435,6 +498,14 @@ struct LibraryView: View {
                     .padding(14)
                 }
             }
+            .task(id: clip.id) {
+                inspectorCaptureEvents = []
+                inspectorLinkResource = nil
+                async let captureEvents = state.captureEvents(for: clip)
+                async let linkResource = state.linkResource(for: clip)
+                inspectorCaptureEvents = await captureEvents
+                inspectorLinkResource = await linkResource
+            }
         } else {
             LibraryEmptyInspector()
         }
@@ -487,8 +558,82 @@ struct LibraryView: View {
             metadataRow("来源", value: clip.source.appName)
             metadataRow("来源可信度", value: clip.source.confidence.displayName)
             metadataRow("创建时间", value: clip.createdAt.formatted(date: .abbreviated, time: .standard))
+            metadataRow("复制次数", value: "\(clip.copyCount) 次")
+            metadataRow("粘贴次数", value: "\(clip.recordedPasteCount) 次")
             metadataRow("大小", value: ByteCountFormatter.string(fromByteCount: Int64(clip.byteSize), countStyle: .file))
             metadataRow("格式", value: Array(Set(clip.items.flatMap { $0.representations.map(\.uti) })).sorted().joined(separator: "、"))
+        }
+    }
+
+    @ViewBuilder
+    private func captureSourceDetails(_ clip: Clip) -> some View {
+        if inspectorCaptureEvents.isEmpty {
+            metadataRow("应用", value: clip.source.appName)
+            metadataRow("可信度", value: clip.source.confidence.displayName)
+            Text("这条内容只保存了来源应用，没有单独的复制上下文。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } else {
+            ForEach(Array(inspectorCaptureEvents.prefix(5).enumerated()), id: \.element.id) { index, event in
+                if index > 0 { Divider() }
+                VStack(alignment: .leading, spacing: 6) {
+                    metadataRow("应用", value: event.source.appName)
+                    metadataRow("采集时间", value: event.capturedAt.formatted(date: .abbreviated, time: .standard))
+                    if let context = event.context {
+                        metadataRow("摘要", value: context.summary)
+                        sourceContextRow("网页链接", value: context.payload["url"])
+                        sourceContextRow("页面标题", value: context.payload["pageTitle"])
+                        sourceContextRow("对话类型", value: context.payload["conversationTypeName"])
+                        sourceContextRow("对话标题", value: context.payload["conversationName"])
+                        sourceContextRow("仓库", value: context.payload["repository"])
+                        sourceContextRow("分支", value: context.payload["branch"])
+                        sourceContextRow("目标分支", value: context.payload["targetBranch"])
+                        sourceContextRow("选中内容", value: context.payload["selectedText"])
+                        sourceContextRow("关联文字", value: context.payload["relatedText"])
+                        sourceContextRow("元素", value: context.payload["elementSelector"])
+                    } else {
+                        Text("本次复制没有获取到更详细的上下文。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            if inspectorCaptureEvents.count > 5 {
+                Text("另有 \(inspectorCaptureEvents.count - 5) 次复制记录")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var linkResolutionDetails: some View {
+        if let resource = inspectorLinkResource {
+            metadataRow("状态", value: resource.requestState.displayName)
+            if let title = resource.resolvedTitle {
+                metadataRow("解析标题", value: title)
+            } else if let candidate = resource.candidateTitle {
+                metadataRow("候选标题", value: candidate)
+            }
+            metadataRow("兜底标题", value: resource.fallbackTitle)
+            metadataRow("标题质量", value: resource.titleQuality.displayName)
+            metadataRow("解析来源", value: resource.resolutionSource?.displayName ?? "尚未解析")
+            metadataRow("链接", value: URLFallbackEngine.redactedDisplayURL(resource.normalizedURL))
+            metadataRow("尝试次数", value: "\(resource.attemptCount) 次，失败 \(resource.failedAttemptCount) 次")
+            if let lastAttemptAt = resource.lastAttemptAt {
+                metadataRow("最近解析", value: lastAttemptAt.formatted(date: .abbreviated, time: .standard))
+            }
+        } else {
+            Text("这条链接尚未建立解析记录。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func sourceContextRow(_ label: String, value: String?) -> some View {
+        if let value, !value.isEmpty {
+            metadataRow(label, value: value)
         }
     }
 
@@ -501,10 +646,17 @@ struct LibraryView: View {
     }
 
     @ViewBuilder
-    private func contextMenu(for clip: Clip) -> some View {
+    private func contextMenu(for clip: Clip, parentAggregationID: UUID?) -> some View {
         Button("粘贴") { onPaste(clip, false, true) }; Button("复制") { onPaste(clip, false, false) }
         Button("纯文本粘贴") { onPaste(clip, true, true) }; Divider()
         Button(clip.isFavorite ? "取消收藏" : "收藏") { state.toggleFavorite(clip) }
+        if let parentAggregationID,
+           let aggregation = state.aggregations.first(where: { $0.id == parentAggregationID }) {
+            Button("移出当前聚合") {
+                Task { await state.removeClip(clip.id, from: aggregation) }
+            }
+            Divider()
+        }
         if clip.deletedAt != nil {
             Button("恢复") { state.restore(clip) }
             Button("彻底删除", role: .destructive) { confirmPermanentDelete(clip) }
@@ -532,6 +684,276 @@ struct LibraryView: View {
         state.requestedCollectionEditorID = nil
         if collection.kind == .smart { editingSmartCollection = collection }
         else { editingNormalCollection = collection }
+    }
+}
+
+private struct LibraryAggregationCard: View {
+    @ObservedObject var state: AppState
+    let aggregation: ClipAggregation
+    let selected: Bool
+    let onEdit: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "square.stack.3d.up.fill")
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundStyle(state.settings.themeColor.accentColor)
+                .frame(width: 46, height: 46)
+                .background(state.settings.themeColor.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 13))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(aggregation.displayTitle).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                if !aggregation.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(aggregation.note).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Text(aggregation.origin.displayName + (aggregation.membershipMode == .automatic ? " · 自动更新" : ""))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Button {
+                state.toggleLibraryAggregation(aggregation.id)
+            } label: {
+                HStack(spacing: 4) {
+                    Text(memberCountLabel)
+                    Image(systemName: state.libraryExpandedAggregationIDs.contains(aggregation.id) ? "chevron.up" : "chevron.down")
+                }
+                .font(.caption.weight(.semibold))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(state.settings.themeColor.accentColor)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 88)
+        .background(
+            aggregation.isPinned ? state.settings.themeColor.accentColor.opacity(0.10) : LibraryTheme.cardBackground,
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(selected ? state.settings.themeColor.accentColor : LibraryTheme.divider, lineWidth: selected ? 2 : 1)
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 14))
+        .onTapGesture {
+            state.selectedAggregationID = aggregation.id
+            state.selectedClipID = nil
+        }
+        .simultaneousGesture(TapGesture(count: 2).onEnded { state.toggleLibraryAggregation(aggregation.id, selectChild: true) })
+        .contextMenu {
+            Button(state.libraryExpandedAggregationIDs.contains(aggregation.id) ? "收起内容" : "展开内容") {
+                state.toggleLibraryAggregation(aggregation.id)
+            }
+            .quickActionShortcut(state.settings.quickShortcut(
+                for: state.libraryExpandedAggregationIDs.contains(aggregation.id) ? .collapseAggregation : .expandAggregation
+            ))
+            Button("编辑聚合…", action: onEdit)
+                .quickActionShortcut(state.settings.quickShortcut(for: .editMetadata))
+            Divider()
+            Button(aggregation.isFavorite ? "取消收藏聚合" : "收藏聚合") {
+                Task { await state.toggleAggregationFavorite(aggregation) }
+            }
+            .quickActionShortcut(state.settings.quickShortcut(for: .toggleFavorite))
+            Button(aggregation.isPinned ? "取消置顶聚合" : "置顶聚合") {
+                Task { await state.toggleAggregationPinned(aggregation) }
+            }
+            .quickActionShortcut(state.settings.quickShortcut(for: .togglePinned))
+            Menu("设置聚合分组") {
+                let groups = state.collections.filter { $0.kind == .normal }
+                if groups.isEmpty { Text("还没有普通分组") }
+                else {
+                    ForEach(groups) { collection in
+                        Button {
+                            Task { await state.toggleAggregationCollection(collection, aggregation: aggregation) }
+                        } label: {
+                            Label(collection.name, systemImage: aggregation.collectionIDs.contains(collection.id) ? "checkmark" : "folder")
+                        }
+                    }
+                }
+            }
+            .quickActionShortcut(state.settings.quickShortcut(for: .setCollection))
+            Divider()
+            Menu("整理全部成员") {
+                let members = state.aggregationMembers[aggregation.id] ?? []
+                Button(members.allSatisfy(\.isFavorite) ? "取消收藏全部成员" : "收藏全部成员") {
+                    Task { await state.toggleFavoriteForAllMembers(of: aggregation) }
+                }
+                Button(members.allSatisfy(\.isPinned) ? "取消置顶全部成员" : "置顶全部成员") {
+                    Task { await state.togglePinnedForAllMembers(of: aggregation) }
+                }
+                Menu("设置全部成员的分组") {
+                    ForEach(state.collections.filter { $0.kind == .normal }) { collection in
+                        let allIncluded = members.allSatisfy { $0.collectionIDs.contains(collection.id) }
+                        Button {
+                            Task { await state.toggleCollectionForAllMembers(collection, aggregation: aggregation) }
+                        } label: {
+                            Label(collection.name, systemImage: allIncluded ? "checkmark" : "folder")
+                        }
+                    }
+                }
+            }
+            Divider()
+            Button("删除聚合但保留内容", role: .destructive) {
+                Task { await state.removeAggregation(aggregation) }
+            }
+            .quickActionShortcut(state.settings.quickShortcut(for: .moveToTrash))
+        }
+    }
+
+    private var memberCountLabel: String {
+        let query = state.libraryQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return "\(aggregation.memberClipIDs.count) 项内容" }
+        let visible = Set(state.clips.map(\.id)).intersection(aggregation.memberClipIDs).count
+        guard visible > 0, visible < aggregation.memberClipIDs.count else {
+            return "\(aggregation.memberClipIDs.count) 项内容"
+        }
+        return "匹配 \(visible) / \(aggregation.memberClipIDs.count)"
+    }
+}
+
+private struct LibraryAggregationInspector: View {
+    @ObservedObject var state: AppState
+    let aggregation: ClipAggregation
+    let onEdit: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("聚合详情").font(.system(size: 17, weight: .semibold))
+                    Text("\(aggregation.memberClipIDs.count) 项内容").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "square.stack.3d.up.fill")
+                    .foregroundStyle(state.settings.themeColor.accentColor)
+            }
+            .padding(16)
+            LibraryDivider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(aggregation.displayTitle).font(.headline)
+                        if !aggregation.note.isEmpty { Text(aggregation.note).foregroundStyle(.secondary) }
+                    }
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("生成方式").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        Text(aggregation.origin.displayName)
+                        Text(aggregation.membershipMode == .automatic ? "成员会按条件自动更新" : "成员保持创建时的内容")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Divider()
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("包含内容").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        ForEach(state.aggregationMembers[aggregation.id] ?? []) { clip in
+                            HStack(spacing: 7) {
+                                Image(systemName: clip.primaryKind.symbolName).foregroundStyle(state.settings.themeColor.accentColor)
+                                Text(clip.displayTitle.isEmpty ? clip.previewText : clip.displayTitle).lineLimit(1)
+                            }
+                            .font(.caption)
+                        }
+                    }
+                    Button("编辑聚合信息和成员…", action: onEdit)
+                        .buttonStyle(.borderedProminent)
+                        .tint(state.settings.themeColor.accentColor)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                    HStack(spacing: 8) {
+                        Button(aggregation.isFavorite ? "取消收藏聚合" : "收藏聚合") {
+                            Task { await state.toggleAggregationFavorite(aggregation) }
+                        }
+                        Button(aggregation.isPinned ? "取消置顶聚合" : "置顶聚合") {
+                            Task { await state.toggleAggregationPinned(aggregation) }
+                        }
+                        Spacer()
+                        Menu("整理全部成员") {
+                            let members = state.aggregationMembers[aggregation.id] ?? []
+                            Button(members.allSatisfy(\.isFavorite) ? "取消收藏全部成员" : "收藏全部成员") {
+                                Task { await state.toggleFavoriteForAllMembers(of: aggregation) }
+                            }
+                            Button(members.allSatisfy(\.isPinned) ? "取消置顶全部成员" : "置顶全部成员") {
+                                Task { await state.togglePinnedForAllMembers(of: aggregation) }
+                            }
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .padding(16)
+            }
+        }
+    }
+}
+
+private struct LibraryAggregationEditor: View {
+    @ObservedObject var state: AppState
+    let original: AggregationDraft
+    let onDone: () -> Void
+    @State private var title: String
+    @State private var note: String
+    @State private var memberIDs: [UUID]
+
+    init(state: AppState, draft: AggregationDraft, onDone: @escaping () -> Void) {
+        self.state = state
+        self.original = draft
+        self.onDone = onDone
+        _title = State(initialValue: draft.title)
+        _note = State(initialValue: draft.note)
+        _memberIDs = State(initialValue: draft.memberClipIDs)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(original.isEditing ? "编辑聚合" : "聚合搜索结果").font(.title3.bold())
+            Text("包含 \(memberIDs.count) 项不同内容 · \(original.origin.displayName)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField("聚合标题", text: $title).textFieldStyle(.roundedBorder)
+            TextField("备注（可选）", text: $note, axis: .vertical).textFieldStyle(.roundedBorder).lineLimit(2...4)
+            ScrollView {
+                LazyVStack(spacing: 6) {
+                    ForEach(memberClips) { clip in
+                        HStack(spacing: 8) {
+                            Image(systemName: clip.primaryKind.symbolName)
+                                .foregroundStyle(state.settings.themeColor.accentColor)
+                                .frame(width: 20)
+                            Text(clip.displayTitle.isEmpty ? clip.previewText : clip.displayTitle).lineLimit(1)
+                            Spacer()
+                            Button {
+                                memberIDs.removeAll { $0 == clip.id }
+                            } label: { Image(systemName: "minus.circle") }
+                                .buttonStyle(.plain)
+                                .disabled(memberIDs.count <= 2)
+                                .help("移出聚合，保留原内容")
+                        }
+                        .padding(.horizontal, 10)
+                        .frame(height: 34)
+                        .background(LibraryTheme.inputBackground, in: RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+            }
+            .frame(minHeight: 100, maxHeight: 220)
+            HStack {
+                Spacer()
+                Button("取消", action: onDone)
+                Button(original.isEditing ? "保存" : "创建聚合") {
+                    var draft = original
+                    draft.memberClipIDs = memberIDs
+                    Task {
+                        if await state.saveLibraryAggregation(draft, title: title, note: note) { onDone() }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(state.settings.themeColor.accentColor)
+                .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || memberIDs.count < 2)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 520, height: 470)
+    }
+
+    private var memberClips: [Clip] {
+        let all = state.clips + state.quickClips + state.aggregationMembers.values.flatMap { $0 }
+        let byID = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return memberIDs.compactMap { byID[$0] }
     }
 }
 
@@ -628,7 +1050,7 @@ private enum LibraryTheme {
     static let divider = Color(nsColor: .separatorColor).opacity(0.55)
 }
 
-private struct CollectionNameEditor: View {
+struct CollectionNameEditor: View {
     @ObservedObject var state: AppState
     @Environment(\.dismiss) private var dismiss
     let existing: ClipCollection?
@@ -882,7 +1304,7 @@ private extension SmartRuleField {
         case .byteSize: "大小"
         case .priority: "优先级"
         case .favorite: "收藏"
-        case .copyCount: "使用次数"
+        case .copyCount: "复制次数"
         }
     }
 }

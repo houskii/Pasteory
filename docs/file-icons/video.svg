@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-video" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#9333EA"/>
+    <stop offset="1" stop-color="#7E22CE"/>
+  </linearGradient>
+  <filter id="shadow-video" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-video)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#9333EA" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#9333EA" fill-opacity=".13" stroke="#9333EA" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#9333EA" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><rect x="34" y="31" width="58" height="40" rx="8"/><path d="M58 43l15 8-15 9z" fill="#9333EA" stroke="none"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-video)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="17" font-weight="800" letter-spacing=".3" fill="#FFFFFF">VID</text>
+</g>
+</svg>

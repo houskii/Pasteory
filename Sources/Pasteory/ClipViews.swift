@@ -9,8 +9,18 @@ enum ClipRowMetrics {
         switch clip.primaryKind {
         case .code: compact ? 96 : 104
         case .link: compact ? 86 : 92
+        case .file: compact ? 96 : 104
+        case .image:
+            imageContentHeight(for: clip, compact: compact) + (compact ? 30 : 34)
         default: compact ? 72 : 82
         }
+    }
+
+    static func imageContentHeight(for clip: Clip, compact: Bool) -> CGFloat {
+        var height: CGFloat = compact ? 58 : 62
+        if !clip.displayTitle.isEmpty { height += compact ? 14 : 15 }
+        if !clip.note.isEmpty { height += compact ? 13 : 14 }
+        return height
     }
 }
 
@@ -48,9 +58,14 @@ struct ClipRowView: View {
                        lineCount > 1 {
                         Text("\(lineCount) 行").fixedSize()
                     }
-                    Text("复制 \(clip.copyCount) 次")
+                    Text(
+                        "复制 ×\(CompactCountFormatter.string(for: clip.copyCount)) · "
+                            + "粘贴 ×\(CompactCountFormatter.string(for: clip.recordedPasteCount))"
+                    )
                         .fixedSize()
                         .layoutPriority(2)
+                        .help("复制 \(clip.copyCount) 次，通过 Pasteory 粘贴 \(clip.recordedPasteCount) 次")
+                        .accessibilityLabel("复制 \(clip.copyCount) 次，通过 Pasteory 粘贴 \(clip.recordedPasteCount) 次")
                     if clip.isPinned { Image(systemName: "pin.fill").foregroundStyle(pasteoryAccentColor).help("已置顶") }
                     if clip.isFavorite { Image(systemName: "star.fill").foregroundStyle(.yellow) }
                     if clip.priority > 0 { Text("P\(clip.priority)").font(.caption2.bold()).foregroundStyle(pasteoryAccentColor) }
@@ -89,7 +104,7 @@ struct ClipRowView: View {
     }
 
     private var timestamp: String {
-        let parts = Calendar.current.dateComponents([.month, .day, .hour, .minute], from: clip.lastCopiedAt)
+        let parts = Calendar.current.dateComponents([.month, .day, .hour, .minute], from: clip.lastUsedAt)
         return String(format: "%02d-%02d %02d:%02d", parts.month ?? 0, parts.day ?? 0, parts.hour ?? 0, parts.minute ?? 0)
     }
 
@@ -122,29 +137,66 @@ struct ClipRowView: View {
                     width: compact ? 52 : 60,
                     height: compact ? 42 : 46
                 )
-                if !clip.displayTitle.isEmpty || !clip.note.isEmpty {
-                    VStack(alignment: .leading, spacing: 3) {
-                        if !clip.displayTitle.isEmpty { titleText }
-                        if !clip.note.isEmpty { noteText }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-            .frame(height: compact ? 42 : 46, alignment: .leading)
-        } else if clip.primaryKind == .file {
-            HStack(spacing: 8) {
-                Image(systemName: "doc.fill")
-                    .font(.system(size: compact ? 27 : 31))
-                    .foregroundStyle(.secondary)
-                    .frame(width: compact ? 36 : 42, height: compact ? 42 : 46)
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
                     if !clip.displayTitle.isEmpty { titleText }
-                    primaryContentText
+                    if clip.primaryKind == .file {
+                        PasteoryFileMetadataDetailsView(clip: clip, attachments: attachments, compact: compact)
+                    } else {
+                        PasteoryImageMetadataDetailsView(
+                            clip: clip,
+                            attachments: attachments,
+                            compact: compact
+                        )
+                    }
                     if !clip.note.isEmpty { noteText }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(height: compact ? 42 : 46, alignment: .leading)
+            .frame(
+                height: clip.primaryKind == .file
+                    ? (compact ? 62 : 66)
+                    : (clip.primaryKind == .image
+                        ? ClipRowMetrics.imageContentHeight(for: clip, compact: compact)
+                        : (compact ? 42 : 46)),
+                alignment: .leading
+            )
+        } else if clip.primaryKind == .file {
+            HStack(spacing: 8) {
+                PasteoryFileIconView(fileName: FileIconResolver.normalizedFileName(clip.previewText))
+                    .frame(width: compact ? 52 : 60, height: compact ? 52 : 60)
+                VStack(alignment: .leading, spacing: 2) {
+                    if !clip.displayTitle.isEmpty { titleText }
+                    if let attachments {
+                        PasteoryFileMetadataDetailsView(clip: clip, attachments: attachments, compact: compact)
+                    } else {
+                        Text(FileIconResolver.normalizedFileName(clip.previewText))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    if !clip.note.isEmpty { noteText }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(height: compact ? 62 : 66, alignment: .leading)
+        } else if clip.primaryKind == .color, let color = ColorParser.color(from: clip.previewText) {
+            HStack(spacing: 9) {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(color)
+                    .frame(width: compact ? 42 : 48, height: compact ? 42 : 48)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .stroke(.primary.opacity(0.16), lineWidth: 1)
+                    }
+                VStack(alignment: .leading, spacing: 3) {
+                    if !clip.displayTitle.isEmpty { titleText }
+                    Text(clip.previewText.uppercased())
+                        .font(.system(size: compact ? 12 : 13, weight: .semibold, design: .monospaced))
+                        .textSelection(.enabled)
+                    if !clip.note.isEmpty { noteText }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(height: compact ? 42 : 48, alignment: .leading)
         } else {
             VStack(alignment: .leading, spacing: 2) {
                 if !clip.displayTitle.isEmpty {
@@ -236,14 +288,14 @@ struct ClipRowView: View {
     }
 
     private var hasImagePreview: Bool {
-        if clip.primaryKind == .image || clip.items.contains(where: { item in
-            item.representations.contains { representation in
-                UTType(representation.uti)?.conforms(to: .image) == true
-            }
-        }) { return true }
-        guard clip.primaryKind == .file else { return false }
-        let ext = URL(fileURLWithPath: clip.previewText).pathExtension.lowercased()
-        return ["png", "jpg", "jpeg", "heic", "heif", "gif", "webp", "tiff", "bmp"].contains(ext)
+        if clip.primaryKind == .image { return true }
+        if clip.primaryKind == .file {
+            return ImageFormatLabel.fileNameIsImage(FileIconResolver.normalizedFileName(clip.previewText))
+        }
+        let supportedImageUTIs = Set(["public.png", "public.tiff", "public.jpeg", "public.jpeg-2000", "public.heic", "public.heif", "com.compuserve.gif", "org.webmproject.webp", "public.svg-image"])
+        return clip.items.contains { item in
+            item.representations.contains { supportedImageUTIs.contains($0.uti) }
+        }
     }
 }
 
@@ -412,6 +464,7 @@ private struct ClipInlineThumbnail: View {
     let width: CGFloat
     let height: CGFloat
     @State private var image: NSImage?
+    @State private var didFinishLoading = false
 
     var body: some View {
         Group {
@@ -421,18 +474,33 @@ private struct ClipInlineThumbnail: View {
                     .scaledToFill()
                     .frame(width: width, height: height)
                     .clipped()
-            } else {
+            } else if !didFinishLoading {
                 RoundedRectangle(cornerRadius: 7)
                     .fill(.quaternary)
                     .frame(width: width, height: height)
                     .overlay { ProgressView().controlSize(.small) }
+            } else if clip.primaryKind == .file {
+                PasteoryFileIconView(fileName: FileIconResolver.normalizedFileName(clip.previewText))
+                    .padding(2)
+            } else {
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(.quaternary)
+                    .overlay {
+                        Image(systemName: "photo")
+                            .foregroundStyle(.secondary)
+                    }
             }
         }
         .frame(width: width, height: height)
         .clipShape(RoundedRectangle(cornerRadius: 7))
         .clipped()
         .overlay(RoundedRectangle(cornerRadius: 7).stroke(.quaternary, lineWidth: 1))
-        .task(id: clip.id) { image = await ClipImageLoader.loadThumbnail(clip: clip, attachments: attachments) }
+        .task(id: clip.id) {
+            image = nil
+            didFinishLoading = false
+            image = await ClipImageLoader.loadThumbnail(clip: clip, attachments: attachments)
+            didFinishLoading = true
+        }
     }
 }
 
@@ -538,9 +606,8 @@ private enum ClipImageLoader {
     }
 
     private static func fileURL(from data: Data, uti: String) -> URL? {
-        if uti == "NSFilenamesPboardType", let paths = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String], let path = paths.first { return URL(fileURLWithPath: path) }
-        guard let value = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) else { return nil }
-        return URL(string: value) ?? URL(fileURLWithPath: value)
+        guard let url = PasteboardFileURLDecoder.decode(data, uti: uti) else { return nil }
+        return PasteboardFileURLDecoder.resolvedPathURL(url)
     }
 
     private static func isImageFile(_ url: URL) -> Bool {
@@ -608,18 +675,32 @@ struct RepresentationPreview: View {
     var body: some View {
         Group {
             if let image {
-                Image(nsImage: image).resizable().scaledToFit()
-            } else if clip.primaryKind == .color, let color = ColorParser.color(from: clip.previewText) {
-                VStack(spacing: 12) {
-                    RoundedRectangle(cornerRadius: 16).fill(color).frame(maxWidth: .infinity, minHeight: 180)
-                    Text(clip.previewText).font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                VStack(alignment: .leading, spacing: 8) {
+                    Image(nsImage: image).resizable().scaledToFit()
+                    PasteoryImageMetadataDetailsView(clip: clip, attachments: attachments)
                 }
+            } else if clip.primaryKind == .color, let color = ColorParser.color(from: clip.previewText) {
+                HStack(spacing: 14) {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(color)
+                        .frame(width: 150, height: 150)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .stroke(.primary.opacity(0.16), lineWidth: 1)
+                        }
+                    Text(clip.previewText.uppercased())
+                        .font(.system(.title3, design: .monospaced).weight(.semibold))
+                        .textSelection(.enabled)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             } else if clip.primaryKind == .code {
                 CodeSnippetPreview(
                     text: loadedCodeText?.text ?? clip.previewText,
                     metadata: clip.codeMetadata,
                     isTruncated: loadedCodeText?.isTruncated ?? false
                 )
+            } else if clip.primaryKind == .file {
+                PasteoryFileDetailPreview(clip: clip, attachments: attachments)
             } else {
                 ScrollView {
                     Text(clip.previewText)
@@ -767,10 +848,40 @@ private enum CodeSyntaxHighlighter {
 
 enum ColorParser {
     static func color(from value: String) -> Color? {
-        var hex = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard hex.hasPrefix("#") else { return nil }
-        hex.removeFirst()
-        if hex.count == 3 { hex = hex.map { "\($0)\($0)" }.joined() }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("#") { return hexColor(String(trimmed.dropFirst())) }
+
+        let lower = trimmed.lowercased()
+        guard let open = lower.firstIndex(of: "("), lower.hasSuffix(")") else { return nil }
+        let values = lower[lower.index(after: open)..<lower.index(before: lower.endIndex)]
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+        if lower.hasPrefix("rgb"), values.count == 3 || values.count == 4,
+           let red = Double(values[0]), let green = Double(values[1]), let blue = Double(values[2]) {
+            let alpha = values.count == 4 ? Double(values[3]) ?? 1 : 1
+            return Color(
+                red: min(max(red / 255, 0), 1),
+                green: min(max(green / 255, 0), 1),
+                blue: min(max(blue / 255, 0), 1),
+                opacity: min(max(alpha, 0), 1)
+            )
+        }
+
+        if lower.hasPrefix("hsl"), values.count == 3 || values.count == 4,
+           let hue = Double(values[0].replacingOccurrences(of: "deg", with: "")),
+           let saturation = percentage(values[1]),
+           let lightness = percentage(values[2]) {
+            let alpha = values.count == 4 ? Double(values[3]) ?? 1 : 1
+            let rgb = hslToRGB(hue: hue, saturation: saturation, lightness: lightness)
+            return Color(red: rgb.red, green: rgb.green, blue: rgb.blue, opacity: min(max(alpha, 0), 1))
+        }
+        return nil
+    }
+
+    private static func hexColor(_ source: String) -> Color? {
+        var hex = source
+        if hex.count == 3 || hex.count == 4 { hex = hex.map { "\($0)\($0)" }.joined() }
         guard hex.count == 6 || hex.count == 8, let number = UInt64(hex, radix: 16) else { return nil }
         let hasAlpha = hex.count == 8
         let red = Double((number >> (hasAlpha ? 24 : 16)) & 0xff) / 255
@@ -778,5 +889,32 @@ enum ColorParser {
         let blue = Double((number >> (hasAlpha ? 8 : 0)) & 0xff) / 255
         let alpha = hasAlpha ? Double(number & 0xff) / 255 : 1
         return Color(red: red, green: green, blue: blue, opacity: alpha)
+    }
+
+    private static func percentage(_ value: String) -> Double? {
+        guard value.hasSuffix("%"), let number = Double(value.dropLast()) else { return nil }
+        return min(max(number / 100, 0), 1)
+    }
+
+    private static func hslToRGB(hue: Double, saturation: Double, lightness: Double) -> (red: Double, green: Double, blue: Double) {
+        let normalizedHue = ((hue.truncatingRemainder(dividingBy: 360)) + 360).truncatingRemainder(dividingBy: 360) / 360
+        guard saturation > 0 else { return (lightness, lightness, lightness) }
+        let q = lightness < 0.5 ? lightness * (1 + saturation) : lightness + saturation - lightness * saturation
+        let p = 2 * lightness - q
+        return (
+            hueComponent(p: p, q: q, t: normalizedHue + 1 / 3),
+            hueComponent(p: p, q: q, t: normalizedHue),
+            hueComponent(p: p, q: q, t: normalizedHue - 1 / 3)
+        )
+    }
+
+    private static func hueComponent(p: Double, q: Double, t source: Double) -> Double {
+        var t = source
+        if t < 0 { t += 1 }
+        if t > 1 { t -= 1 }
+        if t < 1 / 6 { return p + (q - p) * 6 * t }
+        if t < 1 / 2 { return q }
+        if t < 2 / 3 { return p + (q - p) * (2 / 3 - t) * 6 }
+        return p
     }
 }

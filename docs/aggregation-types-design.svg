@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1240" viewBox="0 0 1600 1240">
+  <defs>
+    <style>
+      .bg{fill:#f7f5f7}.panel{fill:#fff;stroke:#e3dfe5;stroke-width:2}.event{fill:#fbfafb;stroke:#d8d2da;stroke-width:2;stroke-dasharray:6 6}.soft{fill:#f8e7f0}.chip{fill:#f5dce9}.neutral{fill:#f0eef1}.line{stroke:#d9d3db;stroke-width:2;fill:none}.relation{stroke:#c7c0c9;stroke-width:2;fill:none}.arrow{stroke:#aaa3ac;stroke-width:2.5;fill:none;stroke-linecap:round;stroke-linejoin:round}
+      .heading{font:700 30px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;fill:#241f24}.subtitle{font:400 16px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;fill:#716a72}.section{font:700 21px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;fill:#2b252b}.title{font:650 17px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;fill:#2b252b}.accent{font:650 15px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;fill:#d92f87}.body{font:500 14px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;fill:#342f35}.meta{font:450 12px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;fill:#817a82}.chipText{font:650 12px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;fill:#bd2b73}.label{font:600 13px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;fill:#4e474f}.small{font:450 11px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;fill:#817a82}.code{font:500 13px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#7041c9}
+    </style>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#a78b9b" flood-opacity=".12"/></filter>
+  </defs>
+  <rect class="bg" width="1600" height="1240" rx="30"/>
+  <text class="heading" x="54" y="58">沿用现有 item 样式的合并与聚合</text>
+  <text class="subtitle" x="54" y="88">时间字段留在详情；列表保留现有信息顺序，聚合子项不缩小图标、字号或正文宽度。</text>
+
+  <text class="section" x="54" y="140">相同内容仍显示为一张现有卡片</text>
+  <text class="small" x="54" y="168">左侧虚线框只表示三次复制事件，不是列表 item。</text>
+  <g transform="translate(54 190)">
+    <rect class="event" width="318" height="58" rx="15"/><text class="label" x="18" y="25">Chrome · 09-02 16:58</text><text class="small" x="18" y="44">复制事件</text>
+    <rect class="event" y="72" width="318" height="58" rx="15"/><text class="label" x="18" y="97">飞书 · 09-02 14:12</text><text class="small" x="18" y="116">复制事件</text>
+    <rect class="event" y="144" width="318" height="58" rx="15"/><text class="label" x="18" y="169">Chrome · 09-03 12:16</text><text class="small" x="18" y="188">复制事件</text>
+  </g>
+  <path class="arrow" d="M400 290h96m-14-10l14 10-14 10"/>
+  <g transform="translate(526 190)" filter="url(#shadow)">
+    <rect class="panel" width="1020" height="202" rx="22"/>
+    <rect class="soft" x="24" y="28" width="58" height="58" rx="16"/>
+    <text class="accent" x="44" y="61">C</text><text class="meta" x="28" y="110">Chrome</text>
+    <circle cx="78" cy="80" r="15" fill="#d92f87"/><path d="M70 76h16M70 81h16M70 86h10" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+    <text class="accent" x="112" y="47">[Feature] Android KMP ABMock 优化</text>
+    <text class="body" x="112" y="78">https://bits.bytedance.net/devops/1486828802/code/detail/8376268</text>
+    <text class="body" x="112" y="104">?devops_space_type=client&amp;devops_space_old_id=112801&amp;tab=all</text>
+    <text class="meta" x="112" y="150">09-03 12:16　复制 ×3 · 粘贴 ×2</text>
+    <rect class="chip" x="908" y="142" width="84" height="34" rx="12"/><text class="chipText" x="934" y="164">⌘ 1</text>
+  </g>
+  <text class="meta" x="526" y="424">首次创建时间和三次复制来源只在资料库详情中展示，不占用列表卡片。</text>
+
+  <line class="line" x1="54" y1="470" x2="1546" y2="470"/>
+  <text class="section" x="54" y="514">多条不同内容生成同一种聚合 item</text>
+  <g transform="translate(54 540)">
+    <rect class="panel" width="300" height="62" rx="16"/><text class="title" x="20" y="27">手动勾选</text><text class="meta" x="20" y="47">用户选择若干内容</text>
+    <rect class="panel" x="326" width="420" height="62" rx="16"/><text class="title" x="346" y="27">场景条件</text><text class="meta" x="346" y="47">关键词、来源、时间或项目上下文</text>
+    <rect class="panel" x="772" width="454" height="62" rx="16"/><text class="title" x="792" y="27">搜索结果</text><text class="meta" x="792" y="47">先搜索，再执行“聚合当前结果”</text>
+    <path class="arrow" d="M1250 31h212m-14-10l14 10-14 10"/>
+  </g>
+
+  <g transform="translate(54 630)" filter="url(#shadow)">
+    <rect class="panel" width="1492" height="106" rx="22"/>
+    <rect class="soft" x="24" y="24" width="58" height="58" rx="16"/><path d="M40 41h14v14H40zM53 41h14v14H53zM40 54h14v14H40zM53 54h14v14H53z" fill="#d92f87"/>
+    <text class="title" x="106" y="39">ABMock 联调资料</text>
+    <text class="body" x="106" y="66">Android KMP 联调需要的链接、代码和文件</text>
+    <text class="meta" x="106" y="89">自动更新 · 最近新增 09-03 12:16</text>
+    <rect class="chip" x="1340" y="36" width="124" height="34" rx="12"/><text class="chipText" x="1362" y="58">3 项内容⌃</text>
+  </g>
+
+  <path class="relation" d="M70 754v330M70 812h18M70 942h18M70 1072h18"/>
+  <g transform="translate(88 754)" filter="url(#shadow)">
+    <rect class="panel" width="1458" height="116" rx="20"/>
+    <rect class="soft" x="22" y="22" width="52" height="52" rx="15"/><text class="accent" x="40" y="54">C</text><text class="meta" x="24" y="96">Chrome</text>
+    <text class="accent" x="98" y="34">[Feature] Android KMP ABMock 优化</text>
+    <text class="body" x="98" y="61">https://bits.bytedance.net/devops/1486828802/code/detail/8376268?devops_space_type=client&amp;tab=all</text>
+    <text class="meta" x="98" y="92">09-03 12:16　复制 ×3 · 粘贴 ×2</text>
+  </g>
+  <g transform="translate(88 884)" filter="url(#shadow)">
+    <rect class="panel" width="1458" height="116" rx="20"/>
+    <rect class="soft" x="22" y="22" width="52" height="52" rx="15"/><text class="code" x="34" y="54">&lt;/&gt;</text><text class="meta" x="25" y="96">Xcode</text>
+    <text class="code" x="98" y="34">struct ABMockConfiguration: Codable {</text>
+    <text class="code" x="114" y="60">let moduleName: String　let mockRules: [Rule]</text>
+    <text class="meta" x="98" y="92">Swift · 18 行　09-03 11:42　复制 ×1 · 粘贴 ×0</text>
+  </g>
+  <g transform="translate(88 1014)" filter="url(#shadow)">
+    <rect class="panel" width="1458" height="116" rx="20"/>
+    <path d="M28 20h44l18 18v58H28z" fill="#eef2f7" stroke="#9baabd" stroke-width="2"/><path d="M72 20v20h18" fill="#dce4ed"/><rect x="34" y="70" width="50" height="20" rx="6" fill="#5e7390"/><text x="45" y="85" font-size="11" font-weight="700" fill="#fff">JSON</text>
+    <text class="title" x="112" y="34">abmock-config.json</text>
+    <text class="body" x="112" y="60">~/Projects/ByteX/config</text>
+    <text class="meta" x="112" y="88">12.8 KB　09-03 10:28　复制 ×2 · 粘贴 ×1</text>
+  </g>
+
+  <line class="line" x1="54" y1="1164" x2="1546" y2="1164"/>
+  <text class="label" x="54" y="1202">展开规则</text>
+  <text class="body" x="154" y="1202">子 item 复用完整卡片，层级标识只占 12 pt 左右；不缩小来源图标、字号和正文区域。</text>
+</svg>

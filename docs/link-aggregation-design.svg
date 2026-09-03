@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <defs>
+    <style>
+      .bg{fill:#f7f5f7}.panel{fill:#fff;stroke:#e3dfe5;stroke-width:2}.soft{fill:#f8e7f0}.neutral{fill:#f0eef1}.chip{fill:#f5dce9}.line{stroke:#d9d3db;stroke-width:2}.arrow{stroke:#aaa3ac;stroke-width:2.5;fill:none;stroke-linecap:round;stroke-linejoin:round}.heading{font:700 30px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;fill:#241f24}.subtitle{font:400 16px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;fill:#716a72}.section{font:700 21px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;fill:#2b252b}.title{font:650 17px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;fill:#2b252b}.accent{font:650 15px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;fill:#d92f87}.body{font:500 14px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;fill:#342f35}.meta{font:450 12px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;fill:#817a82}.label{font:600 13px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;fill:#4e474f}.chipText{font:650 12px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;fill:#bd2b73}
+    </style>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#a78b9b" flood-opacity=".12"/></filter>
+  </defs>
+  <rect class="bg" width="1600" height="900" rx="30"/>
+  <text class="heading" x="54" y="58">相同内容复用现有 item</text>
+  <text class="subtitle" x="54" y="88">三次复制仍是三次事件；列表卡片不增加新字段，也不改变现有信息顺序。</text>
+
+  <text class="section" x="54" y="142">合并前：三张重复卡片</text>
+  <g transform="translate(54 170)" filter="url(#shadow)">
+    <rect class="panel" width="590" height="126" rx="20"/><rect class="soft" x="20" y="22" width="52" height="52" rx="15"/><text class="accent" x="39" y="54">C</text>
+    <text class="accent" x="94" y="35">同一条 BITS 链接</text><text class="body" x="94" y="63">https://bits.bytedance.net/devops/…</text><text class="meta" x="94" y="96">09-03 12:16　复制 ×1 · 粘贴 ×2</text>
+  </g>
+  <g transform="translate(54 316)" filter="url(#shadow)">
+    <rect class="panel" width="590" height="126" rx="20"/><rect class="soft" x="20" y="22" width="52" height="52" rx="15"/><text class="accent" x="39" y="54">C</text>
+    <text class="accent" x="94" y="35">同一条 BITS 链接</text><text class="body" x="94" y="63">https://bits.bytedance.net/devops/…</text><text class="meta" x="94" y="96">09-02 16:58　复制 ×1 · 粘贴 ×0</text>
+  </g>
+  <g transform="translate(54 462)" filter="url(#shadow)">
+    <rect class="panel" width="590" height="126" rx="20"/><rect class="soft" x="20" y="22" width="52" height="52" rx="15"/><text class="accent" x="39" y="54">F</text>
+    <text class="accent" x="94" y="35">同一条 BITS 链接</text><text class="body" x="94" y="63">https://bits.bytedance.net/devops/…</text><text class="meta" x="94" y="96">09-02 14:12　复制 ×1 · 粘贴 ×0</text>
+  </g>
+  <path class="arrow" d="M680 378h92m-14-10l14 10-14 10"/>
+
+  <text class="section" x="810" y="142">合并后：一张同样式卡片</text>
+  <g transform="translate(810 170)" filter="url(#shadow)">
+    <rect class="panel" width="736" height="202" rx="22"/>
+    <rect class="soft" x="24" y="28" width="58" height="58" rx="16"/><text class="accent" x="44" y="61">C</text><text class="meta" x="28" y="110">Chrome</text>
+    <circle cx="78" cy="80" r="15" fill="#d92f87"/><path d="M70 76h16M70 81h16M70 86h10" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+    <text class="accent" x="112" y="47">[Feature] Android KMP ABMock 优化</text>
+    <text class="body" x="112" y="78">https://bits.bytedance.net/devops/1486828802/</text>
+    <text class="body" x="112" y="104">code/detail/8376268?devops_space_type=client&amp;tab=all</text>
+    <text class="meta" x="112" y="150">09-03 12:16　复制 ×3 · 粘贴 ×2</text>
+    <rect class="chip" x="624" y="142" width="84" height="34" rx="12"/><text class="chipText" x="650" y="164">⌘ 1</text>
+  </g>
+  <g transform="translate(810 402)">
+    <rect class="panel" width="736" height="152" rx="20"/>
+    <text class="title" x="24" y="38">这些信息留在资料库详情</text>
+    <text class="body" x="24" y="72">首次创建时间 · 三次复制来源 · 每次抓取上下文</text>
+    <text class="body" x="24" y="104">列表卡片不增加额外标签、记录入口或代表箭头。</text>
+  </g>
+
+  <line class="line" x1="54" y1="642" x2="1546" y2="642"/>
+  <text class="section" x="54" y="688">数据更新规则</text>
+  <g transform="translate(54 718)">
+    <rect class="neutral" width="270" height="52" rx="14"/><text class="label" x="22" y="32">复制次数　1 → 3</text>
+    <rect class="neutral" x="292" width="326" height="52" rx="14"/><text class="label" x="314" y="32">最近复制时间更新</text>
+    <rect class="neutral" x="640" width="326" height="52" rx="14"/><text class="label" x="662" y="32">首次创建时间保留</text>
+    <rect class="neutral" x="988" width="504" height="52" rx="14"/><text class="label" x="1010" y="32">三次来源与上下文写入复制事件</text>
+  </g>
+  <text class="meta" x="54" y="824">粘贴只更新粘贴次数和更新时间，不改变最近复制排序。</text>
+</svg>

@@ -6,6 +6,14 @@ enum PasteoryBrand {
     static let tagline = "Pasteory learns from what you copied."
     static let taglineChinese = "从复制过的内容里，学会你做事的习惯。"
 
+    static func appIconImage() -> NSImage {
+        if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let image = NSImage(contentsOf: url) {
+            return image
+        }
+        return NSApp.applicationIconImage
+    }
+
     static func menuBarImage() -> NSImage {
         if let packagedImage = packagedMenuBarImage() {
             return packagedImage
@@ -26,9 +34,20 @@ enum PasteoryBrand {
         let image = NSImage(size: NSSize(width: 18, height: 18))
         var loadedRepresentation = false
         for resourceName in ["MenuBarIcon", "MenuBarIcon@2x"] {
-            guard let url = Bundle.main.url(forResource: resourceName, withExtension: "png"),
-                  let data = try? Data(contentsOf: url),
-                  let representation = NSBitmapImageRep(data: data) else { continue }
+            var candidates = [URL]()
+            if let packaged = Bundle.main.url(forResource: resourceName, withExtension: "png") {
+                candidates.append(packaged)
+            }
+#if DEBUG
+            candidates.append(
+                URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+                    .appendingPathComponent("docs/brand/\(resourceName == "MenuBarIcon" ? "pasteory-menu-bar-icon" : "pasteory-menu-bar-icon@2x").png")
+            )
+#endif
+            guard let representation = candidates.lazy.compactMap({ url -> NSBitmapImageRep? in
+                guard let data = try? Data(contentsOf: url) else { return nil }
+                return NSBitmapImageRep(data: data)
+            }).first else { continue }
             representation.size = NSSize(width: 18, height: 18)
             image.addRepresentation(representation)
             loadedRepresentation = true

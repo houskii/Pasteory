@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+  <linearGradient id="badge-diagnostic" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F97316"/>
+    <stop offset="1" stop-color="#DC2626"/>
+  </linearGradient>
+  <filter id="shadow-diagnostic" x="-20%" y="-20%" width="140%" height="150%">
+    <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity=".18"/>
+  </filter>
+</defs>
+<g filter="url(#shadow-diagnostic)">
+  <path d="M24 8h55l25 25v79c0 5-4 9-9 9H24c-5 0-9-4-9-9V17c0-5 4-9 9-9z" fill="#FFFFFF" stroke="#F97316" stroke-opacity=".30" stroke-width="2"/>
+  <path d="M79 8v19c0 5 4 9 9 9h16" fill="#F97316" fill-opacity=".13" stroke="#F97316" stroke-opacity=".28" stroke-width="2" stroke-linejoin="round"/>
+  <g stroke="#F97316" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-width="4"><circle cx="64" cy="51" r="19"/><path d="M64 22v10M64 70v9M35 51h10M83 51h10M44 31l7 7M77 64l7 7M84 31l-7 7M51 64l-7 7"/><circle cx="64" cy="51" r="6" fill="#F97316" stroke="none"/></g>
+  <rect x="24" y="82" width="71" height="27" rx="9" fill="url(#badge-diagnostic)"/>
+  <text x="59.5" y="101" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="12" font-weight="800" letter-spacing=".3" fill="#FFFFFF">DEBUG</text>
+</g>
+</svg>

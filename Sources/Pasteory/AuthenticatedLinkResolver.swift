@@ -36,6 +36,7 @@ enum LinkWebKitConfiguration {
 enum LinkAuthenticationSite: String, CaseIterable, Identifiable, Sendable {
     case bits
     case lark
+    case codebase
 
     var id: String { rawValue }
 
@@ -43,6 +44,7 @@ enum LinkAuthenticationSite: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .bits: "BITS"
         case .lark: "飞书"
+        case .codebase: "Codebase"
         }
     }
 
@@ -50,6 +52,7 @@ enum LinkAuthenticationSite: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .bits: URL(string: "https://bits.bytedance.net/")!
         case .lark: URL(string: "https://bytedance.larkoffice.com/")!
+        case .codebase: URL(string: "https://code.byted.org/")!
         }
     }
 
@@ -57,6 +60,7 @@ enum LinkAuthenticationSite: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .bits: "bits.bytedance.net"
         case .lark: "*.larkoffice.com"
+        case .codebase: "code.byted.org"
         }
     }
 
@@ -65,32 +69,88 @@ enum LinkAuthenticationSite: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .bits: return value == "bits.bytedance.net"
         case .lark: return value == "larkoffice.com" || value.hasSuffix(".larkoffice.com")
+        case .codebase: return value == "code.byted.org"
+        }
+    }
+}
+
+enum LinkAuthenticationTarget: Identifiable, Hashable, Sendable {
+    case builtIn(LinkAuthenticationSite)
+    case custom(AuthenticatedLinkRule)
+
+    var id: String {
+        switch self {
+        case .builtIn(let site): site.rawValue
+        case .custom(let rule): "custom.\(rule.id.uuidString)"
         }
     }
 
-    static func matching(host: String) -> LinkAuthenticationSite? {
-        allCases.first { $0.matches(host: host) }
+    var title: String {
+        switch self {
+        case .builtIn(let site): site.title
+        case .custom(let rule): rule.name
+        }
+    }
+
+    var startURL: URL {
+        switch self {
+        case .builtIn(let site): site.startURL
+        case .custom(let rule): URLFallbackEngine.normalizedWebURL(rule.startURL) ?? URL(string: "https://example.com/")!
+        }
+    }
+
+    var domainDescription: String {
+        switch self {
+        case .builtIn(let site): site.domainDescription
+        case .custom(let rule): rule.pattern
+        }
+    }
+
+    var customRule: AuthenticatedLinkRule? {
+        guard case .custom(let rule) = self else { return nil }
+        return rule
+    }
+
+    func matches(_ url: URL) -> Bool {
+        switch self {
+        case .builtIn(let site): site.matches(host: url.host ?? "")
+        case .custom(let rule): rule.matches(url)
+        }
+    }
+
+    static func all(customRules: [AuthenticatedLinkRule]) -> [LinkAuthenticationTarget] {
+        LinkAuthenticationSite.allCases.map(LinkAuthenticationTarget.builtIn)
+            + customRules.filter(\.enabled).map(LinkAuthenticationTarget.custom)
+    }
+
+    static func matching(url: URL, customRules: [AuthenticatedLinkRule]) -> LinkAuthenticationTarget? {
+        let custom = customRules.first { $0.matches(url) }.map(LinkAuthenticationTarget.custom)
+        return custom ?? LinkAuthenticationSite.allCases.first { $0.matches(host: url.host ?? "") }.map(LinkAuthenticationTarget.builtIn)
     }
 }
 
 struct LinkAuthenticationRequest: Identifiable {
     let id = UUID()
-    let site: LinkAuthenticationSite
+    let target: LinkAuthenticationTarget
     let group: LinkFailureGroup?
 }
 
 @MainActor
 enum LinkAuthenticationSession {
-    static func markUpdated(_ site: LinkAuthenticationSite) {
-        UserDefaults.standard.set(Date(), forKey: key(for: site))
+    static func markUpdated(_ target: LinkAuthenticationTarget) {
+        UserDefaults.standard.set(Date(), forKey: key(for: target))
     }
 
-    static func lastUpdatedAt(_ site: LinkAuthenticationSite) -> Date? {
-        UserDefaults.standard.object(forKey: key(for: site)) as? Date
+    static func lastUpdatedAt(_ target: LinkAuthenticationTarget) -> Date? {
+        UserDefaults.standard.object(forKey: key(for: target)) as? Date
     }
 
-    private static func key(for site: LinkAuthenticationSite) -> String {
-        "linkAuthenticationSessionUpdatedAt.\(site.rawValue)"
+    static func clear(_ target: LinkAuthenticationTarget) {
+        UserDefaults.standard.removeObject(forKey: key(for: target))
+    }
+
+    private static func key(for target: LinkAuthenticationTarget) -> String {
+        "linkAuthenticationSessionUpdatedAt.\(target.id)"
     }
 }
 
@@ -116,9 +176,18 @@ enum AuthenticatedLinkResolverError: LocalizedError {
 
 @MainActor
 final class AuthenticatedLinkResolver {
+    private var inFlight = [String: Task<AuthenticatedPageSnapshot, Error>]()
+
     func resolve(url: URL) async throws -> AuthenticatedPageSnapshot {
-        let load = AuthenticatedPageLoad(url: url)
-        return try await load.run()
+        let key = URLFallbackEngine.canonicalResourceKey(for: url)
+        if let task = inFlight[key] { return try await task.value }
+        let task = Task { @MainActor in
+            let load = AuthenticatedPageLoad(url: url)
+            return try await load.run()
+        }
+        inFlight[key] = task
+        defer { inFlight[key] = nil }
+        return try await task.value
     }
 }
 
@@ -130,6 +199,7 @@ private final class AuthenticatedPageLoad: NSObject, WKNavigationDelegate {
     private var continuation: CheckedContinuation<AuthenticatedPageSnapshot, Error>?
     private var timeoutTask: Task<Void, Never>?
     private var completed = false
+    private var extracting = false
     private let startedAt = Date()
 
     init(url: URL) {
@@ -167,6 +237,8 @@ private final class AuthenticatedPageLoad: NSObject, WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard !completed, !extracting else { return }
+        extracting = true
         Task { [weak self] in
             await self?.extractStablePage()
         }
@@ -182,65 +254,68 @@ private final class AuthenticatedPageLoad: NSObject, WKNavigationDelegate {
 
     private func extractStablePage() async {
         var bestSnapshot: AuthenticatedPageSnapshot?
-        var previousFingerprint: String?
-        var stableMeaningfulCount = 0
-        for _ in 0..<8 {
-            guard !completed else { return }
-            try? await Task.sleep(for: .milliseconds(700))
-            do {
-                let snapshot = try await pageSnapshot()
-                bestSnapshot = snapshot
-                let assessment = LinkTitleQualityEvaluator.assess(
-                    candidates: snapshot.candidates,
-                    requestedURL: url,
-                    finalURL: snapshot.finalURL
-                )
-                if assessment.quality.canReplaceFallback, let fingerprint = assessment.fingerprint {
-                    stableMeaningfulCount = fingerprint == previousFingerprint ? stableMeaningfulCount + 1 : 1
-                    previousFingerprint = fingerprint
-                    if stableMeaningfulCount >= 2 {
+        let observationStartedAt = Date()
+        let tiers: [(interval: Duration, requiredMatches: Int)] = [
+            (.milliseconds(600), 3),
+            (.milliseconds(2_500), 2)
+        ]
+
+        for tier in tiers {
+            var repeatedTitle: String?
+            var repeatedCount = 0
+            for _ in 0..<tier.requiredMatches {
+                guard !completed else { return }
+                try? await Task.sleep(for: tier.interval)
+                guard !completed else { return }
+                do {
+                    let snapshot = try await pageSnapshot()
+                    bestSnapshot = snapshot
+                    let title = snapshot.candidates.first?.value.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard let title, !title.isEmpty else {
+                        repeatedTitle = nil
+                        repeatedCount = 0
+                        continue
+                    }
+                    let fingerprint = LinkTitleQualityEvaluator.fingerprint(title)
+                    repeatedCount = fingerprint == repeatedTitle ? repeatedCount + 1 : 1
+                    repeatedTitle = fingerprint
+                    if repeatedCount >= tier.requiredMatches {
                         finish(.success(snapshot))
                         return
                     }
-                } else {
-                    stableMeaningfulCount = 0
-                    previousFingerprint = assessment.fingerprint
-                }
-            } catch {
-                if bestSnapshot == nil {
-                    finish(.failure(AuthenticatedLinkResolverError.navigation(error.localizedDescription)))
-                    return
+                } catch {
+                    if bestSnapshot == nil {
+                        finish(.failure(AuthenticatedLinkResolverError.navigation(error.localizedDescription)))
+                        return
+                    }
                 }
             }
         }
-        if let bestSnapshot { finish(.success(bestSnapshot)) }
-        else { finish(.failure(AuthenticatedLinkResolverError.invalidPage)) }
+
+        let remaining = max(0, 10 - Date().timeIntervalSince(observationStartedAt))
+        if remaining > 0 { try? await Task.sleep(for: .seconds(remaining)) }
+        guard !completed else { return }
+        if let snapshot = try? await pageSnapshot(), !snapshot.candidates.isEmpty {
+            finish(.success(snapshot))
+        } else if let bestSnapshot {
+            finish(.success(bestSnapshot))
+        } else {
+            finish(.failure(AuthenticatedLinkResolverError.invalidPage))
+        }
     }
 
     private func pageSnapshot() async throws -> AuthenticatedPageSnapshot {
         let script = """
         (() => ({
-          title: document.title || '',
-          openGraph: document.querySelector('meta[property="og:title"]')?.content || '',
-          twitter: document.querySelector('meta[name="twitter:title"]')?.content || '',
-          heading: document.querySelector('h1')?.innerText || ''
+          title: document.title || ''
         }))()
         """
         guard let value = try await webView.evaluateJavaScript(script) as? [String: Any],
               let finalURL = webView.url else {
             throw AuthenticatedLinkResolverError.invalidPage
         }
-        let mappings: [(String, LinkTitleCandidateSource)] = [
-            ("openGraph", .openGraph),
-            ("twitter", .twitterCard),
-            ("heading", .mainHeading),
-            ("title", .documentTitle)
-        ]
-        let candidates = mappings.compactMap { key, source -> LinkTitleCandidate? in
-            guard let title = value[key] as? String else { return nil }
-            let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? nil : LinkTitleCandidate(value: trimmed, source: source)
-        }
+        let title = (value["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let candidates = title.isEmpty ? [] : [LinkTitleCandidate(value: title, source: .documentTitle)]
         return AuthenticatedPageSnapshot(
             finalURL: finalURL,
             candidates: candidates,
@@ -252,6 +327,7 @@ private final class AuthenticatedPageLoad: NSObject, WKNavigationDelegate {
         guard !completed else { return }
         completed = true
         timeoutTask?.cancel()
+        webView.navigationDelegate = nil
         webView.stopLoading()
         hostPanel.orderOut(nil)
         hostPanel.contentView = nil
@@ -275,15 +351,15 @@ struct SiteLoginSheet: View {
     init(request: LinkAuthenticationRequest, onComplete: @escaping () -> Void) {
         self.request = request
         self.onComplete = onComplete
-        _address = State(initialValue: request.site.startURL.absoluteString)
-        _requestedURL = State(initialValue: request.site.startURL)
+        _address = State(initialValue: request.target.startURL.absoluteString)
+        _requestedURL = State(initialValue: request.target.startURL)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("登录 \(request.site.title)").font(.title2.bold())
+                    Text("登录 \(request.target.title)").font(.title2.bold())
                     Text("这是 Pasteory 独立的 WebKit 会话，不读取 Chrome Cookie；登录数据按当前 Bundle ID 隔离，网页使用 WebCrypto 时 macOS WebKit 可能访问登录钥匙串。")
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -319,7 +395,7 @@ struct SiteLoginSheet: View {
                 Spacer()
                 Button("取消") { dismiss() }
                 Button(request.group == nil ? "完成登录" : "完成登录并重新解析") {
-                    LinkAuthenticationSession.markUpdated(request.site)
+                    LinkAuthenticationSession.markUpdated(request.target)
                     onComplete()
                     dismiss()
                 }

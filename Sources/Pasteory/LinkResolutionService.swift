@@ -5,7 +5,7 @@ actor LinkResolutionService {
     private let repository: any ClipRepository
     private let session: URLSession
     private var inFlight = [String: Task<Void, Never>]()
-    private let resolvedCacheLifetime: TimeInterval = 24 * 60 * 60
+    private let resolvedCacheLifetime = LinkCacheRefreshPolicy.resolvedCacheLifetime
     private let failedRetryDelay: TimeInterval = 5 * 60
     private let maximumResponseBytes = 5 * 1024 * 1024
 
@@ -24,8 +24,8 @@ actor LinkResolutionService {
     func resolve(clip: Clip, allowNetwork: Bool = true, force: Bool = false) async {
         guard clip.primaryKind == .link,
               let url = URLFallbackEngine.normalizedWebURL(clip.previewText) else { return }
-        let normalizedURL = url.absoluteString
-        if let task = inFlight[normalizedURL] {
+        let canonicalResourceKey = URLFallbackEngine.canonicalResourceKey(for: url)
+        if let task = inFlight[canonicalResourceKey] {
             await task.value
             return
         }
@@ -34,9 +34,9 @@ actor LinkResolutionService {
             guard let self else { return }
             await self.resolve(url: url, clipID: clip.id, allowNetwork: allowNetwork, force: force)
         }
-        inFlight[normalizedURL] = task
+        inFlight[canonicalResourceKey] = task
         await task.value
-        inFlight[normalizedURL] = nil
+        inFlight[canonicalResourceKey] = nil
     }
 
     func retry(group: LinkFailureGroup) async {
@@ -87,6 +87,7 @@ actor LinkResolutionService {
         updated.resolutionSource = .webKit
         updated.updatedAt = Date()
         updated.lastAttemptAt = updated.updatedAt
+        if updated.requestState == .resolved { updated.lastResolvedAt = updated.updatedAt }
         updated.attemptCount += 1
         if updated.requestState != .resolved { updated.failedAttemptCount += 1 }
         let attempt = LinkResolutionAttempt(
@@ -150,9 +151,12 @@ actor LinkResolutionService {
 
     private func resolve(url: URL, existing resource: LinkResource, force: Bool) async {
         let now = Date()
-        if !force, let lastAttempt = resource.lastAttemptAt {
+        if !force {
+            let cacheDate = resource.requestState == .resolved
+                ? (resource.lastResolvedAt ?? resource.lastAttemptAt)
+                : resource.lastAttemptAt
             let minimumDelay = resource.requestState == .resolved ? resolvedCacheLifetime : failedRetryDelay
-            if now.timeIntervalSince(lastAttempt) < minimumDelay { return }
+            if let cacheDate, now.timeIntervalSince(cacheDate) < minimumDelay { return }
         }
 
         let startedAt = Date()
@@ -264,6 +268,7 @@ actor LinkResolutionService {
             updated.resolutionSource = .anonymousHTTP
             updated.updatedAt = Date()
             updated.lastAttemptAt = updated.updatedAt
+            if updated.requestState == .resolved { updated.lastResolvedAt = updated.updatedAt }
             updated.attemptCount += 1
             if updated.requestState != .resolved { updated.failedAttemptCount += 1 }
             let attempt = LinkResolutionAttempt(

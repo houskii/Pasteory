@@ -6,6 +6,7 @@ PROJECT_DIR=${SCRIPT_DIR:h}
 APP_DIR="$PROJECT_DIR/dist/Pasteory.app"
 PLIST="$APP_DIR/Contents/Info.plist"
 BINARY="$APP_DIR/Contents/MacOS/Pasteory"
+FILE_ICON_DIR="$APP_DIR/Contents/Resources/FileIcons"
 
 [[ -d "$APP_DIR" ]] || "$PROJECT_DIR/scripts/build_app.sh"
 EXPECTED_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PROJECT_DIR/Config/Info.plist")
@@ -24,6 +25,15 @@ DMG_PATH="$PROJECT_DIR/dist/Pasteory-$EXPECTED_VERSION-arm64.dmg"
 [[ "$(sips -g pixelWidth "$APP_DIR/Contents/Resources/MenuBarIcon@2x.png" | awk '/pixelWidth/{print $2}')" == "36" ]]
 [[ "$(sips -g hasAlpha "$APP_DIR/Contents/Resources/MenuBarIcon.png" | awk '/hasAlpha/{print $2}')" == "yes" ]]
 [[ "$(sips -g hasAlpha "$APP_DIR/Contents/Resources/MenuBarIcon@2x.png" | awk '/hasAlpha/{print $2}')" == "yes" ]]
+arch -arm64 /usr/bin/swift "$PROJECT_DIR/scripts/verify_menu_bar_icon.swift" \
+  "$APP_DIR/Contents/Resources/MenuBarIcon.png" \
+  "$APP_DIR/Contents/Resources/MenuBarIcon@2x.png"
+[[ -d "$FILE_ICON_DIR" ]]
+[[ "$(find "$FILE_ICON_DIR" -maxdepth 1 -type f -name '*.png' | wc -l | tr -d ' ')" == "49" ]]
+while IFS= read -r -d '' icon; do
+  [[ "$(sips -g pixelWidth "$icon" | awk '/pixelWidth/{print $2}')" == "128" ]]
+  [[ "$(sips -g pixelHeight "$icon" | awk '/pixelHeight/{print $2}')" == "128" ]]
+done < <(find "$FILE_ICON_DIR" -maxdepth 1 -type f -name '*.png' -print0)
 "$PROJECT_DIR/scripts/verify_signing.sh" "$APP_DIR"
 hdiutil verify "$DMG_PATH"
 file "$BINARY"

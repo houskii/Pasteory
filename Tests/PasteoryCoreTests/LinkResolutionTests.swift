@@ -1,4 +1,5 @@
 import Foundation
+import SQLite3
 import Testing
 @testable import PasteoryCore
 
@@ -17,6 +18,11 @@ import Testing
     let wiki = try #require(URLFallbackEngine.normalizedWebURL("https://bytedance.larkoffice.com/wiki/KUNxwc586ivE9MkI1otcBQWPngf"))
     let wikiFallback = URLFallbackEngine.fallback(for: wiki, rules: [])
     #expect(wikiFallback.title == "飞书 Wiki · KUNxwc586ivE9MkI1otcBQWPngf")
+
+    let codebase = try #require(URLFallbackEngine.normalizedWebURL("https://code.byted.org/ugc-android/ByteX/merge_requests/912"))
+    let codebaseFallback = URLFallbackEngine.fallback(for: codebase, rules: [])
+    #expect(codebaseFallback.title == "ByteX MR · !912")
+    #expect(codebaseFallback.routeSignature.pathTemplate == "/{group}/{project}/merge_requests/{mergeRequestID}")
 }
 
 @Test func verificationRequiredHasExplicitUserFacingState() {
@@ -51,6 +57,159 @@ import Testing
     #expect(firstSignature.requiredQueryKeys == ["view"])
     #expect(secondSignature.requiredQueryKeys == ["view"])
     #expect(firstSignature.key == secondSignature.key)
+}
+
+@Test func canonicalResourceKeyUsesTheWholePathAndIgnoresQueryAndFragment() throws {
+    let first = try #require(URLFallbackEngine.normalizedWebURL(
+        "https://bits.bytedance.net/devops/1486828802/code/detail/8390888?devops_space_type=client"
+    ))
+    let second = try #require(URLFallbackEngine.normalizedWebURL(
+        "https://BITS.bytedance.net/devops/1486828802/code/detail/8390888/?tab=all#changes"
+    ))
+    #expect(URLFallbackEngine.canonicalResourceKey(for: first)
+        == "bits.bytedance.net:/devops/1486828802/code/detail/8390888")
+    #expect(URLFallbackEngine.canonicalResourceKey(for: first)
+        == URLFallbackEngine.canonicalResourceKey(for: second))
+}
+
+@Test func cacheMaintenanceScansOneHundredItemsAndKeepsTenUniquePaths() throws {
+    func clip(_ value: String, index: Int) throws -> Clip {
+        try #require(ClipClassifier.makeClip(from: PasteboardCapture(
+            items: [CapturedItem(order: 0, representations: [
+                CapturedRepresentation(uti: "public.utf8-plain-text", data: Data(value.utf8))
+            ])],
+            source: ClipSource(appName: "测试", bundleIdentifier: "app.test", confidence: .high),
+            capturedAt: Date(timeIntervalSince1970: Double(index))
+        )))
+    }
+    var ordered = [Clip]()
+    ordered.append(try clip("https://example.com/items/1?tab=first", index: 0))
+    ordered.append(try clip("https://example.com/items/1?tab=second", index: 1))
+    for index in 2...12 {
+        ordered.append(try clip("https://example.com/items/\(index)", index: index))
+    }
+    while ordered.count < LinkCacheRefreshPolicy.scanLimit {
+        ordered.append(try clip("普通文本 \(ordered.count)", index: ordered.count))
+    }
+    ordered.append(try clip("https://example.com/outside/101", index: 101))
+
+    let candidates = LinkCacheRefreshPolicy.maintenanceCandidates(from: ordered)
+    #expect(candidates.count == LinkCacheRefreshPolicy.resourceLimit)
+    #expect(candidates.first?.previewText.contains("items/1") == true)
+    #expect(candidates.last?.previewText.contains("items/10") == true)
+    #expect(!candidates.contains { $0.previewText.contains("outside/101") })
+}
+
+@Test func repositoryReusesLinkResourceForTheSamePathWithDifferentQueries() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("PasteoryCanonicalLinkTests-\(UUID().uuidString)", isDirectory: true)
+    let directories = try AppDirectories(root: root)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let repository = try SQLiteClipRepository(databaseURL: directories.databaseFile)
+    let rawURLs = [
+        "https://bits.bytedance.net/devops/1486828802/code/detail/8390888?devops_space_type=client",
+        "https://bits.bytedance.net/devops/1486828802/code/detail/8390888?tab=all&cr_tab=All"
+    ]
+    var resourceIDs = [UUID]()
+    for (index, rawURL) in rawURLs.enumerated() {
+        let clip = try #require(ClipClassifier.makeClip(from: PasteboardCapture(
+            items: [CapturedItem(order: 0, representations: [
+                CapturedRepresentation(uti: "public.utf8-plain-text", data: Data(rawURL.utf8))
+            ])],
+            source: ClipSource(appName: "测试", bundleIdentifier: "app.test", confidence: .high),
+            capturedAt: Date(timeIntervalSince1970: Double(index + 1))
+        )))
+        try await repository.save(clip)
+        let url = try #require(URLFallbackEngine.normalizedWebURL(rawURL))
+        let fallback = URLFallbackEngine.fallback(for: url, rules: [])
+        let resource = try await repository.associateLink(
+            clipID: clip.id,
+            resource: LinkResource(
+                normalizedURL: rawURL,
+                host: "bits.bytedance.net",
+                routeSignature: fallback.routeSignature,
+                fallbackTitle: fallback.title,
+                fallbackState: fallback.state
+            )
+        )
+        resourceIDs.append(resource.id)
+    }
+
+    #expect(resourceIDs.count == 2)
+    #expect(Set(resourceIDs).count == 1)
+    let stored = try #require(try await repository.linkResource(normalizedURL: rawURLs[1]))
+    #expect(stored.effectiveCanonicalResourceKey
+        == "bits.bytedance.net:/devops/1486828802/code/detail/8390888")
+}
+
+@Test func repositoryMigratesLegacyQueryVariantsIntoOneCanonicalResource() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("PasteoryCanonicalMigrationTests-\(UUID().uuidString)", isDirectory: true)
+    let directories = try AppDirectories(root: root)
+    defer { try? FileManager.default.removeItem(at: root) }
+    var database: OpaquePointer?
+    #expect(sqlite3_open(directories.databaseFile.path, &database) == SQLITE_OK)
+    let pointer = try #require(database)
+    let createSQL = """
+    CREATE TABLE link_resources(
+      id TEXT PRIMARY KEY,normalized_url TEXT NOT NULL UNIQUE,host TEXT NOT NULL,route_key TEXT NOT NULL,
+      request_state TEXT NOT NULL,title_quality TEXT NOT NULL,fallback_state TEXT NOT NULL,updated_at REAL NOT NULL,
+      last_attempt_at REAL,attempt_count INTEGER NOT NULL DEFAULT 0,failed_attempt_count INTEGER NOT NULL DEFAULT 0,payload_json BLOB NOT NULL
+    );
+    """
+    #expect(sqlite3_exec(pointer, createSQL, nil, nil, nil) == SQLITE_OK)
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .millisecondsSince1970
+    let rawURLs = [
+        "https://bits.bytedance.net/devops/1486828802/code/detail/8390888?devops_space_type=client",
+        "https://bits.bytedance.net/devops/1486828802/code/detail/8390888?tab=all"
+    ]
+    for (index, rawURL) in rawURLs.enumerated() {
+        let url = try #require(URLFallbackEngine.normalizedWebURL(rawURL))
+        let fallback = URLFallbackEngine.fallback(for: url, rules: [])
+        var resource = LinkResource(
+            normalizedURL: rawURL,
+            host: "bits.bytedance.net",
+            routeSignature: fallback.routeSignature,
+            fallbackTitle: fallback.title,
+            fallbackState: fallback.state,
+            resolvedTitle: index == 0 ? "合码请求·抖音" : "[Optimize] fix compile",
+            titleQuality: .distinctive,
+            requestState: .resolved,
+            updatedAt: Date(timeIntervalSince1970: Double(100 + index)),
+            lastAttemptAt: Date(timeIntervalSince1970: Double(100 + index)),
+            attemptCount: 2,
+            failedAttemptCount: 1
+        )
+        resource.canonicalResourceKey = nil
+        resource.lastResolvedAt = nil
+        let payload = try encoder.encode(resource)
+        var insert: OpaquePointer?
+        let sql = "INSERT INTO link_resources(id,normalized_url,host,route_key,request_state,title_quality,fallback_state,updated_at,last_attempt_at,attempt_count,failed_attempt_count,payload_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?);"
+        #expect(sqlite3_prepare_v2(pointer, sql, -1, &insert, nil) == SQLITE_OK)
+        let statement = try #require(insert)
+        sqlite3_bind_text(statement, 1, resource.id.uuidString, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_text(statement, 2, rawURL, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_text(statement, 3, resource.host, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_text(statement, 4, resource.routeSignature.key, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_text(statement, 5, resource.requestState.rawValue, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_text(statement, 6, resource.titleQuality.rawValue, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_text(statement, 7, resource.fallbackState.rawValue, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_double(statement, 8, resource.updatedAt.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 9, resource.lastAttemptAt!.timeIntervalSince1970)
+        sqlite3_bind_int(statement, 10, Int32(resource.attemptCount))
+        sqlite3_bind_int(statement, 11, Int32(resource.failedAttemptCount))
+        _ = payload.withUnsafeBytes { sqlite3_bind_blob(statement, 12, $0.baseAddress, Int32(payload.count), unsafeBitCast(-1, to: sqlite3_destructor_type.self)) }
+        #expect(sqlite3_step(statement) == SQLITE_DONE)
+        sqlite3_finalize(statement)
+    }
+    sqlite3_close(pointer)
+
+    let repository = try SQLiteClipRepository(databaseURL: directories.databaseFile)
+    let first = try #require(try await repository.linkResource(normalizedURL: rawURLs[0]))
+    let second = try #require(try await repository.linkResource(normalizedURL: rawURLs[1]))
+    #expect(first.id == second.id)
+    #expect(first.resolvedTitle == "[Optimize] fix compile")
+    #expect(first.attemptCount == 4)
+    #expect(first.lastResolvedAt != nil)
 }
 
 @Test func routeGroupingIgnoresOptionalQueryKeysAndGeneratedRulesOnlyRequireUsedVariables() throws {

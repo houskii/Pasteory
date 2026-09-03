@@ -30,6 +30,7 @@ public actor SQLiteClipRepository: ClipRepository {
             try Self.migrate(pointer)
             try Self.normalizeGeneratedFallbackRules(pointer, decoder: self.decoder, encoder: self.encoder)
             try Self.normalizeStoredLinkRouteKeys(pointer, decoder: self.decoder)
+            try Self.normalizeStoredLinkCanonicalKeys(pointer, decoder: self.decoder, encoder: self.encoder)
         } catch {
             sqlite3_close(pointer)
             throw error
@@ -41,26 +42,30 @@ public actor SQLiteClipRepository: ClipRepository {
     public func saveCaptured(_ clip: Clip, context: CapturedSourceContext?) throws -> Clip {
         var stored = clip
         try transaction {
-            if var previous = try latestActiveClip(),
-               previous.contentHash == clip.contentHash,
-               previous.primaryKind == clip.primaryKind,
-               previous.source.bundleIdentifier == clip.source.bundleIdentifier,
-               clip.createdAt.timeIntervalSince(previous.createdAt) <= 60 {
-                previous.copyCount += 1
-                previous.lastCopiedAt = clip.createdAt
-                previous.updatedAt = clip.createdAt
+            if var previous = try activeClip(contentHash: clip.contentHash, kind: clip.primaryKind) {
+                previous.copyCount += max(1, clip.copyCount)
+                previous.lastCopiedAt = max(previous.lastCopiedAt, clip.createdAt)
+                previous.updatedAt = max(previous.updatedAt, clip.createdAt)
+                previous.source = clip.source
+                previous.isArchived = false
+                previous.byteSize = max(previous.byteSize, clip.byteSize)
+                previous.secondaryKinds.formUnion(clip.secondaryKinds)
+                if previous.automaticTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+                    previous.automaticTitle = clip.automaticTitle
+                }
+                if previous.codeMetadata == nil { previous.codeMetadata = clip.codeMetadata }
                 try save(previous)
                 stored = previous
             } else {
                 try save(clip)
             }
+            try saveCaptureEvent(ClipCaptureEvent(
+                clipID: stored.id,
+                capturedAt: clip.createdAt,
+                source: clip.source,
+                context: context
+            ))
         }
-        try? saveCaptureEvent(ClipCaptureEvent(
-            clipID: stored.id,
-            capturedAt: clip.createdAt,
-            source: clip.source,
-            context: context
-        ))
         return stored
     }
 
@@ -68,12 +73,13 @@ public actor SQLiteClipRepository: ClipRepository {
         let payload = try encoder.encode(clip)
         let sql = """
         INSERT INTO clips (
-          id, created_at, updated_at, last_copied_at, kind, title, note, priority,
+          id, created_at, updated_at, last_copied_at, last_pasted_at, last_used_at, kind, title, note, priority,
           favorite, pinned, archived, source_name, source_bundle, source_confidence,
           preview_text, content_hash, byte_size, copy_count, deleted_at, payload_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           updated_at=excluded.updated_at, last_copied_at=excluded.last_copied_at,
+          last_pasted_at=excluded.last_pasted_at, last_used_at=excluded.last_used_at,
           kind=excluded.kind, title=excluded.title, note=excluded.note,
           priority=excluded.priority, favorite=excluded.favorite, pinned=excluded.pinned,
           archived=excluded.archived, source_name=excluded.source_name,
@@ -88,24 +94,27 @@ public actor SQLiteClipRepository: ClipRepository {
         sqlite3_bind_double(statement, 2, clip.createdAt.timeIntervalSince1970)
         sqlite3_bind_double(statement, 3, clip.updatedAt.timeIntervalSince1970)
         sqlite3_bind_double(statement, 4, clip.lastCopiedAt.timeIntervalSince1970)
-        bind(clip.primaryKind.rawValue, at: 5, to: statement)
-        bind(clip.displayTitle, at: 6, to: statement)
-        bind(clip.note, at: 7, to: statement)
-        sqlite3_bind_int(statement, 8, Int32(clip.priority))
-        sqlite3_bind_int(statement, 9, clip.isFavorite ? 1 : 0)
-        sqlite3_bind_int(statement, 10, clip.isPinned ? 1 : 0)
-        sqlite3_bind_int(statement, 11, clip.isArchived ? 1 : 0)
-        bind(clip.source.appName, at: 12, to: statement)
-        bindOptional(clip.source.bundleIdentifier, at: 13, to: statement)
-        bind(clip.source.confidence.rawValue, at: 14, to: statement)
-        bind(clip.previewText, at: 15, to: statement)
-        bind(clip.contentHash, at: 16, to: statement)
-        sqlite3_bind_int64(statement, 17, Int64(clip.byteSize))
-        sqlite3_bind_int(statement, 18, Int32(clip.copyCount))
-        if let deletedAt = clip.deletedAt { sqlite3_bind_double(statement, 19, deletedAt.timeIntervalSince1970) }
-        else { sqlite3_bind_null(statement, 19) }
+        if let lastPastedAt = clip.lastPastedAt { sqlite3_bind_double(statement, 5, lastPastedAt.timeIntervalSince1970) }
+        else { sqlite3_bind_null(statement, 5) }
+        sqlite3_bind_double(statement, 6, clip.lastUsedAt.timeIntervalSince1970)
+        bind(clip.primaryKind.rawValue, at: 7, to: statement)
+        bind(clip.displayTitle, at: 8, to: statement)
+        bind(clip.note, at: 9, to: statement)
+        sqlite3_bind_int(statement, 10, Int32(clip.priority))
+        sqlite3_bind_int(statement, 11, clip.isFavorite ? 1 : 0)
+        sqlite3_bind_int(statement, 12, clip.isPinned ? 1 : 0)
+        sqlite3_bind_int(statement, 13, clip.isArchived ? 1 : 0)
+        bind(clip.source.appName, at: 14, to: statement)
+        bindOptional(clip.source.bundleIdentifier, at: 15, to: statement)
+        bind(clip.source.confidence.rawValue, at: 16, to: statement)
+        bind(clip.previewText, at: 17, to: statement)
+        bind(clip.contentHash, at: 18, to: statement)
+        sqlite3_bind_int64(statement, 19, Int64(clip.byteSize))
+        sqlite3_bind_int(statement, 20, Int32(clip.copyCount))
+        if let deletedAt = clip.deletedAt { sqlite3_bind_double(statement, 21, deletedAt.timeIntervalSince1970) }
+        else { sqlite3_bind_null(statement, 21) }
         _ = payload.withUnsafeBytes { bytes in
-            sqlite3_bind_blob(statement, 20, bytes.baseAddress, Int32(payload.count), Self.transient)
+            sqlite3_bind_blob(statement, 22, bytes.baseAddress, Int32(payload.count), Self.transient)
         }
         try stepDone(statement)
         try syncCollections(for: clip)
@@ -118,12 +127,52 @@ public actor SQLiteClipRepository: ClipRepository {
         }
     }
 
+    public func consolidateDuplicateClips() throws -> Int {
+        var mergedCount = 0
+        try transaction {
+            mergedCount = try consolidateActiveDuplicateClips()
+        }
+        return mergedCount
+    }
+
     public func clip(id: UUID) throws -> Clip? {
         let statement = try prepare("SELECT payload_json FROM clips WHERE id=? LIMIT 1;")
         defer { sqlite3_finalize(statement) }
         bind(id.uuidString, at: 1, to: statement)
         guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
         return try decodeClip(statement, column: 0)
+    }
+
+    public func clips(ids: [UUID]) throws -> [Clip] {
+        var seen = Set<UUID>()
+        let uniqueIDs = ids.filter { seen.insert($0).inserted }
+        guard !uniqueIDs.isEmpty else { return [] }
+        var byID = [UUID: Clip]()
+        let chunkSize = 500
+        for start in stride(from: 0, to: uniqueIDs.count, by: chunkSize) {
+            let end = min(start + chunkSize, uniqueIDs.count)
+            let chunk = Array(uniqueIDs[start..<end])
+            let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ",")
+            let statement = try prepare("SELECT payload_json FROM clips WHERE id IN (\(placeholders));")
+            defer { sqlite3_finalize(statement) }
+            for (index, id) in chunk.enumerated() {
+                bind(id.uuidString, at: Int32(index + 1), to: statement)
+            }
+            while sqlite3_step(statement) == SQLITE_ROW {
+                let value = try decodeClip(statement, column: 0)
+                byID[value.id] = value
+            }
+        }
+        return uniqueIDs.compactMap { byID[$0] }
+    }
+
+    public func recordPaste(id: UUID, at date: Date) throws -> Clip? {
+        guard var clip = try clip(id: id) else { return nil }
+        clip.pasteCount = clip.recordedPasteCount + 1
+        clip.lastPastedAt = date
+        clip.updatedAt = date
+        try save(clip)
+        return clip
     }
 
     public func list(filter: ClipFilter, query: String, limit: Int = 500) throws -> [Clip] {
@@ -161,7 +210,7 @@ public actor SQLiteClipRepository: ClipRepository {
             }
         }
         let whereSQL = clauses.isEmpty ? "1" : clauses.joined(separator: " AND ")
-        let ordering = "c.pinned DESC, c.last_copied_at DESC"
+        let ordering = "c.pinned DESC, c.last_used_at DESC"
         let sql = "SELECT c.payload_json FROM clips c \(join) WHERE \(whereSQL) ORDER BY \(ordering) LIMIT ?;"
         let statement = try prepare(sql)
         defer { sqlite3_finalize(statement) }
@@ -178,6 +227,7 @@ public actor SQLiteClipRepository: ClipRepository {
             bind(id.uuidString, at: 1, to: fts); try stepDone(fts); sqlite3_finalize(fts)
             let clip = try prepare("DELETE FROM clips WHERE id=?;")
             bind(id.uuidString, at: 1, to: clip); try stepDone(clip); sqlite3_finalize(clip)
+            try Self.execute(database, "DELETE FROM aggregations WHERE (SELECT COUNT(*) FROM aggregation_members m WHERE m.aggregation_id=aggregations.id)<2;")
             try Self.execute(database, "DELETE FROM context_entities WHERE NOT EXISTS (SELECT 1 FROM capture_event_entities j WHERE j.entity_id=context_entities.id);")
         }
     }
@@ -216,6 +266,29 @@ public actor SQLiteClipRepository: ClipRepository {
         sqlite3_bind_double(statement, 1, date.timeIntervalSince1970)
         guard sqlite3_step(statement) == SQLITE_ROW else { throw sqliteError() }
         return Int(sqlite3_column_int64(statement, 0))
+    }
+
+    public func storedClipKindCounts(since startDate: Date?, before endDate: Date?) throws -> [ClipKindCount] {
+        var conditions = ["deleted_at IS NULL"]
+        if startDate != nil { conditions.append("last_copied_at>=?") }
+        if endDate != nil { conditions.append("last_copied_at<?") }
+        let sql = "SELECT kind, COUNT(*) FROM clips WHERE \(conditions.joined(separator: " AND ")) GROUP BY kind;"
+        let statement = try prepare(sql)
+        defer { sqlite3_finalize(statement) }
+        var bindingIndex: Int32 = 1
+        if let startDate {
+            sqlite3_bind_double(statement, bindingIndex, startDate.timeIntervalSince1970)
+            bindingIndex += 1
+        }
+        if let endDate { sqlite3_bind_double(statement, bindingIndex, endDate.timeIntervalSince1970) }
+
+        var result = [ClipKindCount]()
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let kindText = sqlite3_column_text(statement, 0),
+                  let kind = ClipKind(rawValue: String(cString: kindText)) else { continue }
+            result.append(ClipKindCount(kind: kind, count: Int(sqlite3_column_int64(statement, 1))))
+        }
+        return result.sorted { $0.kind.rawValue < $1.kind.rawValue }
     }
 
     public func collections() throws -> [ClipCollection] {
@@ -259,6 +332,93 @@ public actor SQLiteClipRepository: ClipRepository {
         defer { sqlite3_finalize(statement) }
         var result = [Clip]()
         while sqlite3_step(statement) == SQLITE_ROW { result.append(try decodeClip(statement, column: 0)) }
+        return result
+    }
+
+    public func aggregations() throws -> [ClipAggregation] {
+        let statement = try prepare("SELECT payload_json FROM aggregations ORDER BY pinned DESC,updated_at DESC;")
+        defer { sqlite3_finalize(statement) }
+        var result = [ClipAggregation]()
+        while sqlite3_step(statement) == SQLITE_ROW {
+            var value = try decode(ClipAggregation.self, statement: statement, column: 0)
+            value.memberClipIDs = try aggregationMemberIDs(value.id)
+            value.normalizeMembers()
+            if value.memberClipIDs.count >= 2 { result.append(value) }
+        }
+        return result
+    }
+
+    public func aggregation(id: UUID) throws -> ClipAggregation? {
+        let statement = try prepare("SELECT payload_json FROM aggregations WHERE id=? LIMIT 1;")
+        defer { sqlite3_finalize(statement) }
+        bind(id.uuidString, at: 1, to: statement)
+        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        var value = try decode(ClipAggregation.self, statement: statement, column: 0)
+        value.memberClipIDs = try aggregationMemberIDs(value.id)
+        value.normalizeMembers()
+        return value.memberClipIDs.count >= 2 ? value : nil
+    }
+
+    @discardableResult
+    public func saveAggregation(_ aggregation: ClipAggregation) throws -> ClipAggregation {
+        var value = aggregation
+        value.normalizeMembers()
+        var validIDs = [UUID]()
+        for id in value.memberClipIDs {
+            if let member = try clip(id: id), member.deletedAt == nil { validIDs.append(id) }
+        }
+        value.memberClipIDs = validIDs
+        guard value.memberClipIDs.count >= 2 else { throw RepositoryError.aggregationNeedsMultipleItems }
+        value.title = String(value.title.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120))
+        value.note = String(value.note.prefix(4_000))
+        let data = try encoder.encode(value)
+        try transaction {
+            let statement = try prepare("INSERT INTO aggregations(id,title,note,created_at,updated_at,favorite,pinned,membership_mode,payload_json) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,note=excluded.note,updated_at=excluded.updated_at,favorite=excluded.favorite,pinned=excluded.pinned,membership_mode=excluded.membership_mode,payload_json=excluded.payload_json;")
+            bind(value.id.uuidString, at: 1, to: statement)
+            bind(value.displayTitle, at: 2, to: statement)
+            bind(value.note, at: 3, to: statement)
+            sqlite3_bind_double(statement, 4, value.createdAt.timeIntervalSince1970)
+            sqlite3_bind_double(statement, 5, value.updatedAt.timeIntervalSince1970)
+            sqlite3_bind_int(statement, 6, value.isFavorite ? 1 : 0)
+            sqlite3_bind_int(statement, 7, value.isPinned ? 1 : 0)
+            bind(value.membershipMode.rawValue, at: 8, to: statement)
+            _ = data.withUnsafeBytes { sqlite3_bind_blob(statement, 9, $0.baseAddress, Int32(data.count), Self.transient) }
+            try stepDone(statement)
+            sqlite3_finalize(statement)
+
+            let remove = try prepare("DELETE FROM aggregation_members WHERE aggregation_id=?;")
+            bind(value.id.uuidString, at: 1, to: remove)
+            try stepDone(remove)
+            sqlite3_finalize(remove)
+            for (position, clipID) in value.memberClipIDs.enumerated() {
+                let insert = try prepare("INSERT INTO aggregation_members(aggregation_id,clip_id,position) VALUES(?,?,?);")
+                bind(value.id.uuidString, at: 1, to: insert)
+                bind(clipID.uuidString, at: 2, to: insert)
+                sqlite3_bind_int(insert, 3, Int32(position))
+                try stepDone(insert)
+                sqlite3_finalize(insert)
+            }
+        }
+        return value
+    }
+
+    public func removeAggregation(id: UUID) throws {
+        let statement = try prepare("DELETE FROM aggregations WHERE id=?;")
+        defer { sqlite3_finalize(statement) }
+        bind(id.uuidString, at: 1, to: statement)
+        try stepDone(statement)
+    }
+
+    private func aggregationMemberIDs(_ aggregationID: UUID) throws -> [UUID] {
+        let statement = try prepare("SELECT clip_id FROM aggregation_members WHERE aggregation_id=? ORDER BY position;")
+        defer { sqlite3_finalize(statement) }
+        bind(aggregationID.uuidString, at: 1, to: statement)
+        var result = [UUID]()
+        while sqlite3_step(statement) == SQLITE_ROW,
+              let raw = sqlite3_column_text(statement, 0),
+              let id = UUID(uuidString: String(cString: raw)) {
+            result.append(id)
+        }
         return result
     }
 
@@ -321,8 +481,10 @@ public actor SQLiteClipRepository: ClipRepository {
     }
 
     public func associateLink(clipID: UUID, resource proposed: LinkResource) throws -> LinkResource {
-        let existing = try linkResource(normalizedURL: proposed.normalizedURL)
+        let key = proposed.effectiveCanonicalResourceKey
+        let existing = try linkResource(canonicalResourceKey: key)
         var resource = existing ?? proposed
+        resource.canonicalResourceKey = key
         let fallbackChanged = resource.host != proposed.host
             || resource.routeSignature != proposed.routeSignature
             || resource.fallbackTitle != proposed.fallbackTitle
@@ -352,9 +514,14 @@ public actor SQLiteClipRepository: ClipRepository {
     }
 
     public func linkResource(normalizedURL: String) throws -> LinkResource? {
-        let statement = try prepare("SELECT payload_json FROM link_resources WHERE normalized_url=? LIMIT 1;")
+        guard let url = URLFallbackEngine.normalizedWebURL(normalizedURL) else { return nil }
+        return try linkResource(canonicalResourceKey: URLFallbackEngine.canonicalResourceKey(for: url))
+    }
+
+    public func linkResource(canonicalResourceKey: String) throws -> LinkResource? {
+        let statement = try prepare("SELECT payload_json FROM link_resources WHERE canonical_resource_key=? ORDER BY updated_at DESC LIMIT 1;")
         defer { sqlite3_finalize(statement) }
-        bind(normalizedURL, at: 1, to: statement)
+        bind(canonicalResourceKey, at: 1, to: statement)
         guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
         return try decode(LinkResource.self, statement: statement, column: 0)
     }
@@ -557,21 +724,22 @@ public actor SQLiteClipRepository: ClipRepository {
 
     private func saveLinkResource(_ resource: LinkResource) throws {
         let data = try encoder.encode(resource)
-        let statement = try prepare("INSERT INTO link_resources(id,normalized_url,host,route_key,request_state,title_quality,fallback_state,updated_at,last_attempt_at,attempt_count,failed_attempt_count,payload_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET normalized_url=excluded.normalized_url,host=excluded.host,route_key=excluded.route_key,request_state=excluded.request_state,title_quality=excluded.title_quality,fallback_state=excluded.fallback_state,updated_at=excluded.updated_at,last_attempt_at=excluded.last_attempt_at,attempt_count=excluded.attempt_count,failed_attempt_count=excluded.failed_attempt_count,payload_json=excluded.payload_json;")
+        let statement = try prepare("INSERT INTO link_resources(id,normalized_url,canonical_resource_key,host,route_key,request_state,title_quality,fallback_state,updated_at,last_attempt_at,attempt_count,failed_attempt_count,payload_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET normalized_url=excluded.normalized_url,canonical_resource_key=excluded.canonical_resource_key,host=excluded.host,route_key=excluded.route_key,request_state=excluded.request_state,title_quality=excluded.title_quality,fallback_state=excluded.fallback_state,updated_at=excluded.updated_at,last_attempt_at=excluded.last_attempt_at,attempt_count=excluded.attempt_count,failed_attempt_count=excluded.failed_attempt_count,payload_json=excluded.payload_json;")
         defer { sqlite3_finalize(statement) }
         bind(resource.id.uuidString, at: 1, to: statement)
         bind(resource.normalizedURL, at: 2, to: statement)
-        bind(resource.host, at: 3, to: statement)
-        bind(resource.routeSignature.key, at: 4, to: statement)
-        bind(resource.requestState.rawValue, at: 5, to: statement)
-        bind(resource.titleQuality.rawValue, at: 6, to: statement)
-        bind(resource.fallbackState.rawValue, at: 7, to: statement)
-        sqlite3_bind_double(statement, 8, resource.updatedAt.timeIntervalSince1970)
-        if let lastAttemptAt = resource.lastAttemptAt { sqlite3_bind_double(statement, 9, lastAttemptAt.timeIntervalSince1970) }
-        else { sqlite3_bind_null(statement, 9) }
-        sqlite3_bind_int(statement, 10, Int32(resource.attemptCount))
-        sqlite3_bind_int(statement, 11, Int32(resource.failedAttemptCount))
-        _ = data.withUnsafeBytes { sqlite3_bind_blob(statement, 12, $0.baseAddress, Int32(data.count), Self.transient) }
+        bind(resource.effectiveCanonicalResourceKey, at: 3, to: statement)
+        bind(resource.host, at: 4, to: statement)
+        bind(resource.routeSignature.key, at: 5, to: statement)
+        bind(resource.requestState.rawValue, at: 6, to: statement)
+        bind(resource.titleQuality.rawValue, at: 7, to: statement)
+        bind(resource.fallbackState.rawValue, at: 8, to: statement)
+        sqlite3_bind_double(statement, 9, resource.updatedAt.timeIntervalSince1970)
+        if let lastAttemptAt = resource.lastAttemptAt { sqlite3_bind_double(statement, 10, lastAttemptAt.timeIntervalSince1970) }
+        else { sqlite3_bind_null(statement, 10) }
+        sqlite3_bind_int(statement, 11, Int32(resource.attemptCount))
+        sqlite3_bind_int(statement, 12, Int32(resource.failedAttemptCount))
+        _ = data.withUnsafeBytes { sqlite3_bind_blob(statement, 13, $0.baseAddress, Int32(data.count), Self.transient) }
         try stepDone(statement)
     }
 
@@ -609,11 +777,150 @@ public actor SQLiteClipRepository: ClipRepository {
         return Int(sqlite3_column_int64(statement, 0))
     }
 
-    private func latestActiveClip() throws -> Clip? {
-        let statement = try prepare("SELECT payload_json FROM clips WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT 1;")
+    private func activeClip(contentHash: String, kind: ClipKind) throws -> Clip? {
+        let statement = try prepare("SELECT payload_json FROM clips WHERE deleted_at IS NULL AND content_hash=? AND kind=? ORDER BY created_at LIMIT 1;")
         defer { sqlite3_finalize(statement) }
+        bind(contentHash, at: 1, to: statement)
+        bind(kind.rawValue, at: 2, to: statement)
         guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
         return try decodeClip(statement, column: 0)
+    }
+
+    private func consolidateActiveDuplicateClips() throws -> Int {
+        let groups = try prepare("SELECT kind,content_hash FROM clips WHERE deleted_at IS NULL GROUP BY kind,content_hash HAVING COUNT(*)>1;")
+        var identities = [(String, String)]()
+        while sqlite3_step(groups) == SQLITE_ROW,
+              let kind = sqlite3_column_text(groups, 0),
+              let hash = sqlite3_column_text(groups, 1) {
+            identities.append((String(cString: kind), String(cString: hash)))
+        }
+        sqlite3_finalize(groups)
+
+        var removed = 0
+        for (kind, hash) in identities {
+            let statement = try prepare("SELECT payload_json FROM clips WHERE deleted_at IS NULL AND kind=? AND content_hash=? ORDER BY created_at,id;")
+            bind(kind, at: 1, to: statement)
+            bind(hash, at: 2, to: statement)
+            var members = [Clip]()
+            while sqlite3_step(statement) == SQLITE_ROW { members.append(try decodeClip(statement, column: 0)) }
+            sqlite3_finalize(statement)
+            guard members.count > 1 else { continue }
+            try mergeDuplicateGroup(members)
+            removed += members.count - 1
+        }
+        try Self.execute(database, "DELETE FROM aggregations WHERE (SELECT COUNT(*) FROM aggregation_members m WHERE m.aggregation_id=aggregations.id)<2;")
+        return removed
+    }
+
+    private func mergeDuplicateGroup(_ members: [Clip]) throws {
+        guard var canonical = members.first else { return }
+        for member in members { try ensureCaptureEventExists(for: member) }
+
+        let latest = members.max { $0.lastUsedAt < $1.lastUsedAt } ?? canonical
+        canonical.createdAt = members.map(\.createdAt).min() ?? canonical.createdAt
+        canonical.updatedAt = members.map(\.updatedAt).max() ?? canonical.updatedAt
+        canonical.lastCopiedAt = members.map(\.lastCopiedAt).max() ?? canonical.lastCopiedAt
+        canonical.lastPastedAt = members.compactMap(\.lastPastedAt).max()
+        canonical.source = latest.source
+        canonical.copyCount = members.reduce(0) { $0 + max(1, $1.copyCount) }
+        canonical.pasteCount = members.reduce(0) { $0 + $1.recordedPasteCount }
+        canonical.isFavorite = members.contains(where: \.isFavorite)
+        canonical.isPinned = members.contains(where: \.isPinned)
+        canonical.isArchived = members.allSatisfy(\.isArchived)
+        canonical.priority = members.map(\.priority).max() ?? canonical.priority
+        canonical.collectionIDs = members.reduce(into: Set<UUID>()) { $0.formUnion($1.collectionIDs) }
+        canonical.secondaryKinds = members.reduce(into: Set<ClipKind>()) { $0.formUnion($1.secondaryKinds) }
+        canonical.byteSize = members.map(\.byteSize).max() ?? canonical.byteSize
+        canonical.title = firstNonempty(members.map(\.title))
+        canonical.note = firstNonempty(members.map(\.note))
+        canonical.automaticTitle = members.compactMap(\.automaticTitle).first {
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        canonical.codeMetadata = members.compactMap(\.codeMetadata).first
+        try save(canonical)
+
+        for duplicate in members.dropFirst() {
+            let backupData = try encoder.encode(duplicate)
+            let backup = try prepare("INSERT OR REPLACE INTO clip_merge_backups(id,canonical_id,merged_at,payload_json) VALUES(?,?,?,?);")
+            bind(duplicate.id.uuidString, at: 1, to: backup)
+            bind(canonical.id.uuidString, at: 2, to: backup)
+            sqlite3_bind_double(backup, 3, Date().timeIntervalSince1970)
+            _ = backupData.withUnsafeBytes { sqlite3_bind_blob(backup, 4, $0.baseAddress, Int32(backupData.count), Self.transient) }
+            try stepDone(backup)
+            sqlite3_finalize(backup)
+            try moveCaptureEvents(from: duplicate.id, to: canonical.id)
+            try copyJoinRows(
+                insertSQL: "INSERT OR IGNORE INTO clip_links(clip_id,link_resource_id) SELECT ?,link_resource_id FROM clip_links WHERE clip_id=?;",
+                deleteSQL: "DELETE FROM clip_links WHERE clip_id=?;",
+                from: duplicate.id,
+                to: canonical.id
+            )
+            try copyJoinRows(
+                insertSQL: "INSERT OR IGNORE INTO aggregation_members(aggregation_id,clip_id,position) SELECT aggregation_id,?,position FROM aggregation_members WHERE clip_id=?;",
+                deleteSQL: "DELETE FROM aggregation_members WHERE clip_id=?;",
+                from: duplicate.id,
+                to: canonical.id
+            )
+            let fts = try prepare("DELETE FROM clip_fts WHERE id=?;")
+            bind(duplicate.id.uuidString, at: 1, to: fts)
+            try stepDone(fts)
+            sqlite3_finalize(fts)
+            let delete = try prepare("DELETE FROM clips WHERE id=?;")
+            bind(duplicate.id.uuidString, at: 1, to: delete)
+            try stepDone(delete)
+            sqlite3_finalize(delete)
+        }
+    }
+
+    private func firstNonempty(_ values: [String]) -> String {
+        values.first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? ""
+    }
+
+    private func ensureCaptureEventExists(for clip: Clip) throws {
+        let statement = try prepare("SELECT 1 FROM clip_capture_events WHERE clip_id=? LIMIT 1;")
+        bind(clip.id.uuidString, at: 1, to: statement)
+        let exists = sqlite3_step(statement) == SQLITE_ROW
+        sqlite3_finalize(statement)
+        guard !exists else { return }
+        try saveCaptureEvent(ClipCaptureEvent(
+            clipID: clip.id,
+            capturedAt: clip.lastCopiedAt,
+            source: clip.source
+        ))
+    }
+
+    private func moveCaptureEvents(from oldID: UUID, to newID: UUID) throws {
+        let statement = try prepare("SELECT id,event_json FROM clip_capture_events WHERE clip_id=?;")
+        bind(oldID.uuidString, at: 1, to: statement)
+        var events = [(String, ClipCaptureEvent)]()
+        while sqlite3_step(statement) == SQLITE_ROW,
+              let id = sqlite3_column_text(statement, 0) {
+            events.append((String(cString: id), try decode(ClipCaptureEvent.self, statement: statement, column: 1)))
+        }
+        sqlite3_finalize(statement)
+        for (id, original) in events {
+            var event = original
+            event.clipID = newID
+            let data = try encoder.encode(event)
+            let update = try prepare("UPDATE clip_capture_events SET clip_id=?,event_json=? WHERE id=?;")
+            bind(newID.uuidString, at: 1, to: update)
+            _ = data.withUnsafeBytes { sqlite3_bind_blob(update, 2, $0.baseAddress, Int32(data.count), Self.transient) }
+            bind(id, at: 3, to: update)
+            try stepDone(update)
+            sqlite3_finalize(update)
+        }
+    }
+
+    private func copyJoinRows(insertSQL: String, deleteSQL: String, from oldID: UUID, to newID: UUID) throws {
+        let insert = try prepare(insertSQL)
+        bind(newID.uuidString, at: 1, to: insert)
+        bind(oldID.uuidString, at: 2, to: insert)
+        try stepDone(insert)
+        sqlite3_finalize(insert)
+        let delete = try prepare(deleteSQL)
+        bind(oldID.uuidString, at: 1, to: delete)
+        try stepDone(delete)
+        sqlite3_finalize(delete)
     }
 
     private func syncCollections(for clip: Clip) throws {
@@ -748,11 +1055,26 @@ public actor SQLiteClipRepository: ClipRepository {
         }
     }
 
+    private static func execute(_ database: OpaquePointer, _ sql: String, bindings: [String]) throws {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+            throw RepositoryError.sqlite(String(cString: sqlite3_errmsg(database)))
+        }
+        defer { sqlite3_finalize(statement) }
+        for (index, value) in bindings.enumerated() {
+            sqlite3_bind_text(statement, Int32(index + 1), value, -1, transient)
+        }
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw RepositoryError.sqlite(String(cString: sqlite3_errmsg(database)))
+        }
+    }
+
     private static func migrate(_ database: OpaquePointer) throws {
         try execute(database, """
         CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS clips(
           id TEXT PRIMARY KEY, created_at REAL NOT NULL, updated_at REAL NOT NULL, last_copied_at REAL NOT NULL,
+          last_pasted_at REAL, last_used_at REAL NOT NULL,
           kind TEXT NOT NULL, title TEXT NOT NULL, note TEXT NOT NULL, priority INTEGER NOT NULL DEFAULT 0,
           favorite INTEGER NOT NULL DEFAULT 0, pinned INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0,
           source_name TEXT NOT NULL, source_bundle TEXT, source_confidence TEXT NOT NULL,
@@ -800,6 +1122,7 @@ public actor SQLiteClipRepository: ClipRepository {
         CREATE TABLE IF NOT EXISTS link_resources(
           id TEXT PRIMARY KEY,
           normalized_url TEXT NOT NULL UNIQUE,
+          canonical_resource_key TEXT NOT NULL,
           host TEXT NOT NULL,
           route_key TEXT NOT NULL,
           request_state TEXT NOT NULL,
@@ -833,6 +1156,31 @@ public actor SQLiteClipRepository: ClipRepository {
         );
         CREATE INDEX IF NOT EXISTS idx_link_attempts_resource ON link_resolution_attempts(link_resource_id,finished_at DESC);
         CREATE INDEX IF NOT EXISTS idx_link_attempts_fingerprint ON link_resolution_attempts(candidate_fingerprint,request_state);
+        CREATE TABLE IF NOT EXISTS aggregations(
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          note TEXT NOT NULL,
+          created_at REAL NOT NULL,
+          updated_at REAL NOT NULL,
+          favorite INTEGER NOT NULL DEFAULT 0,
+          pinned INTEGER NOT NULL DEFAULT 0,
+          membership_mode TEXT NOT NULL,
+          payload_json BLOB NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_aggregations_recent ON aggregations(pinned DESC,updated_at DESC);
+        CREATE TABLE IF NOT EXISTS aggregation_members(
+          aggregation_id TEXT NOT NULL REFERENCES aggregations(id) ON DELETE CASCADE,
+          clip_id TEXT NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
+          position INTEGER NOT NULL,
+          PRIMARY KEY(aggregation_id,clip_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_aggregation_members_clip ON aggregation_members(clip_id,aggregation_id);
+        CREATE TABLE IF NOT EXISTS clip_merge_backups(
+          id TEXT PRIMARY KEY,
+          canonical_id TEXT NOT NULL,
+          merged_at REAL NOT NULL,
+          payload_json BLOB NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS url_fallback_rules(
           id TEXT PRIMARY KEY,
           origin TEXT NOT NULL,
@@ -848,7 +1196,33 @@ public actor SQLiteClipRepository: ClipRepository {
         INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(2, strftime('%s','now'));
         INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(3, strftime('%s','now'));
         INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(4, strftime('%s','now'));
+        INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(5, strftime('%s','now'));
         """)
+        try ensureColumn(database, table: "clips", column: "last_pasted_at", definition: "REAL")
+        try ensureColumn(database, table: "clips", column: "last_used_at", definition: "REAL")
+        try ensureColumn(database, table: "link_resources", column: "canonical_resource_key", definition: "TEXT")
+        try execute(database, "UPDATE clips SET last_used_at=last_copied_at WHERE last_used_at IS NULL;")
+        try execute(database, "CREATE INDEX IF NOT EXISTS idx_clips_used ON clips(deleted_at,archived,pinned DESC,last_used_at DESC);")
+        try execute(database, "INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(6,strftime('%s','now'));")
+    }
+
+    private static func ensureColumn(
+        _ database: OpaquePointer,
+        table: String,
+        column: String,
+        definition: String
+    ) throws {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, "PRAGMA table_info(\(table));", -1, &statement, nil) == SQLITE_OK,
+              let statement else {
+            throw RepositoryError.sqlite(String(cString: sqlite3_errmsg(database)))
+        }
+        defer { sqlite3_finalize(statement) }
+        while sqlite3_step(statement) == SQLITE_ROW,
+              let name = sqlite3_column_text(statement, 1) {
+            if String(cString: name) == column { return }
+        }
+        try execute(database, "ALTER TABLE \(table) ADD COLUMN \(column) \(definition);")
     }
 
     private static func normalizeGeneratedFallbackRules(
@@ -922,5 +1296,93 @@ public actor SQLiteClipRepository: ClipRepository {
                 throw RepositoryError.sqlite(String(cString: sqlite3_errmsg(database)))
             }
         }
+    }
+
+    private static func normalizeStoredLinkCanonicalKeys(
+        _ database: OpaquePointer,
+        decoder: JSONDecoder,
+        encoder: JSONEncoder
+    ) throws {
+        let selectSQL = "SELECT id,payload_json FROM link_resources;"
+        var select: OpaquePointer?
+        guard sqlite3_prepare_v2(database, selectSQL, -1, &select, nil) == SQLITE_OK, let select else {
+            throw RepositoryError.sqlite(String(cString: sqlite3_errmsg(database)))
+        }
+        defer { sqlite3_finalize(select) }
+        var groups = [String: [(id: String, resource: LinkResource)]]()
+        while sqlite3_step(select) == SQLITE_ROW,
+              let idValue = sqlite3_column_text(select, 0),
+              let bytes = sqlite3_column_blob(select, 1) {
+            let data = Data(bytes: bytes, count: Int(sqlite3_column_bytes(select, 1)))
+            guard var resource = try? decoder.decode(LinkResource.self, from: data),
+                  let url = URLFallbackEngine.normalizedWebURL(resource.normalizedURL) else { continue }
+            let key = URLFallbackEngine.canonicalResourceKey(for: url)
+            resource.canonicalResourceKey = key
+            if resource.lastResolvedAt == nil, resource.requestState == .resolved {
+                resource.lastResolvedAt = resource.lastAttemptAt ?? resource.updatedAt
+            }
+            groups[key, default: []].append((String(cString: idValue), resource))
+        }
+
+        for (key, values) in groups {
+            let ordered = values.sorted { lhs, rhs in
+                let lhsResolved = lhs.resource.resolvedTitle != nil
+                let rhsResolved = rhs.resource.resolvedTitle != nil
+                if lhsResolved != rhsResolved { return lhsResolved }
+                let lhsDate = lhs.resource.lastResolvedAt ?? lhs.resource.lastAttemptAt ?? lhs.resource.updatedAt
+                let rhsDate = rhs.resource.lastResolvedAt ?? rhs.resource.lastAttemptAt ?? rhs.resource.updatedAt
+                return lhsDate > rhsDate
+            }
+            guard var canonicalEntry = ordered.first else { continue }
+            canonicalEntry.resource.canonicalResourceKey = key
+            canonicalEntry.resource.createdAt = values.map(\.resource.createdAt).min() ?? canonicalEntry.resource.createdAt
+            canonicalEntry.resource.updatedAt = values.map(\.resource.updatedAt).max() ?? canonicalEntry.resource.updatedAt
+            canonicalEntry.resource.lastAttemptAt = values.compactMap(\.resource.lastAttemptAt).max()
+            canonicalEntry.resource.lastResolvedAt = values.compactMap(\.resource.lastResolvedAt).max()
+            canonicalEntry.resource.attemptCount = values.reduce(0) { $0 + $1.resource.attemptCount }
+            canonicalEntry.resource.failedAttemptCount = values.reduce(0) { $0 + $1.resource.failedAttemptCount }
+
+            for duplicate in ordered.dropFirst() {
+                try execute(
+                    database,
+                    "INSERT OR IGNORE INTO clip_links(clip_id,link_resource_id) SELECT clip_id,? FROM clip_links WHERE link_resource_id=?;",
+                    bindings: [canonicalEntry.id, duplicate.id]
+                )
+                try execute(database, "DELETE FROM clip_links WHERE link_resource_id=?;", bindings: [duplicate.id])
+                try execute(
+                    database,
+                    "UPDATE link_resolution_attempts SET link_resource_id=? WHERE link_resource_id=?;",
+                    bindings: [canonicalEntry.id, duplicate.id]
+                )
+                try execute(database, "DELETE FROM link_resources WHERE id=?;", bindings: [duplicate.id])
+            }
+
+            let payload = try encoder.encode(canonicalEntry.resource)
+            let updateSQL = "UPDATE link_resources SET canonical_resource_key=?,request_state=?,title_quality=?,fallback_state=?,updated_at=?,last_attempt_at=?,attempt_count=?,failed_attempt_count=?,payload_json=? WHERE id=?;"
+            var update: OpaquePointer?
+            guard sqlite3_prepare_v2(database, updateSQL, -1, &update, nil) == SQLITE_OK, let update else {
+                throw RepositoryError.sqlite(String(cString: sqlite3_errmsg(database)))
+            }
+            defer { sqlite3_finalize(update) }
+            sqlite3_bind_text(update, 1, key, -1, transient)
+            sqlite3_bind_text(update, 2, canonicalEntry.resource.requestState.rawValue, -1, transient)
+            sqlite3_bind_text(update, 3, canonicalEntry.resource.titleQuality.rawValue, -1, transient)
+            sqlite3_bind_text(update, 4, canonicalEntry.resource.fallbackState.rawValue, -1, transient)
+            sqlite3_bind_double(update, 5, canonicalEntry.resource.updatedAt.timeIntervalSince1970)
+            if let lastAttemptAt = canonicalEntry.resource.lastAttemptAt {
+                sqlite3_bind_double(update, 6, lastAttemptAt.timeIntervalSince1970)
+            } else {
+                sqlite3_bind_null(update, 6)
+            }
+            sqlite3_bind_int(update, 7, Int32(canonicalEntry.resource.attemptCount))
+            sqlite3_bind_int(update, 8, Int32(canonicalEntry.resource.failedAttemptCount))
+            _ = payload.withUnsafeBytes { sqlite3_bind_blob(update, 9, $0.baseAddress, Int32(payload.count), transient) }
+            sqlite3_bind_text(update, 10, canonicalEntry.id, -1, transient)
+            guard sqlite3_step(update) == SQLITE_DONE else {
+                throw RepositoryError.sqlite(String(cString: sqlite3_errmsg(database)))
+            }
+        }
+        try execute(database, "CREATE UNIQUE INDEX IF NOT EXISTS idx_link_resources_canonical ON link_resources(canonical_resource_key);")
+        try execute(database, "INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(7,strftime('%s','now'));")
     }
 }

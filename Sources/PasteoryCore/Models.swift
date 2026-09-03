@@ -1,6 +1,6 @@
 import Foundation
 
-public enum ClipKind: String, Codable, CaseIterable, Sendable {
+public enum ClipKind: String, Codable, CaseIterable, Hashable, Sendable {
     case text, image, link, color, code, file, mixed
 
     public var displayName: String {
@@ -394,6 +394,7 @@ public struct Clip: Codable, Hashable, Identifiable, Sendable {
     public var createdAt: Date
     public var updatedAt: Date
     public var lastCopiedAt: Date
+    public var lastPastedAt: Date?
     public var primaryKind: ClipKind
     public var secondaryKinds: Set<ClipKind>
     public var title: String
@@ -407,6 +408,7 @@ public struct Clip: Codable, Hashable, Identifiable, Sendable {
     public var contentHash: String
     public var byteSize: Int
     public var copyCount: Int
+    public var pasteCount: Int?
     public var deletedAt: Date?
     public var archivePath: String?
     public var items: [ClipItem]
@@ -419,6 +421,7 @@ public struct Clip: Codable, Hashable, Identifiable, Sendable {
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
         lastCopiedAt: Date = Date(),
+        lastPastedAt: Date? = nil,
         primaryKind: ClipKind,
         secondaryKinds: Set<ClipKind> = [],
         title: String = "",
@@ -432,6 +435,7 @@ public struct Clip: Codable, Hashable, Identifiable, Sendable {
         contentHash: String,
         byteSize: Int,
         copyCount: Int = 1,
+        pasteCount: Int = 0,
         deletedAt: Date? = nil,
         archivePath: String? = nil,
         items: [ClipItem],
@@ -443,6 +447,7 @@ public struct Clip: Codable, Hashable, Identifiable, Sendable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.lastCopiedAt = lastCopiedAt
+        self.lastPastedAt = lastPastedAt
         self.primaryKind = primaryKind
         self.secondaryKinds = secondaryKinds
         self.title = title
@@ -456,6 +461,7 @@ public struct Clip: Codable, Hashable, Identifiable, Sendable {
         self.contentHash = contentHash
         self.byteSize = byteSize
         self.copyCount = copyCount
+        self.pasteCount = pasteCount
         self.deletedAt = deletedAt
         self.archivePath = archivePath
         self.items = items
@@ -469,6 +475,9 @@ public struct Clip: Codable, Hashable, Identifiable, Sendable {
         if !manual.isEmpty { return manual }
         return automaticTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
+
+    public var recordedPasteCount: Int { pasteCount ?? 0 }
+    public var lastUsedAt: Date { max(lastCopiedAt, lastPastedAt ?? lastCopiedAt) }
 }
 
 public enum CollectionKind: String, Codable, Sendable { case normal, smart }
