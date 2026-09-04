@@ -1,12 +1,15 @@
 import Foundation
 
 public enum SmartRuleError: LocalizedError {
-    case tooManyConditions, invalidRegularExpression, unsafeRegularExpression
+    case tooManyConditions, tooManyNestedLevels, emptyRuleGroup
+    case invalidRegularExpression, unsafeRegularExpression
     case unsupportedOperator(SmartRuleField, SmartRuleOperator)
     case invalidValue(SmartRuleField)
     public var errorDescription: String? {
         switch self {
-        case .tooManyConditions: "智能分组最多包含 10 个条件"
+        case .tooManyConditions: "一个智能分组最多包含 50 个条件"
+        case .tooManyNestedLevels: "规则组最多可以嵌套 5 层"
+        case .emptyRuleGroup: "子规则组至少需要一个条件或规则组"
         case .invalidRegularExpression: "正则表达式无效"
         case .unsafeRegularExpression: "正则表达式过长或复杂度过高"
         case .unsupportedOperator: "当前字段不支持这个判断条件"
@@ -27,11 +30,29 @@ public enum SmartRuleError: LocalizedError {
 }
 
 public struct SmartRuleEngine: Sendable {
+    public static let maximumConditionCount = 50
+    public static let maximumNestingDepth = 5
+
     public init() {}
 
     public func validate(_ ruleSet: SmartRuleSet) throws {
-        guard ruleSet.conditions.count <= 10 else { throw SmartRuleError.tooManyConditions }
-        for condition in ruleSet.conditions {
+        guard conditionCount(in: ruleSet) <= Self.maximumConditionCount else {
+            throw SmartRuleError.tooManyConditions
+        }
+        try validate(
+            conditions: ruleSet.conditions,
+            groups: ruleSet.groups,
+            depth: 1
+        )
+    }
+
+    private func validate(
+        conditions: [SmartCondition],
+        groups: [SmartRuleGroup],
+        depth: Int
+    ) throws {
+        guard depth <= Self.maximumNestingDepth else { throw SmartRuleError.tooManyNestedLevels }
+        for condition in conditions {
             guard condition.field.supportedOperators.contains(condition.operation) else {
                 throw SmartRuleError.unsupportedOperator(condition.field, condition.operation)
             }
@@ -45,18 +66,70 @@ public struct SmartRuleEngine: Sendable {
                 catch { throw SmartRuleError.invalidRegularExpression }
             }
         }
+        for group in groups {
+            guard !group.conditions.isEmpty || !group.groups.isEmpty else {
+                throw SmartRuleError.emptyRuleGroup
+            }
+            try validate(conditions: group.conditions, groups: group.groups, depth: depth + 1)
+        }
     }
 
     public func matches(_ clip: Clip, ruleSet: SmartRuleSet, now: Date = Date()) throws -> Bool {
         try validate(ruleSet)
-        guard !ruleSet.conditions.isEmpty else { return false }
-        let results = try ruleSet.conditions.map { try matches(clip, condition: $0, now: now) }
-        return ruleSet.mode == .all ? results.allSatisfy { $0 } : results.contains(true)
+        return try matches(
+            clip,
+            mode: ruleSet.mode,
+            conditions: ruleSet.conditions,
+            groups: ruleSet.groups,
+            now: now
+        )
     }
 
     public func preview(_ clips: [Clip], ruleSet: SmartRuleSet, now: Date = Date()) throws -> (items: [Clip], count: Int) {
-        let matches = try clips.filter { try self.matches($0, ruleSet: ruleSet, now: now) }
-        return (Array(matches.prefix(20)), matches.count)
+        let matchingItems = try matchingItems(in: clips, ruleSet: ruleSet, now: now)
+        return (matchingItems, matchingItems.count)
+    }
+
+    public func matchingItems(in clips: [Clip], ruleSet: SmartRuleSet, now: Date = Date()) throws -> [Clip] {
+        try validate(ruleSet)
+        return try clips.filter {
+            try matches(
+                $0,
+                mode: ruleSet.mode,
+                conditions: ruleSet.conditions,
+                groups: ruleSet.groups,
+                now: now
+            )
+        }
+    }
+
+    private func matches(
+        _ clip: Clip,
+        mode: RuleMatchMode,
+        conditions: [SmartCondition],
+        groups: [SmartRuleGroup],
+        now: Date
+    ) throws -> Bool {
+        guard !conditions.isEmpty || !groups.isEmpty else { return false }
+        var results = try conditions.map { try matches(clip, condition: $0, now: now) }
+        results += try groups.map { group in
+            try matches(
+                clip,
+                mode: group.mode,
+                conditions: group.conditions,
+                groups: group.groups,
+                now: now
+            )
+        }
+        return mode == .all ? results.allSatisfy { $0 } : results.contains(true)
+    }
+
+    private func conditionCount(in ruleSet: SmartRuleSet) -> Int {
+        ruleSet.conditions.count + ruleSet.groups.reduce(0) { $0 + conditionCount(in: $1) }
+    }
+
+    private func conditionCount(in group: SmartRuleGroup) -> Int {
+        group.conditions.count + group.groups.reduce(0) { $0 + conditionCount(in: $1) }
     }
 
     private func matches(_ clip: Clip, condition: SmartCondition, now: Date) throws -> Bool {

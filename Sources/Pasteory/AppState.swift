@@ -449,7 +449,7 @@ final class AppState: ObservableObject {
                 case .collection(let id):
                     if let collection = collections.first(where: { $0.id == id }), collection.kind == .smart, let rules = collection.ruleSet {
                         let candidates = try await repository.list(filter: .all, query: query, limit: 10_000)
-                        result = try candidates.filter { try SmartRuleEngine().matches($0, ruleSet: rules) }
+                        result = try SmartRuleEngine().matchingItems(in: candidates, ruleSet: rules)
                     } else {
                         result = try await repository.list(filter: .collection(id), query: query, limit: 500)
                     }
@@ -543,7 +543,7 @@ final class AppState: ObservableObject {
                    let collection = collections.first(where: { $0.id == id }), collection.kind == .smart,
                    let ruleSet = collection.ruleSet {
                     let candidates = try await repository.list(filter: .all, query: query, limit: 100_000)
-                    result = try candidates.filter { try SmartRuleEngine().matches($0, ruleSet: ruleSet) }
+                    result = try SmartRuleEngine().matchingItems(in: candidates, ruleSet: ruleSet)
                 } else {
                     result = try await repository.list(filter: filter, query: query, limit: query.isEmpty ? 10_000 : 500)
                 }
@@ -866,18 +866,34 @@ final class AppState: ObservableObject {
     }
 
     private func normalizedLegacyRules(_ rules: SmartRuleSet) -> SmartRuleSet {
-        let conditions = rules.conditions.map { condition in
-            guard !condition.field.supportedOperators.contains(condition.operation) else { return condition }
-            var value = condition
-            value.operation = condition.field.supportedOperators[0]
-            switch condition.field {
-            case .sourceConfidence, .kind, .priority, .favorite:
+        SmartRuleSet(
+            mode: rules.mode,
+            conditions: rules.conditions.map(normalizedLegacyCondition),
+            groups: rules.groups.map(normalizedLegacyGroup)
+        )
+    }
+
+    private func normalizedLegacyGroup(_ group: SmartRuleGroup) -> SmartRuleGroup {
+        SmartRuleGroup(
+            id: group.id,
+            mode: group.mode,
+            conditions: group.conditions.map(normalizedLegacyCondition),
+            groups: group.groups.map(normalizedLegacyGroup)
+        )
+    }
+
+    private func normalizedLegacyCondition(_ condition: SmartCondition) -> SmartCondition {
+        guard !condition.field.supportedOperators.contains(condition.operation) else { return condition }
+        var value = condition
+        value.operation = condition.field.supportedOperators[0]
+        switch condition.field {
+        case .sourceConfidence, .kind, .priority, .favorite:
+            value.value = condition.field.defaultValue
+        default:
+            if value.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 value.value = condition.field.defaultValue
-            default:
-                if value.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { value.value = condition.field.defaultValue }
             }
-            return value
         }
-        return SmartRuleSet(mode: rules.mode, conditions: conditions)
+        return value
     }
 }

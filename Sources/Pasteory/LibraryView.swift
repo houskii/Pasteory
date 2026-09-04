@@ -207,6 +207,13 @@ struct LibraryView: View {
         .buttonStyle(.plain)
     }
 
+    private var aggregationShortcutHelp: String {
+        guard let shortcut = state.settings.quickShortcut(for: .aggregateContent) else {
+            return "聚合当前搜索结果"
+        }
+        return "聚合当前搜索结果（\(ShortcutFormatter.display(keyCode: shortcut.keyCode, modifiers: shortcut.modifiers))）"
+    }
+
     private var content: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 14) {
@@ -225,7 +232,7 @@ struct LibraryView: View {
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                         .disabled(!state.libraryCanAggregateCurrentResults)
-                        .help("聚合当前搜索结果（⌘⇧M）")
+                        .help(aggregationShortcutHelp)
                         .quickActionShortcut(state.settings.quickShortcut(for: .aggregateContent))
                     }
                     Text("\(state.libraryTopLevelResultCount) 个结果")
@@ -1103,17 +1110,23 @@ struct SmartCollectionEditor: View {
     @Environment(\.dismiss) private var dismiss
     let existing: ClipCollection
     @State private var name: String
-    @State private var mode: RuleMatchMode
-    @State private var conditions: [SmartCondition]
+    @State private var rootGroup: SmartRuleGroup
     @State private var error: String?
     @State private var candidates: [Clip] = []
+    @State private var candidateRevision = 0
+    @State private var isLoadingCandidates = true
+    @State private var previewItems: [Clip] = []
+    @State private var previewCount = 0
+    @State private var previewError: String?
 
     init(state: AppState, existing: ClipCollection) {
         self.state = state; self.existing = existing
         _name = State(initialValue: existing.name)
-        _mode = State(initialValue: existing.ruleSet?.mode ?? .all)
-        let saved = existing.ruleSet?.conditions.isEmpty == false ? existing.ruleSet!.conditions : [SmartCondition(field: .body, operation: .contains, value: "")]
-        _conditions = State(initialValue: saved.map(Self.normalized))
+        var saved = existing.ruleSet?.rootGroup ?? SmartRuleGroup()
+        if saved.conditions.isEmpty && saved.groups.isEmpty {
+            saved.conditions = [SmartCondition(field: .body, operation: .contains, value: "")]
+        }
+        _rootGroup = State(initialValue: Self.normalized(saved))
     }
 
     var body: some View {
@@ -1123,38 +1136,81 @@ struct SmartCollectionEditor: View {
                 TextField("分组名称", text: Binding(get: { name }, set: { name = String($0.prefix(40)) }))
                 Text("\(name.count)/40").font(.caption2).foregroundStyle(.tertiary).frame(maxWidth: .infinity, alignment: .trailing)
             }
-            Picker("匹配方式", selection: $mode) { Text("满足全部条件").tag(RuleMatchMode.all); Text("满足任一条件").tag(RuleMatchMode.any) }.pickerStyle(.segmented)
-            ForEach($conditions) { $condition in
-                SmartConditionRow(condition: $condition, sourceOptions: sourceOptions) {
-                    conditions.removeAll { $0.id == condition.id }
+            GroupBox {
+                ScrollView {
+                    SmartRuleGroupEditor(
+                        group: $rootGroup,
+                        sourceOptions: sourceOptions,
+                        depth: 1,
+                        isRoot: true,
+                        canAddCondition: totalConditionCount < SmartRuleEngine.maximumConditionCount,
+                        onRemove: nil
+                    )
+                    .padding(.vertical, 4)
+                }
+            } label: {
+                Label("匹配条件", systemImage: "slider.horizontal.3")
+            }
+            .frame(minHeight: 220, maxHeight: 320)
+            GroupBox {
+                if isLoadingCandidates {
+                    ProgressView("正在读取资料库…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let previewError {
+                    ContentUnavailableView(
+                        "暂时无法预览",
+                        systemImage: "exclamationmark.triangle",
+                        description: Text(previewError)
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if previewItems.isEmpty {
+                    ContentUnavailableView(
+                        "没有匹配内容",
+                        systemImage: "doc.text.magnifyingglass",
+                        description: Text("调整上方条件后，结果会自动更新")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 8) {
+                            ForEach(previewItems) { clip in
+                                SmartRulePreviewRow(clip: clip)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            } label: {
+                HStack {
+                    Label("匹配预览", systemImage: "eye")
+                    Spacer()
+                    Text("\(previewCount) 条")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
                 }
             }
-            if conditions.count < 10 { Button("添加条件") { conditions.append(SmartCondition(field: .body, operation: .contains, value: "")) } }
-            let preview = previewResult
-            GroupBox("匹配预览：\(preview.count) 条") {
-                if preview.items.isEmpty { Text("当前资料库没有匹配内容").foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading) }
-                else {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ForEach(preview.items.prefix(5)) { clip in Text(clip.displayTitle.isEmpty ? clip.previewText : clip.displayTitle).lineLimit(1).font(.caption) }
-                        if preview.count > 5 { Text("另有 \(preview.count - 5) 条").font(.caption2).foregroundStyle(.secondary) }
-                    }.frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
+            .frame(minHeight: 250, maxHeight: .infinity)
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
             HStack { Spacer(); Button("取消") { dismiss() }; Button(existing.name.isEmpty ? "创建" : "保存") { save() }.keyboardShortcut(.defaultAction) }
         }
         .padding(24)
-        .frame(minWidth: 680)
-        .task { candidates = await state.smartRuleCandidates() }
+        .frame(minWidth: 820, minHeight: 720)
+        .task {
+            candidates = await state.smartRuleCandidates()
+            isLoadingCandidates = false
+            candidateRevision += 1
+        }
+        .task(id: SmartPreviewRequest(group: rootGroup, candidateRevision: candidateRevision)) {
+            await refreshPreview()
+        }
         .onChange(of: name) { _, _ in error = nil }
-        .onChange(of: mode) { _, _ in error = nil }
-        .onChange(of: conditions) { _, _ in error = nil }
+        .onChange(of: rootGroup) { _, _ in error = nil }
     }
 
     private func save() {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         if let message = state.collectionNameValidationMessage(trimmed, excluding: existing.name.isEmpty ? nil : existing.id) { error = message; return }
-        let rules = SmartRuleSet(mode: mode, conditions: conditions)
+        let rules = ruleSet
         do { try SmartRuleEngine().validate(rules) }
         catch { self.error = error.localizedDescription; return }
         var collection = existing
@@ -1165,8 +1221,40 @@ struct SmartCollectionEditor: View {
         }
     }
 
-    private var previewResult: (items: [Clip], count: Int) {
-        (try? SmartRuleEngine().preview(candidates, ruleSet: SmartRuleSet(mode: mode, conditions: conditions))) ?? ([], 0)
+    private var ruleSet: SmartRuleSet {
+        SmartRuleSet(mode: rootGroup.mode, conditions: rootGroup.conditions, groups: rootGroup.groups)
+    }
+
+    private var totalConditionCount: Int {
+        conditionCount(in: rootGroup)
+    }
+
+    private func conditionCount(in group: SmartRuleGroup) -> Int {
+        group.conditions.count + group.groups.reduce(0) { $0 + conditionCount(in: $1) }
+    }
+
+    @MainActor
+    private func refreshPreview() async {
+        guard candidateRevision > 0 else { return }
+        do {
+            try await Task.sleep(for: .milliseconds(120))
+            let candidateSnapshot = candidates
+            let ruleSnapshot = ruleSet
+            let result = try await Task.detached(priority: .userInitiated) {
+                try SmartRuleEngine().preview(candidateSnapshot, ruleSet: ruleSnapshot)
+            }.value
+            guard !Task.isCancelled else { return }
+            previewItems = result.items
+            previewCount = result.count
+            previewError = nil
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled else { return }
+            previewItems = []
+            previewCount = 0
+            previewError = error.localizedDescription
+        }
     }
 
     private var sourceOptions: [ApplicationReference] {
@@ -1179,7 +1267,7 @@ struct SmartCollectionEditor: View {
                 url: nil
             )
         }
-        for condition in conditions where condition.field == .sourceApp && !condition.value.isEmpty {
+        for condition in allConditions(in: rootGroup) where condition.field == .sourceApp && !condition.value.isEmpty {
             if values[condition.value] == nil {
                 values[condition.value] = ApplicationReference(
                     bundleIdentifier: condition.value,
@@ -1191,12 +1279,160 @@ struct SmartCollectionEditor: View {
         return values.values.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
+    private func allConditions(in group: SmartRuleGroup) -> [SmartCondition] {
+        group.conditions + group.groups.flatMap(allConditions)
+    }
+
+    private static func normalized(_ group: SmartRuleGroup) -> SmartRuleGroup {
+        SmartRuleGroup(
+            id: group.id,
+            mode: group.mode,
+            conditions: group.conditions.map(normalized),
+            groups: group.groups.map(normalized)
+        )
+    }
+
     private static func normalized(_ condition: SmartCondition) -> SmartCondition {
         guard !condition.field.supportedOperators.contains(condition.operation) else { return condition }
         var value = condition
         value.operation = condition.field.supportedOperators[0]
         value.value = condition.field.defaultValue
         return value
+    }
+}
+
+private struct SmartPreviewRequest: Hashable {
+    let group: SmartRuleGroup
+    let candidateRevision: Int
+}
+
+private struct SmartRulePreviewRow: View {
+    let clip: Clip
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            if !title.isEmpty, title != content.trimmingCharacters(in: .whitespacesAndNewlines) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+            }
+            Text(hasContent ? content : "（没有可预览的文本）")
+                .font(.caption)
+                .foregroundStyle(hasContent ? .secondary : .tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color(nsColor: .separatorColor).opacity(0.55), lineWidth: 0.5)
+        }
+    }
+
+    private var title: String {
+        clip.displayTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var content: String {
+        clip.previewText
+    }
+
+    private var hasContent: Bool {
+        !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
+private struct SmartRuleGroupEditor: View {
+    @Binding var group: SmartRuleGroup
+    let sourceOptions: [ApplicationReference]
+    let depth: Int
+    let isRoot: Bool
+    let canAddCondition: Bool
+    let onRemove: (() -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Label(isRoot ? "主规则组" : "子规则组", systemImage: isRoot ? "point.3.connected.trianglepath.dotted" : "arrow.turn.down.right")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Picker("组内关系", selection: $group.mode) {
+                    Text("满足全部").tag(RuleMatchMode.all)
+                    Text("满足任一").tag(RuleMatchMode.any)
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 176)
+                if let onRemove {
+                    Button(action: onRemove) { Image(systemName: "trash") }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .help("删除这个规则组")
+                }
+            }
+
+            Text(group.mode == .all ? "下面每一项都要满足" : "下面任意一项满足即可")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ForEach($group.conditions) { $condition in
+                SmartConditionRow(condition: $condition, sourceOptions: sourceOptions) {
+                    group.conditions.removeAll { $0.id == condition.id }
+                }
+            }
+
+            ForEach($group.groups) { $child in
+                AnyView(
+                    SmartRuleGroupEditor(
+                        group: $child,
+                        sourceOptions: sourceOptions,
+                        depth: depth + 1,
+                        isRoot: false,
+                        canAddCondition: canAddCondition,
+                        onRemove: { group.groups.removeAll { $0.id == child.id } }
+                    )
+                )
+            }
+
+            HStack(spacing: 8) {
+                Spacer()
+                Button {
+                    group.conditions.append(SmartCondition(field: .body, operation: .contains, value: ""))
+                } label: {
+                    Label("添加条件", systemImage: "plus")
+                }
+                .disabled(!canAddCondition)
+
+                Button {
+                    group.groups.append(SmartRuleGroup(
+                        mode: .all,
+                        conditions: [SmartCondition(field: .body, operation: .contains, value: "")]
+                    ))
+                } label: {
+                    Label("添加子组", systemImage: "rectangle.stack.badge.plus")
+                }
+                .disabled(!canAddCondition || depth >= SmartRuleEngine.maximumNestingDepth)
+                .help(depth >= SmartRuleEngine.maximumNestingDepth ? "最多可以嵌套 5 层" : "添加一个可独立设置且／或关系的规则组")
+            }
+            .controlSize(.small)
+        }
+        .padding(isRoot ? 4 : 12)
+        .background {
+            if !isRoot {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.045))
+            }
+        }
+        .overlay {
+            if !isRoot {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
+            }
+        }
+        .padding(.leading, isRoot ? 0 : 12)
     }
 }
 

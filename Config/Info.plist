@@ -19,9 +19,9 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.23</string>
+    <string>0.1.24</string>
     <key>CFBundleVersion</key>
-    <string>28</string>
+    <string>29</string>
     <key>PasteoryBuildVariant</key>
     <string>production</string>
     <key>PasteoryApplicationSupportDirectory</key>
@@ -36,6 +36,8 @@
     <true/>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>用于在用户选择“显示终端窗口”时执行文件命令，并在完成 3 秒后关闭本次新建的终端窗口。</string>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
     <key>NSHumanReadableCopyright</key>

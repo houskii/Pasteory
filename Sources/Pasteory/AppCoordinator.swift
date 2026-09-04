@@ -308,6 +308,9 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
             source: ClipSource(appName: "访达", bundleIdentifier: "com.apple.finder", confidence: .high)
         )
         await state.accept(fileCapture)
+        if ProcessInfo.processInfo.arguments.contains("--debug-seed-missing-file") {
+            try? FileManager.default.removeItem(at: debugFileURL)
+        }
         _ = await state.addCollection(name: "开发资料", smart: false)
         _ = await state.addCollection(name: "Lark Open API", smart: false)
         _ = await state.addCollection(name: "KMP", smart: false)
@@ -462,6 +465,28 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
                     state.libraryQuery = ""
                     await state.refreshLibrary()
                 }
+                if arguments.contains("--debug-edit-smart-rules"),
+                   var smartCollection = state.collections.first(where: { $0.kind == .smart }) {
+                    smartCollection.ruleSet = SmartRuleSet(
+                        mode: .any,
+                        conditions: [
+                            SmartCondition(field: .body, operation: .contains, value: "Pasteory")
+                        ],
+                        groups: [
+                            SmartRuleGroup(
+                                mode: .all,
+                                conditions: [
+                                    SmartCondition(field: .kind, operation: .equals, value: ClipKind.code.rawValue),
+                                    SmartCondition(field: .sourceApp, operation: .equals, value: "com.apple.dt.Xcode")
+                                ]
+                            )
+                        ]
+                    )
+                    if await state.saveCollection(smartCollection) {
+                        state.requestedCollectionEditorID = smartCollection.id
+                        try? await Task.sleep(for: .milliseconds(900))
+                    }
+                }
                 if arguments.contains("--debug-select-code") {
                     state.selectedClipID = state.clips.first(where: { $0.primaryKind == .code })?.id
                 }
@@ -486,9 +511,17 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
                     await state.refreshLibrary()
                     state.selectedClipID = state.clips.first(where: { $0.primaryKind == .image })?.id
                 }
+                if arguments.contains("--debug-select-file") {
+                    state.libraryFilter = .kind(.file)
+                    await state.refreshLibrary()
+                    state.selectedClipID = state.clips.first(where: { $0.primaryKind == .file })?.id
+                }
                 try? await Task.sleep(for: .milliseconds(200))
                 window.makeFirstResponder(nil)
-                saveDebugSnapshot(of: window, to: arguments[index + 1])
+                saveDebugSnapshot(
+                    of: arguments.contains("--debug-edit-smart-rules") ? (window.attachedSheet ?? window) : window,
+                    to: arguments[index + 1]
+                )
             }
         }
 #endif
@@ -504,7 +537,8 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
             )
             let window = NSWindow(contentViewController: NSHostingController(rootView: view))
             window.title = "Pasteory 设置"; window.styleMask = [.titled, .closable]
-            window.setContentSize(NSSize(width: 940, height: 660)); window.center(); window.isReleasedWhenClosed = false
+            let debugShowsFileRules = ProcessInfo.processInfo.arguments.contains("--debug-settings-file-rules")
+            window.setContentSize(NSSize(width: 940, height: debugShowsFileRules ? 900 : 660)); window.center(); window.isReleasedWhenClosed = false
             settingsWindow = window
         }
         activateAndShow(settingsWindow)

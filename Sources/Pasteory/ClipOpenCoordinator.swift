@@ -3,22 +3,70 @@ import Foundation
 import PasteoryCore
 import UniformTypeIdentifiers
 
+private final class FileCommandLogCapture: @unchecked Sendable {
+    private let lock = NSLock()
+    private let handle: FileHandle
+    private let maximumOutputBytes = 1_024 * 1_024
+    private var outputBytes = 0
+    private var wroteTruncationNotice = false
+
+    init(handle: FileHandle) {
+        self.handle = handle
+    }
+
+    func append(_ data: Data) {
+        guard !data.isEmpty else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        let remaining = max(0, maximumOutputBytes - outputBytes)
+        if remaining > 0 {
+            let accepted = data.prefix(remaining)
+            try? handle.write(contentsOf: accepted)
+            outputBytes += accepted.count
+        }
+        if data.count > remaining, !wroteTruncationNotice {
+            try? handle.write(contentsOf: Data("\n\n…日志输出超过 1 MB，后续内容已省略…\n".utf8))
+            wroteTruncationNotice = true
+        }
+    }
+
+    func finish(exitCode: Int32) {
+        lock.lock()
+        defer { lock.unlock() }
+        let footer = "\n\n结束：\(Date().formatted(.iso8601))\n退出码：\(exitCode)\n"
+        try? handle.write(contentsOf: Data(footer.utf8))
+        try? handle.close()
+    }
+
+    func failToLaunch(_ error: Error) {
+        lock.lock()
+        defer { lock.unlock() }
+        let footer = "\n\n启动失败：\(error.localizedDescription)\n"
+        try? handle.write(contentsOf: Data(footer.utf8))
+        try? handle.close()
+    }
+}
+
 enum ClipOpenError: LocalizedError {
     case unsupportedKind(ClipKind)
     case browserNotConfigured
     case codeEditorNotConfigured
     case fileRuleNotConfigured(String)
-    case fileHasNoExtension
+    case fileApplicationNotConfigured(String)
+    case fileCommandNotConfigured(String)
+    case fileUnavailable
     case applicationUnavailable(String)
     case contentUnavailable
 
     var errorDescription: String? {
         switch self {
         case .unsupportedKind(let kind): "暂不支持打开“\(kind.displayName)”内容"
-        case .browserNotConfigured: "尚未配置网页浏览器，请先前往“设置 → 打开方式”"
+        case .browserNotConfigured: "尚未配置链接浏览器，请先前往“设置 → 打开方式”"
         case .codeEditorNotConfigured: "尚未配置代码编辑器，请先前往“设置 → 打开方式”"
-        case .fileRuleNotConfigured(let fileExtension): "尚未为 .\(fileExtension) 文件配置打开应用"
-        case .fileHasNoExtension: "这个文件没有后缀，无法匹配打开规则"
+        case .fileRuleNotConfigured(let fileType): "尚未为“\(fileType)”配置打开方式"
+        case .fileApplicationNotConfigured(let fileType): "尚未为“\(fileType)”选择打开应用"
+        case .fileCommandNotConfigured(let fileType): "尚未为“\(fileType)”填写命令"
+        case .fileUnavailable: "原文件已经删除，无法打开"
         case .applicationUnavailable(let bundleIdentifier): "找不到已配置的应用（\(bundleIdentifier)）"
         case .contentUnavailable: "当前项目没有可打开的原始内容"
         }
@@ -30,11 +78,19 @@ final class ClipOpenCoordinator {
     private let settings: AppSettings
     private let attachments: AttachmentStore
     private let workspace: NSWorkspace
+    private let onCommandCompletion: (@MainActor @Sendable (FileCommandExecution) -> Void)?
+    private var runningFileCommands: [UUID: Process] = [:]
 
-    init(settings: AppSettings, attachments: AttachmentStore, workspace: NSWorkspace = .shared) {
+    init(
+        settings: AppSettings,
+        attachments: AttachmentStore,
+        workspace: NSWorkspace = .shared,
+        onCommandCompletion: (@MainActor @Sendable (FileCommandExecution) -> Void)? = nil
+    ) {
         self.settings = settings
         self.attachments = attachments
         self.workspace = workspace
+        self.onCommandCompletion = onCommandCompletion
     }
 
     func open(_ clip: Clip) async throws {
@@ -73,12 +129,26 @@ final class ClipOpenCoordinator {
                 throw ClipOpenError.contentUnavailable
             }
             let resolvedURL = PasteboardFileURLDecoder.resolvedPathURL(url)
-            let fileExtension = resolvedURL.pathExtension.lowercased()
-            guard !fileExtension.isEmpty else { throw ClipOpenError.fileHasNoExtension }
-            guard let bundleIdentifier = settings.applicationBundleIdentifier(forFileExtension: fileExtension) else {
-                throw ClipOpenError.fileRuleNotConfigured(fileExtension)
+            guard FileManager.default.fileExists(atPath: resolvedURL.path) else {
+                throw ClipOpenError.fileUnavailable
             }
-            try await open(resolvedURL, withBundleIdentifier: bundleIdentifier)
+            let uti = try? resolvedURL.resourceValues(forKeys: [.typeIdentifierKey]).typeIdentifier
+            let descriptor = FileIconResolver.descriptor(fileName: resolvedURL.lastPathComponent, uti: uti)
+            let fileTypeName = FileIconResolver.fileType(assetName: descriptor.assetName)?.displayName ?? descriptor.label
+            guard let rule = settings.fileOpenRule(fileName: resolvedURL.lastPathComponent, uti: uti) else {
+                throw ClipOpenError.fileRuleNotConfigured(fileTypeName)
+            }
+            switch rule.action {
+            case .application:
+                guard !rule.bundleIdentifier.isEmpty else {
+                    throw ClipOpenError.fileApplicationNotConfigured(fileTypeName)
+                }
+                try await open(resolvedURL, withBundleIdentifier: rule.bundleIdentifier)
+            case .command:
+                let command = rule.command.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !command.isEmpty else { throw ClipOpenError.fileCommandNotConfigured(fileTypeName) }
+                try runFileCommand(command, fileURL: resolvedURL, fileType: rule.matchIdentifier)
+            }
 
         case .text, .color, .mixed:
             throw ClipOpenError.unsupportedKind(clip.primaryKind)
@@ -98,6 +168,136 @@ final class ClipOpenCoordinator {
             }
         }
     }
+
+    private func runFileCommand(_ command: String, fileURL: URL, fileType: String) throws {
+        let invocation = FileCommandInvocation.make(
+            shell: settings.fileCommandShell,
+            command: command,
+            fileURL: fileURL
+        )
+        switch settings.fileCommandPresentation {
+        case .silent:
+            let logSession = settings.beginFileCommandLog(fileType: fileType, shell: settings.fileCommandShell)
+            let process = Process()
+            process.executableURL = invocation.executableURL
+            process.arguments = invocation.arguments
+            process.environment = invocation.environment
+            process.currentDirectoryURL = invocation.currentDirectoryURL
+            process.standardInput = FileHandle.nullDevice
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            var outputPipe: Pipe?
+            var logCapture: FileCommandLogCapture?
+            if let (_, logHandle) = logSession {
+                let pipe = Pipe()
+                let capture = FileCommandLogCapture(handle: logHandle)
+                outputPipe = pipe
+                logCapture = capture
+                process.standardOutput = pipe.fileHandleForWriting
+                process.standardError = pipe.fileHandleForWriting
+                pipe.fileHandleForReading.readabilityHandler = { readable in
+                    let data = readable.availableData
+                    if data.isEmpty { readable.readabilityHandler = nil }
+                    else { capture.append(data) }
+                }
+            }
+            let commandID = logSession?.0.id ?? UUID()
+            let execution = logSession?.0
+            let settings = settings
+            let onCommandCompletion = onCommandCompletion
+            let completionPipe = outputPipe
+            let completionCapture = logCapture
+            process.terminationHandler = { [weak self] completedProcess in
+                let exitCode = completedProcess.terminationStatus
+                completionPipe?.fileHandleForReading.readabilityHandler = nil
+                if let remaining = try? completionPipe?.fileHandleForReading.readToEnd() {
+                    completionCapture?.append(remaining)
+                }
+                try? completionPipe?.fileHandleForReading.close()
+                completionCapture?.finish(exitCode: exitCode)
+                Task { @MainActor [weak self] in
+                    self?.runningFileCommands.removeValue(forKey: commandID)
+                    guard let execution else { return }
+                    let finished = settings.finishFileCommandLog(execution: execution, exitCode: exitCode)
+                    onCommandCompletion?(finished)
+                }
+            }
+            runningFileCommands[commandID] = process
+            do {
+                try process.run()
+                try? outputPipe?.fileHandleForWriting.close()
+            } catch {
+                runningFileCommands.removeValue(forKey: commandID)
+                if let (execution, _) = logSession {
+                    outputPipe?.fileHandleForReading.readabilityHandler = nil
+                    try? outputPipe?.fileHandleForReading.close()
+                    try? outputPipe?.fileHandleForWriting.close()
+                    logCapture?.failToLaunch(error)
+                    let finished = settings.finishFileCommandLog(execution: execution, exitCode: -1)
+                    onCommandCompletion?(finished)
+                }
+                throw error
+            }
+        case .terminalWindow:
+            try runFileCommandInTerminal(invocation)
+        }
+    }
+
+    private func runFileCommandInTerminal(_ invocation: FileCommandInvocation) throws {
+        let process = Process()
+        let completionMarkerURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Pasteory-FileCommand-\(UUID().uuidString).done")
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = [
+            "-e", Self.terminalAppleScript,
+            invocation.executableURL.path,
+            invocation.environment["file"] ?? "",
+            invocation.currentDirectoryURL.path,
+            invocation.arguments.last ?? "",
+            invocation.environment["PATH"] ?? "",
+            completionMarkerURL.path
+        ]
+        let commandID = UUID()
+        process.terminationHandler = { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.runningFileCommands.removeValue(forKey: commandID)
+            }
+        }
+        runningFileCommands[commandID] = process
+        do {
+            try process.run()
+        } catch {
+            runningFileCommands.removeValue(forKey: commandID)
+            throw error
+        }
+    }
+
+    private static let terminalAppleScript = """
+    on run argv
+        set shellPath to item 1 of argv
+        set filePath to item 2 of argv
+        set directoryPath to item 3 of argv
+        set commandText to item 4 of argv
+        set executablePath to item 5 of argv
+        set completionMarker to item 6 of argv
+        set launchCommand to "cd " & quoted form of directoryPath & " && env file=" & quoted form of filePath & " PATH=" & quoted form of executablePath & " " & quoted form of shellPath & " -c " & quoted form of commandText & "; commandStatus=$?; sleep 3; /usr/bin/touch " & quoted form of completionMarker & "; (exit $commandStatus)"
+        tell application "Terminal"
+            activate
+            set targetTab to do script launchCommand
+            set targetWindow to first window whose selected tab is targetTab
+            repeat
+                if not (exists targetWindow) then return
+                try
+                    POSIX file completionMarker as alias
+                    exit repeat
+                end try
+                delay 0.2
+            end repeat
+            if exists targetWindow then close targetWindow
+        end tell
+        do shell script "/bin/rm " & quoted form of completionMarker
+    end run
+    """
 
     private func firstURL(in clip: Clip, acceptedUTIs: Set<String>) async -> URL? {
         for representation in clip.items.flatMap(\.representations) where acceptedUTIs.contains(representation.uti) {

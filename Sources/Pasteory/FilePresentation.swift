@@ -11,6 +11,9 @@ struct LoadedFilePresentation: Equatable, Sendable {
     var byteCount: Int?
     var uti: String?
     var isDirectory: Bool
+    var exists: Bool?
+
+    var isMissing: Bool { exists == false }
 
     var sizeText: String {
         if isDirectory { return "文件夹" }
@@ -79,7 +82,8 @@ enum ClipFilePresentationLoader {
             path: nil,
             byteCount: nil,
             uti: nil,
-            isDirectory: false
+            isDirectory: false,
+            exists: nil
         )
     }
 
@@ -94,13 +98,17 @@ enum ClipFilePresentationLoader {
             guard let data = try? await attachments.data(for: representation),
                   let encodedURL = PasteboardFileURLDecoder.decode(data, uti: representation.uti) else { continue }
             let url = PasteboardFileURLDecoder.resolvedPathURL(encodedURL)
-            let values = try? url.resourceValues(forKeys: [.nameKey, .fileSizeKey, .typeIdentifierKey, .isDirectoryKey])
+            let exists = FileManager.default.fileExists(atPath: url.path)
+            let values = exists
+                ? try? url.resourceValues(forKeys: [.nameKey, .fileSizeKey, .typeIdentifierKey, .isDirectoryKey])
+                : nil
             return LoadedFilePresentation(
                 name: values?.name ?? (url.lastPathComponent.isEmpty ? fallback.name : url.lastPathComponent),
                 path: url.path.isEmpty ? nil : url.deletingLastPathComponent().path,
                 byteCount: values?.fileSize,
                 uti: values?.typeIdentifier,
-                isDirectory: values?.isDirectory == true
+                isDirectory: values?.isDirectory == true,
+                exists: exists
             )
         }
         return fallback
@@ -317,11 +325,22 @@ struct PasteoryFileMetadataDetailsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(presentation.name)
-                .font(.system(size: compact ? 12 : 13, weight: .semibold))
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .help(presentation.name)
+            HStack(spacing: 6) {
+                Text(presentation.name)
+                    .font(.system(size: compact ? 12 : 13, weight: .semibold))
+                    .strikethrough(presentation.isMissing)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(presentation.name)
+                if presentation.isMissing {
+                    Text("已删除")
+                        .font(.system(size: compact ? 8.5 : 9.5, weight: .semibold))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.secondary.opacity(0.12), in: Capsule())
+                        .fixedSize()
+                }
+            }
 
             HStack(spacing: 6) {
                 if let path = presentation.shortenedPath {
@@ -338,6 +357,7 @@ struct PasteoryFileMetadataDetailsView: View {
             .font(.system(size: compact ? 9.5 : 10.5))
             .foregroundStyle(.secondary)
         }
+        .opacity(presentation.isMissing ? 0.5 : 1)
         .frame(maxWidth: .infinity, alignment: .leading)
         .task(id: clip.id) {
             presentation = await ClipFilePresentationLoader.load(clip: clip, attachments: attachments)
@@ -360,8 +380,10 @@ struct PasteoryFileDetailPreview: View {
         VStack(spacing: 12) {
             PasteoryFileIconView(fileName: presentation.name, uti: presentation.uti)
                 .frame(width: 88, height: 88)
+                .saturation(presentation.isMissing ? 0 : 1)
             Text(presentation.name)
                 .font(.headline)
+                .strikethrough(presentation.isMissing)
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
                 .textSelection(.enabled)
@@ -377,7 +399,13 @@ struct PasteoryFileDetailPreview: View {
             Text(presentation.sizeText)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
+            if presentation.isMissing {
+                Label("原文件已删除", systemImage: "trash")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
         }
+        .opacity(presentation.isMissing ? 0.5 : 1)
         .frame(maxWidth: .infinity)
         .task(id: clip.id) {
             presentation = await ClipFilePresentationLoader.load(clip: clip, attachments: attachments)

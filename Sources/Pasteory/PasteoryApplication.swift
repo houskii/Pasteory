@@ -52,22 +52,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
             let directories: AppDirectories
+            let settingsDefaults: UserDefaults
 #if DEBUG
             let arguments = ProcessInfo.processInfo.arguments
             if let index = arguments.firstIndex(of: "--debug-data-root"), arguments.indices.contains(index + 1) {
-                directories = try AppDirectories(root: URL(fileURLWithPath: arguments[index + 1], isDirectory: true))
+                let debugRoot = URL(fileURLWithPath: arguments[index + 1], isDirectory: true)
+                directories = try AppDirectories(root: debugRoot)
+                settingsDefaults = UserDefaults(
+                    suiteName: "com.pasteory.debug.\(debugRoot.lastPathComponent)"
+                ) ?? .standard
             } else {
                 directories = try AppDirectories()
+                settingsDefaults = .standard
             }
 #else
             directories = try AppDirectories()
+            settingsDefaults = .standard
 #endif
             let repository = try SQLiteClipRepository(databaseURL: directories.databaseFile)
             let attachments = AttachmentStore(directories: directories)
             let archive = ArchiveService(repository: repository, directories: directories)
             let backup = BackupService(repository: repository, directories: directories)
             let storageAnalyticsService = StorageAnalyticsService(repository: repository, directories: directories)
-            let settings = AppSettings()
+            let settings = AppSettings(defaults: settingsDefaults, logsDirectory: directories.logs)
             let linkResolutionService = LinkResolutionService(repository: repository)
             ApplicationCatalog.configure(cacheDirectory: directories.applicationCache)
             if PasteoryRuntimeIdentity.current.chromeIntegrationEnabled {

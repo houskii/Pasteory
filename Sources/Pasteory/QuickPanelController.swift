@@ -37,7 +37,25 @@ final class QuickPanelController: NSObject {
         onCreateTextClip: @escaping () -> Void
     ) {
         self.state = state; self.pasteCoordinator = pasteCoordinator; self.targetProvider = targetProvider
-        self.clipOpenCoordinator = ClipOpenCoordinator(settings: state.settings, attachments: state.attachments)
+        self.clipOpenCoordinator = ClipOpenCoordinator(
+            settings: state.settings,
+            attachments: state.attachments,
+            onCommandCompletion: { [weak state] execution in
+                guard let state else { return }
+                switch execution.status {
+                case .running:
+                    break
+                case .succeeded:
+                    state.presentStatus("文件命令已完成，可在“设置 → 打开方式”查看日志")
+                case .failed(let exitCode):
+                    state.presentStatus(
+                        "文件命令执行失败（退出码 \(exitCode)），请在“设置 → 打开方式”查看日志",
+                        kind: .error,
+                        dismissAfter: 6
+                    )
+                }
+            }
+        )
         self.onOpenLibrary = onOpenLibrary; self.onOpenSettings = onOpenSettings
         self.onCreateTextClip = onCreateTextClip
 #if DEBUG

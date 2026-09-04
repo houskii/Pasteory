@@ -110,7 +110,7 @@ struct SettingsView: View {
                 .clipped()
             }
         }
-        .frame(width: 940, height: 660)
+        .frame(width: 940, height: debugSettingsHeight)
         .background(Color(nsColor: .windowBackgroundColor))
         .pasteoryTheme(settings.themeColor)
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -120,6 +120,37 @@ struct SettingsView: View {
         .onAppear {
             if ProcessInfo.processInfo.arguments.contains("--debug-settings-privacy") { selectedDestination = .privacy }
             if ProcessInfo.processInfo.arguments.contains("--debug-settings-open") { selectedDestination = .openBehavior }
+            if ProcessInfo.processInfo.arguments.contains("--debug-settings-file-rules"),
+               settings.fileOpenRules.isEmpty {
+                settings.addCustomFileOpenRule()
+                if let customRule = settings.fileOpenRules.last {
+                    settings.updateFileOpenRuleExtension(id: customRule.id, fileExtension: "hap")
+                }
+                settings.addFileOpenRule()
+                if let applicationRule = settings.fileOpenRules.last,
+                   let pdf = FileIconResolver.fileExtension("pdf") {
+                    settings.updateFileOpenRuleCatalogExtension(id: applicationRule.id, descriptor: pdf)
+                    var applicationRule = settings.fileOpenRules.last!
+                    applicationRule.bundleIdentifier = "com.apple.Preview"
+                    settings.updateFileOpenRule(applicationRule)
+                }
+                settings.addFileOpenRule()
+                if let commandRule = settings.fileOpenRules.last,
+                   let swift = FileIconResolver.fileExtension("swift") {
+                    settings.updateFileOpenRuleCatalogExtension(id: commandRule.id, descriptor: swift)
+                    var commandRule = settings.fileOpenRules.last!
+                    commandRule.action = .command
+                    commandRule.command = "wc -l \"$file\""
+                    settings.updateFileOpenRule(commandRule)
+                }
+            }
+            if ProcessInfo.processInfo.arguments.contains("--debug-settings-file-rules"),
+               settings.recentFileCommandExecution(for: "extension:swift") == nil,
+               let (execution, handle) = settings.beginFileCommandLog(fileType: "extension:swift", shell: .zsh) {
+                try? handle.write(contentsOf: Data("8 Sources/Pasteory/AppState.swift\n".utf8))
+                try? handle.close()
+                settings.finishFileCommandLog(execution: execution, exitCode: 0)
+            }
             if ProcessInfo.processInfo.arguments.contains("--debug-settings-links") { selectedDestination = .linkResolution }
             if ProcessInfo.processInfo.arguments.contains("--debug-settings-shortcuts") { selectedDestination = .shortcuts }
             if ProcessInfo.processInfo.arguments.contains("--debug-settings-storage") { selectedDestination = .storage }
@@ -130,6 +161,14 @@ struct SettingsView: View {
             if ProcessInfo.processInfo.arguments.contains("--debug-settings-advanced") { selectedDestination = .advanced }
             if ProcessInfo.processInfo.arguments.contains("--debug-settings-about") { selectedDestination = .about }
         }
+#endif
+    }
+
+    private var debugSettingsHeight: CGFloat {
+#if DEBUG
+        ProcessInfo.processInfo.arguments.contains("--debug-settings-file-rules") ? 900 : 660
+#else
+        660
 #endif
     }
 
@@ -469,7 +508,7 @@ struct SettingsView: View {
                         shortcutError = nil
                     }
                 }
-                Text("全局唤起恢复为 ⌘⇧C，打开内容恢复为空格，搜索恢复为 ⌘F，其余操作恢复为各自默认组合。")
+                Text("全局唤起恢复为 ⌘⇧V，打开内容恢复为空格，搜索恢复为 ⌘F，其余操作恢复为当前发布默认组合。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

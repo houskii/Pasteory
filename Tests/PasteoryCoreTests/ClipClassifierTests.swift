@@ -117,6 +117,119 @@ import Testing
     #expect(try !engine.matches(sourceClip, ruleSet: SmartRuleSet()))
 }
 
+@Test func smartRulesSupportNestedAnyAndAllGroups() throws {
+    let engine = SmartRuleEngine()
+    let rules = SmartRuleSet(
+        mode: .any,
+        conditions: [SmartCondition(field: .favorite, operation: .equals, value: "true")],
+        groups: [
+            SmartRuleGroup(
+                mode: .all,
+                conditions: [
+                    SmartCondition(field: .kind, operation: .equals, value: ClipKind.code.rawValue),
+                    SmartCondition(field: .body, operation: .contains, value: "Pasteory")
+                ]
+            )
+        ]
+    )
+
+    let favoriteText = smartRuleClip(body: "普通文本", kind: .text, favorite: true)
+    let matchingCode = smartRuleClip(body: "struct PasteoryApp {}", kind: .code)
+    let unrelatedCode = smartRuleClip(body: "struct OtherApp {}", kind: .code)
+
+    #expect(try engine.matches(favoriteText, ruleSet: rules))
+    #expect(try engine.matches(matchingCode, ruleSet: rules))
+    #expect(try !engine.matches(unrelatedCode, ruleSet: rules))
+}
+
+@Test func smartRuleSetDecodesLegacyFlatConfiguration() throws {
+    let conditionID = UUID()
+    let data = Data("""
+        {
+          "mode": "any",
+          "conditions": [
+            {
+              "id": "\(conditionID.uuidString)",
+              "field": "body",
+              "operation": "contains",
+              "value": "Pasteory"
+            }
+          ]
+        }
+        """.utf8)
+
+    let decoded = try JSONDecoder().decode(SmartRuleSet.self, from: data)
+    #expect(decoded.mode == .any)
+    #expect(decoded.conditions.count == 1)
+    #expect(decoded.conditions[0].id == conditionID)
+    #expect(decoded.groups.isEmpty)
+    #expect(try SmartRuleEngine().matches(smartRuleClip(body: "Pasteory"), ruleSet: decoded))
+}
+
+@Test func smartRuleSetPreservesNestedGroupsWhenEncoded() throws {
+    let original = SmartRuleSet(
+        mode: .all,
+        conditions: [SmartCondition(field: .favorite, operation: .equals, value: "true")],
+        groups: [
+            SmartRuleGroup(
+                mode: .any,
+                conditions: [SmartCondition(field: .body, operation: .contains, value: "Swift")],
+                groups: [
+                    SmartRuleGroup(
+                        mode: .all,
+                        conditions: [SmartCondition(field: .note, operation: .equals, value: "保留")]
+                    )
+                ]
+            )
+        ]
+    )
+
+    let data = try JSONEncoder().encode(original)
+    let decoded = try JSONDecoder().decode(SmartRuleSet.self, from: data)
+    #expect(decoded == original)
+}
+
+@Test func smartRulePreviewReturnsEveryMatchingItem() throws {
+    let clips = (0..<25).map { smartRuleClip(body: "Pasteory \($0)") }
+    let rules = SmartRuleSet(conditions: [
+        SmartCondition(field: .body, operation: .contains, value: "Pasteory")
+    ])
+
+    let preview = try SmartRuleEngine().preview(clips, ruleSet: rules)
+    #expect(preview.count == 25)
+    #expect(preview.items.count == 25)
+}
+
+@Test func smartRulesRejectGroupsBeyondMaximumDepth() {
+    var group = SmartRuleGroup(conditions: [
+        SmartCondition(field: .body, operation: .contains, value: "Pasteory")
+    ])
+    for _ in 0..<SmartRuleEngine.maximumNestingDepth {
+        group = SmartRuleGroup(groups: [group])
+    }
+    let rules = SmartRuleSet(groups: [group])
+
+    #expect(throws: SmartRuleError.self) {
+        try SmartRuleEngine().validate(rules)
+    }
+}
+
+private func smartRuleClip(
+    body: String,
+    kind: ClipKind = .text,
+    favorite: Bool = false
+) -> Clip {
+    Clip(
+        primaryKind: kind,
+        isFavorite: favorite,
+        source: ClipSource(appName: "测试", bundleIdentifier: "app.test", confidence: .high),
+        previewText: body,
+        contentHash: UUID().uuidString,
+        byteSize: body.utf8.count,
+        items: []
+    )
+}
+
 private func makeTextClip(
     _ text: String,
     uti: String = "public.utf8-plain-text",

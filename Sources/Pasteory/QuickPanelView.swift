@@ -414,7 +414,7 @@ struct QuickPanelView: View {
             .buttonStyle(.borderless)
             .font(.caption.weight(.semibold))
             .disabled(!state.quickCanAggregateCurrentResults)
-            .help("聚合当前搜索结果（⌘⇧M）")
+            .help(aggregateResultsHelp)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
@@ -452,6 +452,13 @@ struct QuickPanelView: View {
             return "全部内容"
         }
         return "\(collection.kind == .smart ? "智能分组" : "普通分组")：\(collection.name) · 拖动调整顺序"
+    }
+
+    private var aggregateResultsHelp: String {
+        guard let shortcut = state.settings.quickShortcut(for: .aggregateContent) else {
+            return "聚合当前搜索结果"
+        }
+        return "聚合当前搜索结果（\(ShortcutFormatter.display(keyCode: shortcut.keyCode, modifiers: shortcut.modifiers))）"
     }
 
     private func quickTabIconColor(_ tab: QuickTab) -> Color {

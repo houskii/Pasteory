@@ -95,18 +95,6 @@ enum PasteoryThemeColor: String, CaseIterable, Codable, Identifiable {
     }
 }
 
-struct FileOpenRule: Codable, Hashable, Identifiable {
-    var id: UUID
-    var fileExtension: String
-    var bundleIdentifier: String
-
-    init(id: UUID = UUID(), fileExtension: String = "", bundleIdentifier: String = "") {
-        self.id = id
-        self.fileExtension = fileExtension
-        self.bundleIdentifier = bundleIdentifier
-    }
-}
-
 enum QuickPanelAction: String, CaseIterable, Codable, Identifiable {
     case openSelected
     case toggleSearch
@@ -155,6 +143,29 @@ struct PasteoryShortcut: Codable, Hashable {
     var modifiers: UInt32
 }
 
+enum FileCommandExecutionStatus: Equatable {
+    case running
+    case succeeded
+    case failed(Int32)
+
+    var displayName: String {
+        switch self {
+        case .running: "执行中"
+        case .succeeded: "已完成"
+        case .failed(let code): "失败（退出码 \(code)）"
+        }
+    }
+}
+
+struct FileCommandExecution: Identifiable, Equatable {
+    var id: UUID
+    var fileType: String
+    var startedAt: Date
+    var finishedAt: Date?
+    var status: FileCommandExecutionStatus
+    var logURL: URL
+}
+
 @MainActor
 final class AppSettings: ObservableObject {
     private enum Key {
@@ -175,6 +186,8 @@ final class AppSettings: ObservableObject {
         static let browserBundleIdentifier = "browserBundleIdentifier"
         static let codeEditorBundleIdentifier = "codeEditorBundleIdentifier"
         static let fileOpenRules = "fileOpenRules"
+        static let fileCommandShell = "fileCommandShell"
+        static let fileCommandPresentation = "fileCommandPresentation"
         static let authenticatedLinkRules = "authenticatedLinkRules"
     }
 
@@ -197,6 +210,12 @@ final class AppSettings: ObservableObject {
     @Published private(set) var fileOpenRules: [FileOpenRule] {
         didSet { persistFileOpenRules() }
     }
+    @Published var fileCommandShell: FileCommandShell {
+        didSet { defaults.set(fileCommandShell.rawValue, forKey: Key.fileCommandShell) }
+    }
+    @Published var fileCommandPresentation: FileCommandPresentation {
+        didSet { defaults.set(fileCommandPresentation.rawValue, forKey: Key.fileCommandPresentation) }
+    }
     @Published private(set) var authenticatedLinkRules: [AuthenticatedLinkRule] {
         didSet { persistAuthenticatedLinkRules() }
     }
@@ -215,11 +234,14 @@ final class AppSettings: ObservableObject {
     @Published private(set) var disabledQuickActions: Set<QuickPanelAction> {
         didSet { defaults.set(disabledQuickActions.map(\.rawValue).sorted(), forKey: Key.disabledQuickActions) }
     }
+    @Published private(set) var recentFileCommandExecutions: [String: FileCommandExecution] = [:]
 
     private let defaults: UserDefaults
+    let fileCommandLogsDirectory: URL?
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, logsDirectory: URL? = nil) {
         self.defaults = defaults
+        fileCommandLogsDirectory = logsDirectory?.appendingPathComponent("FileCommands", isDirectory: true)
         completedOnboarding = defaults.bool(forKey: Key.completedOnboarding)
         if defaults.integer(forKey: Key.monitoringDefaultVersion) < 2 {
             monitoringEnabled = true
@@ -238,10 +260,19 @@ final class AppSettings: ObservableObject {
         codeEditorBundleIdentifier = defaults.string(forKey: Key.codeEditorBundleIdentifier) ?? ""
         if let data = defaults.data(forKey: Key.fileOpenRules),
            let stored = try? JSONDecoder().decode([FileOpenRule].self, from: data) {
+            var seenMatches = Set<String>()
             fileOpenRules = stored
+                .map(Self.migrateFileTypeRuleToExtension)
+                .filter { seenMatches.insert($0.matchIdentifier).inserted }
         } else {
             fileOpenRules = []
         }
+        fileCommandShell = FileCommandShell(
+            rawValue: defaults.string(forKey: Key.fileCommandShell) ?? ""
+        ) ?? .zsh
+        fileCommandPresentation = FileCommandPresentation(
+            rawValue: defaults.string(forKey: Key.fileCommandPresentation) ?? ""
+        ) ?? .terminalWindow
         if let data = defaults.data(forKey: Key.authenticatedLinkRules),
            let stored = try? JSONDecoder().decode([AuthenticatedLinkRule].self, from: data) {
             authenticatedLinkRules = stored
@@ -256,18 +287,9 @@ final class AppSettings: ObservableObject {
         let storedKeyCode = defaults.object(forKey: Key.shortcutKeyCode) as? Int
         let storedModifiers = defaults.object(forKey: Key.shortcutModifiers) as? Int
         globalShortcutEnabled = defaults.object(forKey: Key.globalShortcutEnabled) as? Bool ?? true
-        if defaults.integer(forKey: Key.shortcutDefaultVersion) < 3,
-           (storedKeyCode == nil || storedKeyCode == 9 || storedKeyCode == 11),
-           (storedModifiers == nil || storedModifiers == 768) {
-            shortcutKeyCode = 8
-            shortcutModifiers = 768
-            defaults.set(8, forKey: Key.shortcutKeyCode)
-            defaults.set(768, forKey: Key.shortcutModifiers)
-        } else {
-            shortcutKeyCode = UInt32(storedKeyCode ?? 8)
-            shortcutModifiers = UInt32(storedModifiers ?? 768)
-        }
-        defaults.set(3, forKey: Key.shortcutDefaultVersion)
+        shortcutKeyCode = UInt32(storedKeyCode ?? Int(Self.defaultGlobalShortcut.keyCode))
+        shortcutModifiers = UInt32(storedModifiers ?? Int(Self.defaultGlobalShortcut.modifiers))
+        defaults.set(4, forKey: Key.shortcutDefaultVersion)
         var disabledActions = Set(
             (defaults.stringArray(forKey: Key.disabledQuickActions) ?? []).compactMap(QuickPanelAction.init(rawValue:))
         )
@@ -368,20 +390,64 @@ final class AppSettings: ObservableObject {
     }
 
     func resetAllShortcuts() {
-        shortcutKeyCode = 8
-        shortcutModifiers = UInt32(cmdKey | shiftKey)
+        shortcutKeyCode = Self.defaultGlobalShortcut.keyCode
+        shortcutModifiers = Self.defaultGlobalShortcut.modifiers
         globalShortcutEnabled = true
         quickActionShortcuts = Self.defaultQuickActionShortcuts
         disabledQuickActions.removeAll()
     }
 
     func addFileOpenRule() {
-        fileOpenRules.append(FileOpenRule())
+        let configuredExtensions = Set(fileOpenRules.map(\.normalizedFileExtension))
+        guard let next = FileIconResolver.allFileExtensions.first(where: {
+            !configuredExtensions.contains($0.fileExtension)
+        }) else { return }
+        fileOpenRules.append(FileOpenRule(
+            matchKind: .catalogExtension,
+            fileType: next.assetName,
+            fileExtension: next.fileExtension
+        ))
+    }
+
+    func addCustomFileOpenRule() {
+        guard !fileOpenRules.contains(where: {
+            $0.matchKind == .fileExtension && $0.normalizedFileExtension.isEmpty
+        }) else { return }
+        fileOpenRules.append(FileOpenRule(matchKind: .fileExtension))
     }
 
     func updateFileOpenRule(_ rule: FileOpenRule) {
         guard let index = fileOpenRules.firstIndex(where: { $0.id == rule.id }) else { return }
-        fileOpenRules[index] = rule
+        var normalized = rule
+        if !FileIconResolver.allAssetNames.contains(normalized.fileType) {
+            normalized.fileType = "generic"
+        }
+        fileOpenRules[index] = normalized
+    }
+
+    func updateFileOpenRuleType(id: UUID, fileType: String) {
+        guard let index = fileOpenRules.firstIndex(where: { $0.id == id }),
+              FileIconResolver.allAssetNames.contains(fileType) else { return }
+        fileOpenRules[index].matchKind = .fileType
+        fileOpenRules[index].fileType = fileType
+    }
+
+    func updateFileOpenRuleCatalogExtension(id: UUID, descriptor: FileExtensionDescriptor) {
+        guard let index = fileOpenRules.firstIndex(where: { $0.id == id }) else { return }
+        fileOpenRules[index].matchKind = .catalogExtension
+        fileOpenRules[index].fileType = descriptor.assetName
+        fileOpenRules[index].fileExtension = descriptor.fileExtension
+    }
+
+    func updateFileOpenRuleExtension(id: UUID, fileExtension: String) {
+        guard let index = fileOpenRules.firstIndex(where: { $0.id == id }) else { return }
+        fileOpenRules[index].matchKind = .fileExtension
+        fileOpenRules[index].fileExtension = fileExtension
+    }
+
+    func updateFileOpenRuleCommand(id: UUID, command: String) {
+        guard let index = fileOpenRules.firstIndex(where: { $0.id == id }) else { return }
+        fileOpenRules[index].command = command
     }
 
     func removeFileOpenRule(id: UUID) {
@@ -400,12 +466,62 @@ final class AppSettings: ObservableObject {
         authenticatedLinkRules.removeAll { $0.id == id }
     }
 
-    func applicationBundleIdentifier(forFileExtension fileExtension: String) -> String? {
-        let normalized = Self.normalizedFileExtension(fileExtension)
-        guard !normalized.isEmpty else { return nil }
+    func fileOpenRule(fileName: String, uti: String?) -> FileOpenRule? {
+        if let customRule = fileOpenRules.first(where: {
+            $0.matchKind == .fileExtension && $0.matches(fileName: fileName, uti: uti)
+        }) {
+            return customRule
+        }
+        if let catalogRule = fileOpenRules.first(where: {
+            $0.matchKind == .catalogExtension && $0.matches(fileName: fileName, uti: uti)
+        }) {
+            return catalogRule
+        }
         return fileOpenRules.first {
-            Self.normalizedFileExtension($0.fileExtension) == normalized && !$0.bundleIdentifier.isEmpty
-        }?.bundleIdentifier
+            $0.matchKind == .fileType && $0.matches(fileName: fileName, uti: uti)
+        }
+    }
+
+    func beginFileCommandLog(fileType: String, shell: FileCommandShell) -> (FileCommandExecution, FileHandle)? {
+        guard let fileCommandLogsDirectory else { return nil }
+        do {
+            try FileManager.default.createDirectory(at: fileCommandLogsDirectory, withIntermediateDirectories: true)
+            let execution = FileCommandExecution(
+                id: UUID(),
+                fileType: fileType,
+                startedAt: Date(),
+                finishedAt: nil,
+                status: .running,
+                logURL: fileCommandLogsDirectory.appendingPathComponent(
+                    "\(Self.logTimestamp.string(from: Date()))-\(fileType)-\(UUID().uuidString.prefix(8)).log"
+                )
+            )
+            let header = "Pasteory 文件命令\n类型：\(fileType)\nShell：\(shell.displayName)\n开始：\(execution.startedAt.formatted(.iso8601))\n\n"
+            try Data(header.utf8).write(to: execution.logURL, options: .atomic)
+            let handle = try FileHandle(forWritingTo: execution.logURL)
+            try handle.seekToEnd()
+            recentFileCommandExecutions[fileType] = execution
+            trimFileCommandLogs()
+            return (execution, handle)
+        } catch {
+            return nil
+        }
+    }
+
+    @discardableResult
+    func finishFileCommandLog(
+        execution: FileCommandExecution,
+        exitCode: Int32
+    ) -> FileCommandExecution {
+        var finished = execution
+        finished.finishedAt = Date()
+        finished.status = exitCode == 0 ? .succeeded : .failed(exitCode)
+        recentFileCommandExecutions[execution.fileType] = finished
+        return finished
+    }
+
+    func recentFileCommandExecution(for fileType: String) -> FileCommandExecution? {
+        recentFileCommandExecutions[fileType]
     }
 
     func globalShortcutConflict(keyCode: UInt32, modifiers: UInt32) -> String? {
@@ -461,18 +577,49 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    private static func migrateFileTypeRuleToExtension(_ storedRule: FileOpenRule) -> FileOpenRule {
+        guard storedRule.matchKind == .fileType,
+              let descriptor = FileIconResolver.preferredFileExtension(assetName: storedRule.fileType) else {
+            return storedRule
+        }
+        var rule = storedRule
+        rule.matchKind = .catalogExtension
+        rule.fileExtension = descriptor.fileExtension
+        rule.fileType = descriptor.assetName
+        return rule
+    }
+
     private func persistAuthenticatedLinkRules() {
         if let data = try? JSONEncoder().encode(authenticatedLinkRules) {
             defaults.set(data, forKey: Key.authenticatedLinkRules)
         }
     }
 
-    private static func normalizedFileExtension(_ value: String) -> String {
-        value.trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
-            .lowercased()
+    private static var defaultGlobalShortcut: PasteoryShortcut {
+        PasteoryShortcut(keyCode: 9, modifiers: UInt32(cmdKey | shiftKey))
     }
 
+    private func trimFileCommandLogs() {
+        guard let fileCommandLogsDirectory,
+              let urls = try? FileManager.default.contentsOfDirectory(
+                at: fileCommandLogsDirectory,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+              ), urls.count > 20 else { return }
+        let sorted = urls.sorted {
+            let left = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let right = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return left > right
+        }
+        for url in sorted.dropFirst(20) { try? FileManager.default.removeItem(at: url) }
+    }
+
+    private static let logTimestamp: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return formatter
+    }()
 
     private static var defaultQuickActionShortcuts: [QuickPanelAction: PasteoryShortcut] {
         let command = UInt32(cmdKey), option = UInt32(optionKey), shift = UInt32(shiftKey)
@@ -480,14 +627,14 @@ final class AppSettings: ObservableObject {
             .openSelected: PasteoryShortcut(keyCode: 49, modifiers: 0),
             .toggleSearch: PasteoryShortcut(keyCode: 3, modifiers: command),
             .directPaste: PasteoryShortcut(keyCode: 36, modifiers: 0),
-            .copyOnly: PasteoryShortcut(keyCode: 36, modifiers: command),
+            .copyOnly: PasteoryShortcut(keyCode: 8, modifiers: command),
             .plainTextPaste: PasteoryShortcut(keyCode: 36, modifiers: option),
-            .plainTextCopy: PasteoryShortcut(keyCode: 36, modifiers: command | option),
+            .plainTextCopy: PasteoryShortcut(keyCode: 8, modifiers: command | option),
             .toggleFavorite: PasteoryShortcut(keyCode: 3, modifiers: command | shift),
-            .togglePinned: PasteoryShortcut(keyCode: 35, modifiers: command | shift),
-            .editMetadata: PasteoryShortcut(keyCode: 14, modifiers: command | shift),
-            .setCollection: PasteoryShortcut(keyCode: 5, modifiers: command | shift),
-            .aggregateContent: PasteoryShortcut(keyCode: 46, modifiers: command | shift),
+            .togglePinned: PasteoryShortcut(keyCode: 17, modifiers: command),
+            .editMetadata: PasteoryShortcut(keyCode: 14, modifiers: command),
+            .setCollection: PasteoryShortcut(keyCode: 5, modifiers: command),
+            .aggregateContent: PasteoryShortcut(keyCode: 11, modifiers: command),
             .expandAggregation: PasteoryShortcut(keyCode: 125, modifiers: command),
             .collapseAggregation: PasteoryShortcut(keyCode: 126, modifiers: command),
             .moveToTrash: PasteoryShortcut(keyCode: 51, modifiers: command),

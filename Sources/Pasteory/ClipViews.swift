@@ -30,6 +30,7 @@ struct ClipRowView: View {
     let attachments: AttachmentStore?
     var compact = false
     var shortcutNumber: Int? = nil
+    @State private var fileIsMissing = false
 
     private var rowHeight: CGFloat { ClipRowMetrics.height(for: clip, compact: compact) }
 
@@ -98,9 +99,21 @@ struct ClipRowView: View {
             .padding(.trailing, 4)
             .padding(.bottom, 4)
         }
+        .saturation(fileIsMissing ? 0 : 1)
+        .opacity(fileIsMissing ? 0.5 : 1)
         .frame(height: rowHeight)
         .clipped()
         .modifier(ClipRowAccessibility(summary: accessibilitySummary))
+        .task(id: clip.id) {
+            guard clip.primaryKind == .file, let attachments else {
+                fileIsMissing = false
+                return
+            }
+            fileIsMissing = await ClipFilePresentationLoader.load(
+                clip: clip,
+                attachments: attachments
+            ).isMissing
+        }
     }
 
     private var timestamp: String {
@@ -170,6 +183,7 @@ struct ClipRowView: View {
                         PasteoryFileMetadataDetailsView(clip: clip, attachments: attachments, compact: compact)
                     } else {
                         Text(FileIconResolver.normalizedFileName(clip.previewText))
+                            .strikethrough(fileIsMissing)
                             .lineLimit(1)
                             .truncationMode(.middle)
                     }
@@ -219,6 +233,7 @@ struct ClipRowView: View {
                 .accessibilityHidden(true)
             Text(String(clip.displayTitle.prefix(120)))
                 .font(.system(size: compact ? 11 : 12, weight: .semibold))
+                .strikethrough(fileIsMissing)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .layoutPriority(1)

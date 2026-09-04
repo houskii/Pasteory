@@ -32,7 +32,7 @@ let package = Package(
         ),
         .testTarget(
             name: "PasteoryCoreTests",
-            dependencies: ["PasteoryCore"]
+            dependencies: ["PasteoryCore", "Pasteory"]
         )
     ]
 )

@@ -547,13 +547,61 @@ public struct SmartCondition: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+public struct SmartRuleGroup: Codable, Hashable, Identifiable, Sendable {
+    public var id: UUID
+    public var mode: RuleMatchMode
+    public var conditions: [SmartCondition]
+    public var groups: [SmartRuleGroup]
+
+    public init(
+        id: UUID = UUID(),
+        mode: RuleMatchMode = .all,
+        conditions: [SmartCondition] = [],
+        groups: [SmartRuleGroup] = []
+    ) {
+        self.id = id
+        self.mode = mode
+        self.conditions = conditions
+        self.groups = groups
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, mode, conditions, groups }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        mode = try container.decodeIfPresent(RuleMatchMode.self, forKey: .mode) ?? .all
+        conditions = try container.decodeIfPresent([SmartCondition].self, forKey: .conditions) ?? []
+        groups = try container.decodeIfPresent([SmartRuleGroup].self, forKey: .groups) ?? []
+    }
+}
+
 public struct SmartRuleSet: Codable, Hashable, Sendable {
     public var mode: RuleMatchMode
     public var conditions: [SmartCondition]
+    public var groups: [SmartRuleGroup]
 
-    public init(mode: RuleMatchMode = .all, conditions: [SmartCondition] = []) {
+    public init(
+        mode: RuleMatchMode = .all,
+        conditions: [SmartCondition] = [],
+        groups: [SmartRuleGroup] = []
+    ) {
         self.mode = mode
-        self.conditions = Array(conditions.prefix(10))
+        self.conditions = conditions
+        self.groups = groups
+    }
+
+    private enum CodingKeys: String, CodingKey { case mode, conditions, groups }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        mode = try container.decodeIfPresent(RuleMatchMode.self, forKey: .mode) ?? .all
+        conditions = try container.decodeIfPresent([SmartCondition].self, forKey: .conditions) ?? []
+        groups = try container.decodeIfPresent([SmartRuleGroup].self, forKey: .groups) ?? []
+    }
+
+    public var rootGroup: SmartRuleGroup {
+        SmartRuleGroup(mode: mode, conditions: conditions, groups: groups)
     }
 }
 

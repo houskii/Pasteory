@@ -10,6 +10,75 @@ public struct FileIconDescriptor: Equatable, Sendable {
     }
 }
 
+public struct FileTypeDescriptor: Identifiable, Equatable, Sendable {
+    public var assetName: String
+    public var displayName: String
+    public var label: String
+    public var fileExtensions: [String]
+    public var exactFileNames: [String]
+
+    public var id: String { assetName }
+
+    public var suffixSummary: String {
+        let values = fileExtensions.map { ".\($0)" } + exactFileNames
+        guard !values.isEmpty else { return label }
+        let visible = values.prefix(4).joined(separator: " · ")
+        return values.count > 4 ? visible + " · …" : visible
+    }
+
+    public var primaryPattern: String {
+        if let fileExtension = fileExtensions.first { return ".\(fileExtension)" }
+        if let exactFileName = exactFileNames.first { return exactFileName }
+        return label
+    }
+
+    public var coverageSummary: String {
+        if fileExtensions.count > 1 {
+            return "\(displayName) · 共 \(fileExtensions.count) 种后缀"
+        }
+        if fileExtensions.isEmpty, exactFileNames.count > 1 {
+            return "\(displayName) · 共 \(exactFileNames.count) 种文件名"
+        }
+        return displayName
+    }
+
+    public var sortName: String {
+        if assetName == "generic" { return "\u{10ffff}" }
+        return fileExtensions.first ?? exactFileNames.first ?? label.lowercased()
+    }
+
+    public init(
+        assetName: String,
+        displayName: String,
+        label: String,
+        fileExtensions: [String] = [],
+        exactFileNames: [String] = []
+    ) {
+        self.assetName = assetName
+        self.displayName = displayName
+        self.label = label
+        self.fileExtensions = fileExtensions
+        self.exactFileNames = exactFileNames
+    }
+}
+
+public struct FileExtensionDescriptor: Identifiable, Equatable, Sendable {
+    public var fileExtension: String
+    public var assetName: String
+    public var displayName: String
+    public var label: String
+
+    public var id: String { fileExtension }
+    public var pattern: String { ".\(fileExtension)" }
+
+    public init(fileExtension: String, assetName: String, displayName: String, label: String) {
+        self.fileExtension = fileExtension
+        self.assetName = assetName
+        self.displayName = displayName
+        self.label = label
+    }
+}
+
 public enum FileIconResolver {
     public static let allAssetNames = [
         "android-library", "android-package", "api", "archive", "arkts", "audio", "binary", "build",
@@ -19,6 +88,60 @@ public enum FileIconResolver {
         "python", "ruby", "rust", "shell", "spreadsheet", "swift", "txt", "typescript", "video", "web",
         "xcode", "xml", "yaml"
     ]
+
+    public static let allFileTypes: [FileTypeDescriptor] = allAssetNames
+        .map { assetName in
+            FileTypeDescriptor(
+                assetName: assetName,
+                displayName: assetDisplayNames[assetName] ?? assetName,
+                label: assetLabels[assetName] ?? "FILE",
+                fileExtensions: catalogExtensions(for: assetName),
+                exactFileNames: catalogExactFileNames[assetName] ?? []
+            )
+        }
+        .sorted {
+            $0.sortName.localizedStandardCompare($1.sortName) == .orderedAscending
+        }
+
+    public static let allFileExtensions: [FileExtensionDescriptor] = {
+        var mappings = extensionAssetNames
+        mappings["har"] = "harmony-package"
+        mappings["key"] = "certificate"
+        mappings["tar.gz"] = "archive"
+        mappings["perfetto-trace"] = "diagnostic"
+        return mappings.map { fileExtension, assetName in
+            FileExtensionDescriptor(
+                fileExtension: fileExtension,
+                assetName: assetName,
+                displayName: assetDisplayNames[assetName] ?? assetName,
+                label: assetLabels[assetName] ?? "FILE"
+            )
+        }
+        .sorted {
+            $0.fileExtension.localizedStandardCompare($1.fileExtension) == .orderedAscending
+        }
+    }()
+
+    public static func fileType(assetName: String) -> FileTypeDescriptor? {
+        allFileTypes.first { $0.assetName == assetName }
+    }
+
+    public static func fileExtension(_ value: String) -> FileExtensionDescriptor? {
+        let normalized = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            .lowercased()
+        return allFileExtensions.first { $0.fileExtension == normalized }
+    }
+
+    public static func preferredFileExtension(assetName: String) -> FileExtensionDescriptor? {
+        if let preferred = preferredAssetExtensions[assetName],
+           let descriptor = fileExtension(preferred) {
+            return descriptor
+        }
+        guard let first = fileType(assetName: assetName)?.fileExtensions.first else { return nil }
+        return fileExtension(first)
+    }
 
     public static func descriptor(fileName: String, uti: String? = nil) -> FileIconDescriptor {
         let normalizedName = normalizedFileName(fileName)
@@ -85,6 +208,43 @@ public enum FileIconResolver {
         return values
     }()
 
+    private static let catalogExactFileNames: [String: [String]] = [
+        "build": ["Makefile", "Dockerfile"],
+        "config": [".env", ".editorconfig"],
+        "git": [".gitignore", ".gitattributes"],
+        "lock": ["Podfile.lock", "Package.resolved"],
+        "ruby": ["Fastfile", "Gemfile"],
+        "swift": ["Package.swift"]
+    ]
+
+    private static let catalogAmbiguousExtensions: [String: [String]] = [
+        "certificate": ["key"],
+        "harmony-package": ["har"],
+        "network": ["har"],
+        "presentation": ["key"]
+    ]
+
+    private static let preferredAssetExtensions: [String: String] = [
+        "android-library": "aar", "android-package": "apk", "api": "proto", "archive": "zip",
+        "arkts": "ets", "audio": "mp3", "binary": "so", "build": "gradle", "certificate": "pem",
+        "config": "plist", "cpp": "cpp", "dart": "dart", "database": "db", "diagnostic": "crash",
+        "diff": "diff", "document": "docx", "font": "ttf", "go": "go", "harmony-package": "hap",
+        "image": "png", "installer": "dmg", "ios-package": "ipa", "java": "java",
+        "javascript": "js", "json": "json", "kotlin": "kt", "lock": "lock", "log": "log",
+        "lua": "lua", "markdown": "md", "network": "har", "objc": "m", "pdf": "pdf",
+        "presentation": "pptx", "python": "py", "ruby": "rb", "rust": "rs", "shell": "sh",
+        "spreadsheet": "xlsx", "swift": "swift", "txt": "txt", "typescript": "ts", "video": "mp4",
+        "web": "html", "xcode": "xcodeproj", "xml": "xml", "yaml": "yaml"
+    ]
+
+    private static func catalogExtensions(for assetName: String) -> [String] {
+        let direct = extensionAssetNames.compactMap { fileExtension, mappedAssetName in
+            mappedAssetName == assetName ? fileExtension : nil
+        }
+        return Array(Set(direct + (catalogAmbiguousExtensions[assetName] ?? [])))
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
     private static let extensionAssetNames: [String: String] = [
         "txt": "txt", "text": "txt",
         "md": "markdown", "markdown": "markdown",
@@ -146,5 +306,18 @@ public enum FileIconResolver {
         "json": "JSON", "kotlin": "KT", "lock": "LOCK", "log": "LOG", "lua": "LUA", "markdown": "MD", "network": "NET", "objc": "OBJ-C", "pdf": "PDF", "presentation": "PPT",
         "python": "PY", "ruby": "RB", "rust": "RS", "shell": "SH", "spreadsheet": "XLS", "swift": "SWIFT", "txt": "TXT", "typescript": "TS", "video": "VID", "web": "WEB",
         "xcode": "XCODE", "xml": "XML", "yaml": "YAML"
+    ]
+
+    private static let assetDisplayNames: [String: String] = [
+        "android-library": "Android 库", "android-package": "Android 安装包", "api": "接口定义", "archive": "压缩包",
+        "arkts": "ArkTS", "audio": "音频", "binary": "二进制", "build": "构建脚本", "certificate": "证书与密钥",
+        "config": "配置文件", "cpp": "C/C++", "dart": "Dart", "database": "数据库", "diagnostic": "诊断文件",
+        "diff": "差异文件", "document": "文档", "font": "字体", "generic": "其他文件", "git": "Git 配置",
+        "go": "Go", "harmony-package": "Harmony 安装包", "image": "图片文件", "installer": "磁盘镜像与安装包",
+        "ios-package": "Apple 安装包", "java": "Java", "javascript": "JavaScript", "json": "JSON", "kotlin": "Kotlin",
+        "lock": "依赖锁定文件", "log": "日志", "lua": "Lua", "markdown": "Markdown", "network": "网络抓包",
+        "objc": "Objective-C", "pdf": "PDF", "presentation": "演示文稿", "python": "Python", "ruby": "Ruby",
+        "rust": "Rust", "shell": "Shell 脚本", "spreadsheet": "电子表格", "swift": "Swift", "txt": "纯文本",
+        "typescript": "TypeScript", "video": "视频", "web": "网页前端", "xcode": "Xcode 工程", "xml": "XML", "yaml": "YAML"
     ]
 }

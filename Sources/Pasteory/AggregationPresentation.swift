@@ -558,7 +558,7 @@ extension AppState {
                collection.kind == .smart,
                let rules = collection.ruleSet {
                 let matches = try await repository.list(filter: .all, query: query, limit: 100_000)
-                candidates = try matches.filter { try SmartRuleEngine().matches($0, ruleSet: rules) }
+                candidates = try SmartRuleEngine().matchingItems(in: matches, ruleSet: rules)
             } else {
                 candidates = try await repository.list(filter: .collection(id), query: query, limit: 100_000)
             }
@@ -573,7 +573,7 @@ extension AppState {
            collection.kind == .smart,
            let rules = collection.ruleSet {
             let matches = try await repository.list(filter: .all, query: query, limit: 100_000)
-            candidates = try matches.filter { try SmartRuleEngine().matches($0, ruleSet: rules) }
+            candidates = try SmartRuleEngine().matchingItems(in: matches, ruleSet: rules)
         } else {
             candidates = try await repository.list(filter: libraryFilter, query: query, limit: 100_000)
         }

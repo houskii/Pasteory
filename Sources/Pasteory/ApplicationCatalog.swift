@@ -29,6 +29,7 @@ enum ApplicationCatalog {
         }
         let roots = [
             URL(fileURLWithPath: "/Applications", isDirectory: true),
+            URL(fileURLWithPath: "/System/Applications", isDirectory: true),
             FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications", isDirectory: true)
         ]
         let customURLs = (UserDefaults.standard.stringArray(forKey: customPathsKey) ?? []).map {
@@ -46,6 +47,14 @@ enum ApplicationCatalog {
 
     static func reference(for url: URL) -> ApplicationReference? {
         guard let reference = makeReference(url: url) else { return nil }
+        persistentCache?.remember(reference)
+        return reference
+    }
+
+    static func reference(forBundleIdentifier bundleIdentifier: String) -> ApplicationReference? {
+        guard !bundleIdentifier.isEmpty,
+              let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier),
+              let reference = makeReference(url: url) else { return nil }
         persistentCache?.remember(reference)
         return reference
     }
@@ -488,6 +497,7 @@ struct ApplicationSelectionControl: View {
     private var selectedApplication: ApplicationReference? {
         applications.first { $0.bundleIdentifier == bundleIdentifier }
             ?? additionalApplications.first { $0.bundleIdentifier == bundleIdentifier }
+            ?? ApplicationCatalog.reference(forBundleIdentifier: bundleIdentifier)
             ?? (bundleIdentifier.isEmpty ? nil : ApplicationReference(bundleIdentifier: bundleIdentifier, name: bundleIdentifier, url: nil))
     }
 }
