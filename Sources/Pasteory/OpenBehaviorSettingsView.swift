@@ -72,7 +72,7 @@ struct OpenBehaviorSettingsView: View {
                 HStack {
                     Spacer(minLength: 0)
                     if settings.fileCommandLogsDirectory != nil {
-                        Button("打开日志目录", systemImage: "folder") {
+                        Button("打开静默命令日志目录", systemImage: "folder") {
                             revealFileCommandLogs()
                         }
                     }
@@ -211,7 +211,7 @@ struct OpenBehaviorSettingsView: View {
                         Text(execution.startedAt.formatted(date: .omitted, time: .standard))
                             .foregroundStyle(.secondary)
                         Spacer(minLength: 0)
-                        Button("查看日志") { viewedExecution = execution }
+                        Button("查看本次命令输出") { viewedExecution = execution }
                     }
                     .font(.caption)
                 }
@@ -320,9 +320,9 @@ struct OpenBehaviorSettingsView: View {
     private var commandPresentationDescription: String {
         switch settings.fileCommandPresentation {
         case .terminalWindow:
-            "每次执行会新建一个 Terminal.app 窗口。命令完成后保留结果 3 秒，再关闭这个新窗口。首次使用需要允许 Pasteory 控制终端。"
+            "每次执行会新建一个 Terminal.app 窗口，只显示简短的启动命令和实际输出，不展开 $file、PATH 等内部参数。命令完成后保留结果 3 秒，再关闭这个新窗口。首次使用需要允许 Pasteory 控制终端。"
         case .silent:
-            "命令在后台执行，不显示窗口，也不读取 bash 或 zsh 的登录配置。输出会写入日志；需要输入或确认的交互式命令请使用终端窗口。"
+            "文件命令在后台执行，不显示窗口，也不读取 bash 或 zsh 的登录配置。命令的 stdout 和 stderr 会写入下方的静默命令日志，不包含 Pasteory App 日志。需要输入或确认的命令请使用终端窗口。"
         }
     }
 
@@ -568,7 +568,7 @@ private struct FileCommandLogViewer: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("文件命令日志").font(.title2.bold())
+                    Text("文件静默命令日志").font(.title2.bold())
                     Text(execution?.status.displayName ?? "历史日志")
                         .font(.caption)
                         .foregroundStyle(.secondary)

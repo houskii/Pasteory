@@ -11,7 +11,6 @@ struct QuickPanelView: View {
     let onCreateTextClip: () -> Void
     @FocusState private var searchFocused: Bool
     @State private var showingCollectionOverview = false
-    @State private var showingNewNormalCollection = false
     @State private var editingNormalCollection: ClipCollection?
     @State private var editingSmartCollection: ClipCollection?
     @State private var deletingCollection: ClipCollection?
@@ -52,13 +51,29 @@ struct QuickPanelView: View {
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(.quaternary, lineWidth: 1))
         .overlay {
-            if let draft = state.quickAggregationDraft {
+            if let clip = metadataEditorClip {
+                QuickMetadataEditor(
+                    state: state,
+                    clip: clip,
+                    initialField: state.quickMetadataEditorInitialField,
+                    onSave: { title, note, collectionIDs in
+                        state.updateMetadata(
+                            for: clip,
+                            title: title,
+                            note: note,
+                            collectionIDs: collectionIDs
+                        )
+                        state.dismissQuickMetadataEditor()
+                    },
+                    onCancel: { state.dismissQuickMetadataEditor() }
+                )
+            } else if let draft = state.quickAggregationDraft {
                 QuickAggregationEditor(state: state, draft: draft)
             }
         }
         .frame(minWidth: 340, idealWidth: 380, maxWidth: 520, minHeight: 480, idealHeight: 660, maxHeight: 760)
         .pasteoryTheme(state.settings.themeColor)
-        .sheet(isPresented: $showingNewNormalCollection) {
+        .sheet(isPresented: $state.quickNewNormalCollectionActive) {
             CollectionNameEditor(state: state, existing: nil)
         }
         .sheet(item: $editingNormalCollection) {
@@ -130,11 +145,19 @@ struct QuickPanelView: View {
             }
         }
         .onChange(of: showingCollectionOverview) { _, _ in updateCollectionManagerState() }
-        .onChange(of: showingNewNormalCollection) { _, _ in updateCollectionManagerState() }
+        .onChange(of: state.quickNewNormalCollectionActive) { _, _ in
+            updateCollectionManagerState()
+        }
         .onChange(of: editingNormalCollection) { _, _ in updateCollectionManagerState() }
         .onChange(of: editingSmartCollection) { _, _ in updateCollectionManagerState() }
         .onChange(of: deletingCollection) { _, _ in updateCollectionManagerState() }
         .onDisappear { state.quickCollectionManagerActive = false }
+    }
+
+    private var metadataEditorClip: Clip? {
+        guard let clipID = state.quickMetadataEditorClipID else { return nil }
+        if let clip = state.quickClips.first(where: { $0.id == clipID }) { return clip }
+        return state.aggregationMembers.values.lazy.flatMap { $0 }.first(where: { $0.id == clipID })
     }
 
     private var header: some View {
@@ -217,7 +240,7 @@ struct QuickPanelView: View {
                         onCreateText: onCreateTextClip,
                         onCreateNormal: {
                             showingCollectionOverview = false
-                            DispatchQueue.main.async { showingNewNormalCollection = true }
+                            DispatchQueue.main.async { state.quickNewNormalCollectionActive = true }
                         },
                         onCreateSmart: {
                             showingCollectionOverview = false
@@ -317,6 +340,7 @@ struct QuickPanelView: View {
     }
 
     private func selectQuickTab(_ tab: QuickTab) {
+        state.dismissQuickMetadataEditor()
         state.quickScope = tab.scope
         state.quickPresentationID = UUID()
         Task { await state.refreshQuick(resetSelection: true) }
@@ -324,7 +348,7 @@ struct QuickPanelView: View {
 
     private func updateCollectionManagerState() {
         state.quickCollectionManagerActive = showingCollectionOverview
-            || showingNewNormalCollection
+            || state.quickNewNormalCollectionActive
             || editingNormalCollection != nil
             || editingSmartCollection != nil
             || deletingCollection != nil
@@ -645,7 +669,12 @@ private struct QuickCollectionOverview: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 3) {
-                actionButton("新建分组", symbol: "folder.badge.plus", action: onCreateNormal)
+                actionButton(
+                    "新建分组",
+                    symbol: "folder.badge.plus",
+                    shortcut: state.settings.quickShortcut(for: .createCollection),
+                    action: onCreateNormal
+                )
                 actionButton("新建智能分组", symbol: "sparkles", action: onCreateSmart)
                 Divider().padding(.vertical, 3)
                 actionButton("新建文本内容", symbol: "doc.badge.plus", action: onCreateText)
@@ -655,6 +684,7 @@ private struct QuickCollectionOverview: View {
         .frame(width: 340)
         .pasteoryTheme(state.settings.themeColor)
         .focusable()
+        .focusEffectDisabled()
         .focused($overviewFocused)
         .onAppear {
             highlightedScope = state.quickScope
@@ -749,12 +779,22 @@ private struct QuickCollectionOverview: View {
         .buttonStyle(.plain)
     }
 
-    private func actionButton(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+    private func actionButton(
+        _ title: String,
+        symbol: String,
+        shortcut: PasteoryShortcut? = nil,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             HStack(spacing: 9) {
                 Image(systemName: symbol).frame(width: 18)
                 Text(title)
                 Spacer()
+                if let shortcut {
+                    Text(ShortcutFormatter.display(keyCode: shortcut.keyCode, modifiers: shortcut.modifiers))
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                }
             }
             .font(.system(size: 12.5, weight: .medium))
             .foregroundStyle(state.settings.themeColor.accentColor)
@@ -847,7 +887,7 @@ struct QuickCommandHelpView: View {
                 "整理当前项目",
                 actions: [
                     .toggleFavorite, .togglePinned, .editMetadata, .setCollection,
-                    .aggregateContent, .expandAggregation, .collapseAggregation, .moveToTrash
+                    .createCollection, .aggregateContent, .expandAggregation, .collapseAggregation, .moveToTrash
                 ]
             )
             commandHelpSection("窗口与页面", actions: [.openLibrary, .openSettings, .closePanel])
@@ -902,15 +942,14 @@ private struct QuickClipCard: View {
     let parentAggregationID: UUID?
     let shortcutNumber: Int?
     let onCopy: (Clip, Bool, Bool) -> Void
-    @State private var showMetadataEditor = false
-    @State private var showCollectionPicker = false
 
     var body: some View {
         ClipRowView(
             clip: clip,
             attachments: state.attachments,
             compact: true,
-            shortcutNumber: state.quickCommandKeyDown ? shortcutNumber : nil
+            shortcutNumber: state.quickCommandKeyDown ? shortcutNumber : nil,
+            filePresentationRefreshID: state.quickPresentationID
         )
             .padding(.horizontal, 12)
             .frame(height: ClipRowMetrics.height(for: clip, compact: true))
@@ -940,34 +979,6 @@ private struct QuickClipCard: View {
                 guard !state.quickMultiSelectActive else { return }
                 onCopy(clip, false, true)
             })
-            .popover(isPresented: $showMetadataEditor, arrowEdge: .trailing) {
-                QuickMetadataEditor(
-                    state: state,
-                    clip: clip,
-                    onSave: { title, note in
-                        state.updateMetadata(for: clip, title: title, note: note)
-                        showMetadataEditor = false
-                    },
-                    onCancel: { showMetadataEditor = false }
-                )
-            }
-            .popover(isPresented: $showCollectionPicker, arrowEdge: .trailing) {
-                QuickCollectionPicker(
-                    state: state,
-                    clipID: clip.id,
-                    onDone: { showCollectionPicker = false }
-                )
-            }
-            .onChange(of: state.quickMetadataEditorOpenRequestID) { _, request in
-                guard request != nil, isSelected else { return }
-                showCollectionPicker = false
-                showMetadataEditor = true
-            }
-            .onChange(of: state.quickCollectionPickerOpenRequestID) { _, request in
-                guard request != nil, isSelected else { return }
-                showMetadataEditor = false
-                showCollectionPicker = true
-            }
             .contextMenu {
                 Button("直接粘贴") { onCopy(clip, false, true) }
                     .quickActionShortcut(state.settings.quickShortcut(for: .directPaste))
@@ -982,22 +993,13 @@ private struct QuickClipCard: View {
                     .quickActionShortcut(state.settings.quickShortcut(for: .toggleFavorite))
                 Button(clip.isPinned ? "取消置顶" : "置顶") { state.togglePinned(clip) }
                     .quickActionShortcut(state.settings.quickShortcut(for: .togglePinned))
-                Button("编辑信息…") { showMetadataEditor = true }
+                Button("编辑信息…") {
+                    state.presentQuickMetadataEditor(for: clip.id, initialField: .title)
+                }
                     .quickActionShortcut(state.settings.quickShortcut(for: .editMetadata))
-                Menu {
-                    let groups = state.collections.filter { $0.kind == .normal }
-                    if groups.isEmpty {
-                        Text("还没有普通分组")
-                    } else {
-                        ForEach(groups) { collection in
-                            Button {
-                                state.toggleCollection(collection, for: clip)
-                            } label: {
-                                Label(collection.name, systemImage: clip.collectionIDs.contains(collection.id) ? "checkmark" : "folder")
-                            }
-                        }
-                    }
-                } label: { Text("设置分组") }
+                Button("设置分组…") {
+                    state.presentQuickMetadataEditor(for: clip.id, initialField: .collections)
+                }
                     .quickActionShortcut(state.settings.quickShortcut(for: .setCollection))
                 Button("聚合内容…") {
                     state.quickSelectionID = clip.id
@@ -1019,6 +1021,7 @@ private struct QuickClipCard: View {
     }
 
     private var isSelected: Bool { state.quickSelectionID == clip.id }
+
 }
 
 private struct QuickAggregationCard: View {
@@ -1304,58 +1307,6 @@ extension PasteoryShortcut {
     }
 }
 
-private struct QuickCollectionPicker: View {
-    @ObservedObject var state: AppState
-    let clipID: UUID
-    let onDone: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("设置分组").font(.headline)
-            let groups = state.collections.filter { $0.kind == .normal }
-            if groups.isEmpty {
-                ContentUnavailableView("还没有普通分组", systemImage: "folder")
-                    .frame(height: 120)
-            } else {
-                ScrollView {
-                    VStack(spacing: 4) {
-                        ForEach(groups) { collection in
-                            Button {
-                                guard let current = state.quickClips.first(where: { $0.id == clipID }) else { return }
-                                state.toggleCollection(collection, for: current)
-                            } label: {
-                                HStack {
-                                    Image(systemName: selectedCollectionIDs.contains(collection.id) ? "checkmark.circle.fill" : "circle")
-                                        .foregroundStyle(selectedCollectionIDs.contains(collection.id) ? state.settings.themeColor.accentColor : Color.secondary)
-                                    Text(collection.name).lineLimit(1)
-                                    Spacer()
-                                }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .padding(.vertical, 5)
-                        }
-                    }
-                }
-                .frame(maxHeight: 220)
-            }
-            HStack { Spacer(); Button("完成", action: onDone).keyboardShortcut(.defaultAction) }
-        }
-        .padding(16)
-        .frame(width: 300)
-        .onAppear { state.quickCollectionPickerActive = true }
-        .onDisappear { state.quickCollectionPickerActive = false }
-        .onChange(of: state.quickCollectionPickerDismissRequestID) { _, request in
-            guard request != nil else { return }
-            onDone()
-        }
-    }
-
-    private var selectedCollectionIDs: Set<UUID> {
-        state.quickClips.first(where: { $0.id == clipID })?.collectionIDs ?? []
-    }
-}
-
 private struct QuickAggregationCollectionPicker: View {
     @ObservedObject var state: AppState
     let aggregation: ClipAggregation
@@ -1408,122 +1359,347 @@ private struct QuickAggregationCollectionPicker: View {
 }
 
 private struct QuickMetadataEditor: View {
-    private enum EditorField: Hashable {
-        case title
-        case note
-    }
-
     @ObservedObject var state: AppState
     let clip: Clip
-    let onSave: (String, String) -> Void
+    let initialField: QuickMetadataEditorField
+    let onSave: (String, String, Set<UUID>) -> Void
     let onCancel: () -> Void
     @State private var title: String
     @State private var note: String
+    @State private var selectedCollectionIDs: Set<UUID>
+    @State private var highlightedCollectionID: UUID?
     @State private var captureEvents = [ClipCaptureEvent]()
-    @FocusState private var focusedField: EditorField?
+    @FocusState private var focusedField: QuickMetadataEditorField?
 
-    init(state: AppState, clip: Clip, onSave: @escaping (String, String) -> Void, onCancel: @escaping () -> Void) {
+    init(
+        state: AppState,
+        clip: Clip,
+        initialField: QuickMetadataEditorField,
+        onSave: @escaping (String, String, Set<UUID>) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
         self.state = state
         self.clip = clip
+        self.initialField = initialField
         self.onSave = onSave
         self.onCancel = onCancel
         _title = State(initialValue: clip.title)
         _note = State(initialValue: clip.note)
+        _selectedCollectionIDs = State(initialValue: clip.collectionIDs)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("编辑信息").font(.headline)
-            VStack(alignment: .leading, spacing: 5) {
-                HStack { Text("标题"); Spacer(); Text("\(title.count)/120").foregroundStyle(.tertiary) }
-                    .font(.caption)
-                TextField("可选标题", text: Binding(get: { title }, set: { title = String($0.prefix(120)) }))
-                    .textFieldStyle(.roundedBorder)
-                    .focused($focusedField, equals: .title)
-                    .onKeyPress(.tab) {
-                        focusedField = .note
-                        return .handled
-                    }
-            }
-            VStack(alignment: .leading, spacing: 5) {
-                HStack { Text("备注"); Spacer(); Text("\(note.count)/4000").foregroundStyle(.tertiary) }
-                    .font(.caption)
-                TextEditor(text: Binding(get: { note }, set: { note = String($0.prefix(4_000)) }))
-                    .frame(height: 90)
-                    .padding(6)
-                    .focused($focusedField, equals: .note)
-                    .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 7)
-                            .stroke(
-                                focusedField == .note ? state.settings.themeColor.accentColor : Color(nsColor: .quaternaryLabelColor),
-                                lineWidth: focusedField == .note ? 2 : 1
-                            )
-                    }
-            }
-            Divider()
-            VStack(alignment: .leading, spacing: 7) {
-                HStack {
-                    Text("抓取的来源信息").font(.subheadline.weight(.semibold))
-                    Spacer()
-                    if captureEvents.count > 1 {
-                        Text("共 \(captureEvents.count) 次复制").font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                if let event = captureEvents.first, let context = event.context {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(context.summary).font(.caption.weight(.medium)).textSelection(.enabled)
-                            Text(event.capturedAt.formatted(date: .abbreviated, time: .standard))
-                                .font(.caption2).foregroundStyle(.secondary)
-                            sourceContextRow("网页链接", value: context.payload["url"])
-                            sourceContextRow("页面标题", value: context.payload["pageTitle"])
-                            sourceContextRow("对话类型", value: context.payload["conversationTypeName"])
-                            sourceContextRow("对话标题", value: context.payload["conversationName"])
-                            sourceContextRow("仓库", value: context.payload["repository"])
-                            sourceContextRow("分支", value: context.payload["branch"])
-                            sourceContextRow("目标分支", value: context.payload["targetBranch"])
-                            sourceContextRow("选中内容", value: context.payload["selectedText"])
-                            sourceContextRow("关联文字", value: context.payload["relatedText"])
-                            sourceContextRow("元素", value: context.payload["elementSelector"])
+        GeometryReader { geometry in
+            let cardWidth = max(300, min(430, geometry.size.width - 24))
+            let cardHeight = max(420, min(620, geometry.size.height - 24))
+            ZStack {
+                Color.black.opacity(0.18)
+                    .ignoresSafeArea()
+
+                VStack(spacing: 0) {
+                    HStack {
+                        Text("编辑信息").font(.headline)
+                        Spacer()
+                        Button(action: onCancel) {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.tertiary)
                         }
+                        .buttonStyle(.plain)
+                        .help("取消编辑")
+                    }
+                    .padding(.horizontal, 16)
+                    .frame(height: 44)
+
+                    Divider()
+
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 12) {
+                            titleEditor
+                            noteEditor
+                            Divider()
+                            collectionEditor
+                            Divider()
+                            sourceContextEditor
+                        }
+                        .padding(16)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .frame(maxHeight: 150)
-                } else if captureEvents.isEmpty {
-                    Text("这条剪辑没有单独保存的来源上下文。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("本次复制只记录了来源应用，没有获取到更详细的上下文。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Tab / Shift-Tab 切换 · ↑↓ 选择 · Space 勾选")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(2)
+                        HStack {
+                            Spacer()
+                            Button("取消", action: onCancel)
+                            Button("保存") { save() }.keyboardShortcut(.defaultAction)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
                 }
-                Text("这里是自动抓取的只读数据，不会写入上面的标题和备注。")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                .frame(width: cardWidth, height: cardHeight)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color(nsColor: .separatorColor).opacity(0.65), lineWidth: 1)
+                }
+                .shadow(radius: 18, y: 8)
             }
-            HStack {
-                Spacer()
-                Button("保存") { onSave(title, note) }.keyboardShortcut(.defaultAction)
-            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .padding(16)
-        .frame(width: 430)
         .task(id: clip.id) { captureEvents = await state.captureEvents(for: clip) }
         .onAppear {
             state.quickMetadataEditorActive = true
-            DispatchQueue.main.async { focusedField = .title }
+            if highlightedCollectionID == nil {
+                highlightedCollectionID = normalCollections.first(where: { selectedCollectionIDs.contains($0.id) })?.id
+                    ?? normalCollections.first?.id
+            }
+            DispatchQueue.main.async {
+                let target = initialField == .collections && normalCollections.isEmpty ? .title : initialField
+                state.quickMetadataEditorFocusedField = target
+                focusedField = target
+            }
         }
         .onDisappear { state.quickMetadataEditorActive = false }
+        .onChange(of: focusedField) { _, field in
+            if let field { state.quickMetadataEditorFocusedField = field }
+        }
+        .onChange(of: state.quickMetadataEditorKeyCommand) { _, command in
+            guard let command else { return }
+            switch command {
+            case .moveFocus(_, let backwards):
+                moveFocus(from: focusedField ?? state.quickMetadataEditorFocusedField, backwards: backwards)
+            case .moveCollection(_, let offset):
+                focusedField = .collections
+                state.quickMetadataEditorFocusedField = .collections
+                moveCollectionHighlight(by: offset)
+            case .toggleCollection:
+                focusedField = .collections
+                state.quickMetadataEditorFocusedField = .collections
+                toggleHighlightedCollection()
+            }
+        }
         .onChange(of: state.quickMetadataEditorCommitRequestID) { _, request in
             guard request != nil else { return }
-            onSave(title, note)
+            save()
         }
         .onChange(of: state.quickMetadataEditorDismissRequestID) { _, request in
             guard request != nil else { return }
             onCancel()
         }
+    }
+
+    private var titleEditor: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack { Text("标题"); Spacer(); Text("\(title.count)/120").foregroundStyle(.tertiary) }
+                .font(.caption)
+            TextField("可选标题", text: Binding(get: { title }, set: { title = String($0.prefix(120)) }))
+                .textFieldStyle(.roundedBorder)
+                .focused($focusedField, equals: .title)
+                .onKeyPress(keys: [.tab]) { press in
+                    moveFocus(from: .title, backwards: press.modifiers.contains(.shift))
+                    return .handled
+                }
+        }
+    }
+
+    private var noteEditor: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack { Text("备注"); Spacer(); Text("\(note.count)/4000").foregroundStyle(.tertiary) }
+                .font(.caption)
+            TextEditor(text: Binding(get: { note }, set: { note = String($0.prefix(4_000)) }))
+                .frame(height: 90)
+                .padding(6)
+                .focused($focusedField, equals: .note)
+                .onKeyPress(keys: [.tab]) { press in
+                    moveFocus(from: .note, backwards: press.modifiers.contains(.shift))
+                    return .handled
+                }
+                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 7)
+                        .stroke(
+                            focusedField == .note ? state.settings.themeColor.accentColor : Color(nsColor: .quaternaryLabelColor),
+                            lineWidth: focusedField == .note ? 2 : 1
+                        )
+                }
+        }
+    }
+
+    private var sourceContextEditor: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Text("抓取的来源信息").font(.subheadline.weight(.semibold))
+                Spacer()
+                if captureEvents.count > 1 {
+                    Text("共 \(captureEvents.count) 次复制").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if let event = captureEvents.first, let context = event.context {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(context.summary).font(.caption.weight(.medium)).textSelection(.enabled)
+                    Text(event.capturedAt.formatted(date: .abbreviated, time: .standard))
+                        .font(.caption2).foregroundStyle(.secondary)
+                    sourceContextRow("网页链接", value: context.payload["url"])
+                    sourceContextRow("页面标题", value: context.payload["pageTitle"])
+                    sourceContextRow("对话类型", value: context.payload["conversationTypeName"])
+                    sourceContextRow("对话标题", value: context.payload["conversationName"])
+                    sourceContextRow("仓库", value: context.payload["repository"])
+                    sourceContextRow("分支", value: context.payload["branch"])
+                    sourceContextRow("目标分支", value: context.payload["targetBranch"])
+                    sourceContextRow("选中内容", value: context.payload["selectedText"])
+                    sourceContextRow("关联文字", value: context.payload["relatedText"])
+                    sourceContextRow("元素", value: context.payload["elementSelector"])
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else if captureEvents.isEmpty {
+                Text("这条剪辑没有单独保存的来源上下文。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("本次复制只记录了来源应用，没有获取到更详细的上下文。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Text("这里是自动抓取的只读数据，不会写入上面的标题和备注。")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    private var normalCollections: [ClipCollection] {
+        state.collections.filter { $0.kind == .normal }
+    }
+
+    @ViewBuilder
+    private var collectionEditor: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("分组")
+                Spacer()
+                Text(selectedCollectionCountText).foregroundStyle(.tertiary)
+            }
+            .font(.caption)
+
+            if normalCollections.isEmpty {
+                Label("还没有普通分组", systemImage: "folder")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 3) {
+                            ForEach(normalCollections) { collection in
+                                collectionRow(collection)
+                                    .id(collection.id)
+                            }
+                        }
+                        .padding(4)
+                    }
+                    .onChange(of: highlightedCollectionID) { _, id in
+                        guard let id else { return }
+                        withAnimation(.easeOut(duration: 0.12)) { proxy.scrollTo(id, anchor: .center) }
+                    }
+                }
+                .frame(maxHeight: 142)
+                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color(nsColor: .quaternaryLabelColor), lineWidth: 1)
+                }
+                .focusable()
+                .focusEffectDisabled()
+                .focused($focusedField, equals: .collections)
+                .onKeyPress(keys: [.tab]) { press in
+                    moveFocus(from: .collections, backwards: press.modifiers.contains(.shift))
+                    return .handled
+                }
+                .onKeyPress(.upArrow) {
+                    moveCollectionHighlight(by: -1)
+                    return .handled
+                }
+                .onKeyPress(.downArrow) {
+                    moveCollectionHighlight(by: 1)
+                    return .handled
+                }
+                .onKeyPress(.space) {
+                    toggleHighlightedCollection()
+                    return .handled
+                }
+            }
+        }
+    }
+
+    private func collectionRow(_ collection: ClipCollection) -> some View {
+        let selected = selectedCollectionIDs.contains(collection.id)
+        let highlighted = focusedField == .collections && highlightedCollectionID == collection.id
+        return Button {
+            highlightedCollectionID = collection.id
+            selectedCollectionIDs = QuickMetadataEditorNavigation.toggled(collection.id, in: selectedCollectionIDs)
+            focusedField = .collections
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(selected || highlighted ? state.settings.themeColor.accentColor : Color.secondary)
+                Image(systemName: "folder")
+                    .foregroundStyle(.secondary)
+                Text(collection.name).lineLimit(1)
+                Spacer(minLength: 8)
+            }
+            .font(.system(size: 12.5, weight: selected ? .semibold : .regular))
+            .padding(.horizontal, 8)
+            .frame(height: 30)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                highlighted
+                    ? state.settings.themeColor.accentColor.opacity(0.14)
+                    : (selected ? state.settings.themeColor.accentColor.opacity(0.07) : Color.clear),
+                in: RoundedRectangle(cornerRadius: 7)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focusable(false)
+    }
+
+    private var selectedCollectionCountText: String {
+        let count = normalCollections.lazy.filter { selectedCollectionIDs.contains($0.id) }.count
+        return count == 0 ? "未选择" : "已选择 \(count) 个"
+    }
+
+    private func moveFocus(from field: QuickMetadataEditorField, backwards: Bool) {
+        focusedField = QuickMetadataEditorNavigation.nextField(
+            from: field,
+            backwards: backwards,
+            hasCollections: !normalCollections.isEmpty
+        )
+    }
+
+    private func moveCollectionHighlight(by offset: Int) {
+        highlightedCollectionID = QuickMetadataEditorNavigation.nextCollection(
+            in: normalCollections.map(\.id),
+            currentID: highlightedCollectionID,
+            offset: offset
+        )
+    }
+
+    private func toggleHighlightedCollection() {
+        guard let highlightedCollectionID else { return }
+        selectedCollectionIDs = QuickMetadataEditorNavigation.toggled(
+            highlightedCollectionID,
+            in: selectedCollectionIDs
+        )
+    }
+
+    private func save() {
+        onSave(title, note, selectedCollectionIDs)
     }
 
     @ViewBuilder

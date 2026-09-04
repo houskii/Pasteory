@@ -61,12 +61,16 @@ final class AppState: ObservableObject {
     @Published var undoableAggregation: ClipAggregation?
     var quickHoveredClipID: UUID?
     @Published var quickMetadataEditorActive = false
-    @Published var quickMetadataEditorOpenRequestID: UUID?
+    @Published var quickMetadataEditorClipID: UUID?
     @Published var quickMetadataEditorCommitRequestID: UUID?
     @Published var quickMetadataEditorDismissRequestID: UUID?
+    @Published var quickMetadataEditorInitialField: QuickMetadataEditorField = .title
+    @Published var quickMetadataEditorFocusedField: QuickMetadataEditorField = .title
+    @Published var quickMetadataEditorKeyCommand: QuickMetadataEditorKeyCommand?
     @Published var quickCollectionPickerActive = false
     @Published var quickCollectionPickerOpenRequestID: UUID?
     @Published var quickCollectionPickerDismissRequestID: UUID?
+    @Published var quickNewNormalCollectionActive = false
     @Published var quickCollectionManagerActive = false
     @Published var statusMessage: String?
     @Published var statusKind: AppStatusKind = .info
@@ -521,14 +525,36 @@ final class AppState: ObservableObject {
         let tabs = quickTabs
         guard !tabs.isEmpty else { return }
         let current = tabs.firstIndex(where: { $0.scope == quickScope }) ?? 0
-        let next = min(max(current + offset, 0), tabs.count - 1)
+        guard let next = QuickPanelNavigation.wrappedIndex(
+            current: current,
+            offset: offset,
+            count: tabs.count
+        ) else { return }
         guard tabs[next].scope != quickScope else { return }
+        dismissQuickMetadataEditor()
         quickScope = tabs[next].scope
 #if DEBUG
         print("quick-scope-index=\(next)")
 #endif
         quickPresentationID = UUID()
         await refreshQuick(resetSelection: true)
+    }
+
+    func presentQuickMetadataEditor(for clipID: UUID, initialField: QuickMetadataEditorField) {
+        quickSelectionID = clipID
+        quickSelectedAggregationID = nil
+        quickMetadataEditorInitialField = initialField
+        quickMetadataEditorFocusedField = initialField
+        quickMetadataEditorClipID = clipID
+    }
+
+    func dismissQuickMetadataEditor() {
+        quickMetadataEditorClipID = nil
+        quickMetadataEditorActive = false
+        quickMetadataEditorFocusedField = .title
+        quickMetadataEditorKeyCommand = nil
+        quickMetadataEditorCommitRequestID = nil
+        quickMetadataEditorDismissRequestID = nil
     }
 
     func refreshLibrary(debounce: Bool = false) async {
@@ -654,10 +680,20 @@ final class AppState: ObservableObject {
         }
     }
 
-    func updateMetadata(for clip: Clip, title: String, note: String) {
+    func updateMetadata(
+        for clip: Clip,
+        title: String,
+        note: String,
+        collectionIDs: Set<UUID>? = nil
+    ) {
+        let editableCollectionIDs = Set(collections.filter { $0.kind == .normal }.map(\.id))
         mutate(clip) { value in
             value.title = String(title.prefix(120))
             value.note = String(note.prefix(4_000))
+            if let collectionIDs {
+                value.collectionIDs.subtract(editableCollectionIDs)
+                value.collectionIDs.formUnion(collectionIDs.intersection(editableCollectionIDs))
+            }
         }
     }
 

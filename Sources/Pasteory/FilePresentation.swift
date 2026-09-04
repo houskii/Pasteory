@@ -57,20 +57,15 @@ struct LoadedImagePresentation: Equatable, Sendable {
 
 enum PasteboardFileURLDecoder {
     static func decode(_ data: Data, uti: String) -> URL? {
-        if uti == "NSFilenamesPboardType",
-           let paths = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String],
-           let path = paths.first {
-            return URL(fileURLWithPath: path)
-        }
-        guard let value = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !value.isEmpty else { return nil }
-        if uti == "public.file-url", value.hasPrefix("/") { return URL(fileURLWithPath: value) }
-        return URL(string: value)
+        decodeAll(data, uti: uti).first
+    }
+
+    static func decodeAll(_ data: Data, uti: String) -> [URL] {
+        FileReferenceDecoder.urls(from: data, uti: uti)
     }
 
     static func resolvedPathURL(_ url: URL) -> URL {
-        guard url.isFileURL else { return url }
-        return (url as NSURL).filePathURL ?? url
+        FileReferenceDecoder.resolvedFileURL(url)
     }
 }
 
@@ -88,30 +83,77 @@ enum ClipFilePresentationLoader {
     }
 
     static func load(clip: Clip, attachments: AttachmentStore) async -> LoadedFilePresentation {
-        let fallback = fallback(for: clip)
-        let fileRepresentations = clip.items
-            .sorted(by: { $0.order < $1.order })
-            .flatMap(\.representations)
-            .filter { $0.uti == "public.file-url" || $0.uti == "NSFilenamesPboardType" }
+        await loadAll(clip: clip, attachments: attachments).first ?? fallback(for: clip)
+    }
 
-        for representation in fileRepresentations {
-            guard let data = try? await attachments.data(for: representation),
-                  let encodedURL = PasteboardFileURLDecoder.decode(data, uti: representation.uti) else { continue }
-            let url = PasteboardFileURLDecoder.resolvedPathURL(encodedURL)
-            let exists = FileManager.default.fileExists(atPath: url.path)
-            let values = exists
-                ? try? url.resourceValues(forKeys: [.nameKey, .fileSizeKey, .typeIdentifierKey, .isDirectoryKey])
-                : nil
-            return LoadedFilePresentation(
-                name: values?.name ?? (url.lastPathComponent.isEmpty ? fallback.name : url.lastPathComponent),
-                path: url.path.isEmpty ? nil : url.deletingLastPathComponent().path,
-                byteCount: values?.fileSize,
-                uti: values?.typeIdentifier,
-                isDirectory: values?.isDirectory == true,
-                exists: exists
-            )
+    static func loadAll(clip: Clip, attachments: AttachmentStore) async -> [LoadedFilePresentation] {
+        var result = [LoadedFilePresentation]()
+        let metadata = clip.effectiveFileMetadata
+        for item in clip.items.sorted(by: { $0.order < $1.order }) {
+            for representation in item.representations.sorted(by: { $0.uti < $1.uti })
+            where representation.uti == "public.file-url" || representation.uti == "NSFilenamesPboardType" {
+                guard let data = try? await attachments.data(for: representation) else { continue }
+                let urls = PasteboardFileURLDecoder.decodeAll(data, uti: representation.uti)
+                guard !urls.isEmpty else { continue }
+                for url in urls {
+                    let index = result.count
+                    let fallbackName: String? = metadata.flatMap {
+                        $0.fileNames.indices.contains(index) ? $0.fileNames[index] : nil
+                    }
+                    let fallbackPath: String? = metadata.flatMap { metadata in
+                        guard let paths = metadata.filePaths, paths.indices.contains(index) else { return nil }
+                        return paths[index]
+                    }
+                    result.append(presentation(
+                        for: url,
+                        fallbackName: fallbackName,
+                        fallbackPath: fallbackPath
+                    ))
+                }
+                break
+            }
         }
-        return fallback
+        if !result.isEmpty { return result }
+        return clip.effectiveFileMetadata?.fileNames.map { name in
+            LoadedFilePresentation(
+                name: name,
+                path: nil,
+                byteCount: nil,
+                uti: nil,
+                isDirectory: false,
+                exists: nil
+            )
+        } ?? [fallback(for: clip)]
+    }
+
+    private static func presentation(
+        for encodedURL: URL,
+        fallbackName: String?,
+        fallbackPath: String?
+    ) -> LoadedFilePresentation {
+        let resolvedURL = PasteboardFileURLDecoder.resolvedPathURL(encodedURL)
+        let url = if !resolvedURL.path.isEmpty,
+                     !FileReferenceDecoder.isOpaqueFileReference(resolvedURL) {
+            resolvedURL
+        } else if let fallbackPath, !fallbackPath.isEmpty {
+            URL(fileURLWithPath: fallbackPath)
+        } else {
+            resolvedURL
+        }
+        let exists = !url.path.isEmpty && FileManager.default.fileExists(atPath: url.path)
+        let values = exists
+            ? try? url.resourceValues(forKeys: [.nameKey, .fileSizeKey, .typeIdentifierKey, .isDirectoryKey])
+            : nil
+        return LoadedFilePresentation(
+            name: values?.name
+                ?? fallbackName
+                ?? (url.lastPathComponent.isEmpty ? "未命名文件" : url.lastPathComponent),
+            path: url.path.isEmpty ? nil : url.deletingLastPathComponent().path,
+            byteCount: values?.fileSize,
+            uti: values?.typeIdentifier,
+            isDirectory: values?.isDirectory == true,
+            exists: exists
+        )
     }
 }
 
@@ -310,20 +352,103 @@ struct PasteoryFileIconView: View {
     }
 }
 
+struct PasteoryMultiFileIconView: View {
+    let fileNames: [String]
+    let accentColor: Color
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            ZStack {
+                ForEach(Array(fileNames.prefix(3).enumerated()), id: \.offset) { index, name in
+                    PasteoryFileIconView(fileName: name)
+                        .frame(width: 38, height: 38)
+                        .offset(x: CGFloat(index) * 5 - 5, y: CGFloat(index) * -3 + 3)
+                }
+            }
+            Text("\(fileNames.count)")
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 5)
+                .frame(minHeight: 17)
+                .background(accentColor, in: Capsule())
+        }
+        .accessibilityLabel("\(fileNames.count) 个文件")
+    }
+}
+
 struct PasteoryFileMetadataDetailsView: View {
     let clip: Clip
     let attachments: AttachmentStore
     var compact = false
+    var refreshID: UUID? = nil
     @State private var presentation: LoadedFilePresentation
+    @State private var presentations: [LoadedFilePresentation] = []
 
-    init(clip: Clip, attachments: AttachmentStore, compact: Bool = false) {
+    init(clip: Clip, attachments: AttachmentStore, compact: Bool = false, refreshID: UUID? = nil) {
         self.clip = clip
         self.attachments = attachments
         self.compact = compact
+        self.refreshID = refreshID
         _presentation = State(initialValue: ClipFilePresentationLoader.fallback(for: clip))
     }
 
     var body: some View {
+        Group {
+            if let metadata = clip.effectiveFileMetadata, metadata.isMultiple {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(metadata.displayName)
+                            .font(.system(size: compact ? 12 : 13, weight: .semibold))
+                            .strikethrough(allFilesMissing)
+                        if missingFileCount > 0 {
+                            Text(allFilesMissing ? "已删除" : "\(missingFileCount) 个已删除")
+                                .font(.system(size: compact ? 8.5 : 9.5, weight: .semibold))
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(Color.secondary.opacity(0.12), in: Capsule())
+                                .fixedSize()
+                        }
+                    }
+                    Text(metadata.namesSummary)
+                        .font(.system(size: compact ? 9.5 : 10.5))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(metadata.fileNames.joined(separator: "\n"))
+                }
+                .opacity(allFilesMissing ? 0.5 : 1)
+            } else {
+                singleFileBody
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .task(id: refreshTaskID) {
+            await refresh()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await refresh() }
+        }
+    }
+
+    private var refreshTaskID: String {
+        "\(clip.id.uuidString):\(refreshID?.uuidString ?? "static")"
+    }
+
+    private var missingFileCount: Int {
+        presentations.filter(\.isMissing).count
+    }
+
+    private var allFilesMissing: Bool {
+        !presentations.isEmpty && presentations.allSatisfy(\.isMissing)
+    }
+
+    private func refresh() async {
+        let loaded = await ClipFilePresentationLoader.loadAll(clip: clip, attachments: attachments)
+        presentations = loaded
+        if let first = loaded.first { presentation = first }
+    }
+
+    private var singleFileBody: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
                 Text(presentation.name)
@@ -358,10 +483,6 @@ struct PasteoryFileMetadataDetailsView: View {
             .foregroundStyle(.secondary)
         }
         .opacity(presentation.isMissing ? 0.5 : 1)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .task(id: clip.id) {
-            presentation = await ClipFilePresentationLoader.load(clip: clip, attachments: attachments)
-        }
     }
 }
 
@@ -369,14 +490,37 @@ struct PasteoryFileDetailPreview: View {
     let clip: Clip
     let attachments: AttachmentStore
     @State private var presentation: LoadedFilePresentation
+    @State private var presentations: [LoadedFilePresentation]
 
     init(clip: Clip, attachments: AttachmentStore) {
         self.clip = clip
         self.attachments = attachments
         _presentation = State(initialValue: ClipFilePresentationLoader.fallback(for: clip))
+        _presentations = State(initialValue: [])
     }
 
     var body: some View {
+        Group {
+            if clip.effectiveFileMetadata?.isMultiple == true {
+                multipleFileBody
+            } else {
+                singleFileBody
+            }
+        }
+        .task(id: clip.id) {
+            await refresh()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await refresh() }
+        }
+    }
+
+    private func refresh() async {
+        presentations = await ClipFilePresentationLoader.loadAll(clip: clip, attachments: attachments)
+        if let first = presentations.first { presentation = first }
+    }
+
+    private var singleFileBody: some View {
         VStack(spacing: 12) {
             PasteoryFileIconView(fileName: presentation.name, uti: presentation.uti)
                 .frame(width: 88, height: 88)
@@ -407,9 +551,60 @@ struct PasteoryFileDetailPreview: View {
         }
         .opacity(presentation.isMissing ? 0.5 : 1)
         .frame(maxWidth: .infinity)
-        .task(id: clip.id) {
-            presentation = await ClipFilePresentationLoader.load(clip: clip, attachments: attachments)
+    }
+
+    private var multipleFileBody: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                PasteoryMultiFileIconView(
+                    fileNames: clip.effectiveFileMetadata?.fileNames ?? presentations.map(\.name),
+                    accentColor: .accentColor
+                )
+                .frame(width: 54, height: 54)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(presentations.isEmpty ? (clip.effectiveFileMetadata?.fileCount ?? 0) : presentations.count) 个文件")
+                        .font(.headline)
+                    let missingCount = presentations.filter(\.isMissing).count
+                    Text(
+                        presentations.isEmpty
+                            ? "正在读取文件信息"
+                            : (missingCount == 0 ? "全部文件可用" : "\(missingCount) 个原文件已删除")
+                    )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            ScrollView {
+                LazyVStack(spacing: 5) {
+                    ForEach(Array(presentations.enumerated()), id: \.offset) { _, file in
+                        HStack(spacing: 9) {
+                            PasteoryFileIconView(fileName: file.name, uti: file.uti)
+                                .frame(width: 30, height: 30)
+                                .saturation(file.isMissing ? 0 : 1)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(file.name)
+                                    .strikethrough(file.isMissing)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                HStack(spacing: 5) {
+                                    Text(file.sizeText)
+                                    if file.isMissing { Text("已删除") }
+                                }
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .opacity(file.isMissing ? 0.5 : 1)
+                        .padding(.horizontal, 8)
+                        .frame(height: 42)
+                        .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+            }
+            .frame(maxHeight: 260)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

@@ -26,6 +26,7 @@ final class QuickPanelController: NSObject {
     private var globalMouseMonitor: Any?
     private let frameAutosaveName = "PasteoryQuickPanelWindow"
     private var hasInitialPlacement = false
+    private var activatedApplicationForQuickPanel = false
     private(set) var targetApplication: NSRunningApplication?
 
     init(
@@ -46,10 +47,10 @@ final class QuickPanelController: NSObject {
                 case .running:
                     break
                 case .succeeded:
-                    state.presentStatus("文件命令已完成，可在“设置 → 打开方式”查看日志")
+                    state.presentStatus("文件命令已完成，可在“设置 → 打开方式”查看本次命令输出")
                 case .failed(let exitCode):
                     state.presentStatus(
-                        "文件命令执行失败（退出码 \(exitCode)），请在“设置 → 打开方式”查看日志",
+                        "文件命令执行失败（退出码 \(exitCode)），请在“设置 → 打开方式”查看本次命令输出",
                         kind: .error,
                         dismissAfter: 6
                     )
@@ -81,6 +82,7 @@ final class QuickPanelController: NSObject {
         panel.isFloatingPanel = true; panel.level = .floating; panel.hidesOnDeactivate = false
 #endif
         panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true
+        panel.animationBehavior = .none
         panel.becomesKeyOnlyIfNeeded = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.minSize = NSSize(width: 340, height: 480); panel.maxSize = NSSize(width: 520, height: 760)
@@ -88,9 +90,9 @@ final class QuickPanelController: NSObject {
         let view = QuickPanelView(
             state: state,
             onCopy: { [weak self] clip, plain, paste in self?.perform(clip, plainText: plain, paste: paste) },
-            onOpenLibrary: { [weak self] in self?.close(); onOpenLibrary() },
-            onOpenSettings: { [weak self] in self?.close(); onOpenSettings() },
-            onCreateTextClip: { [weak self] in self?.close(); onCreateTextClip() }
+            onOpenLibrary: { [weak self] in self?.close(restoreTargetApplication: false); onOpenLibrary() },
+            onOpenSettings: { [weak self] in self?.close(restoreTargetApplication: false); onOpenSettings() },
+            onCreateTextClip: { [weak self] in self?.close(restoreTargetApplication: false); onCreateTextClip() }
         )
         panel.contentViewController = NSHostingController(rootView: view)
         panel.setContentSize(NSSize(width: 380, height: 660))
@@ -101,6 +103,7 @@ final class QuickPanelController: NSObject {
     func toggle() { panel.isVisible ? close() : show() }
 
     func show() {
+        activatedApplicationForQuickPanel = false
         state.quickCommandKeyDown = false
         state.quickSearchFocused = false
         cancelPendingCommandHelp()
@@ -121,9 +124,22 @@ final class QuickPanelController: NSObject {
             panel.setFrameOrigin(NSPoint(x: panel.frame.minX, y: visible.maxY - panel.frame.height - 8))
         }
 #endif
-        panel.orderFrontRegardless(); panel.makeKey(); panel.makeFirstResponder(nil)
+        // A non-activating panel cannot reliably become key while another app is active.
+        // Activate while the panel is still hidden so AppKit never exposes an intermediate frame.
+        if !NSApp.isActive {
+            activatedApplicationForQuickPanel = true
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        let frameBeforeShow = panel.frame
+        panel.makeKeyAndOrderFront(nil)
+        panel.makeFirstResponder(nil)
 #if DEBUG
-        DispatchQueue.main.async { [weak panel] in print("quick-panel-is-key=\(panel?.isKeyWindow == true)") }
+        DispatchQueue.main.async { [weak panel] in
+            print("quick-panel-is-key=\(panel?.isKeyWindow == true)")
+            if ProcessInfo.processInfo.arguments.contains("--debug-panel-frame"), let panel {
+                print("quick-panel-frame-stable=\(panel.frame == frameBeforeShow) before=\(NSStringFromRect(frameBeforeShow)) after=\(NSStringFromRect(panel.frame))")
+            }
+        }
 #endif
         installKeyMonitor()
         installOutsideClickMonitor()
@@ -136,7 +152,7 @@ final class QuickPanelController: NSObject {
 #endif
     }
 
-    func close() {
+    func close(restoreTargetApplication: Bool = true) {
         state.quickCommandKeyDown = false
         state.quickSearchFocused = false
         state.quickQuery = ""
@@ -144,8 +160,9 @@ final class QuickPanelController: NSObject {
         cancelPendingCommandHelp()
         hideCommandHelp()
         state.quickHoveredClipID = nil
-        state.quickMetadataEditorActive = false
+        state.dismissQuickMetadataEditor()
         state.quickCollectionPickerActive = false
+        state.quickNewNormalCollectionActive = false
         state.quickCollectionManagerActive = false
         state.dismissQuickAggregationDraft()
         state.exitQuickMultiSelect()
@@ -153,6 +170,13 @@ final class QuickPanelController: NSObject {
         panel.orderOut(nil)
         if let eventMonitor { NSEvent.removeMonitor(eventMonitor); self.eventMonitor = nil }
         if let globalMouseMonitor { NSEvent.removeMonitor(globalMouseMonitor); self.globalMouseMonitor = nil }
+        if activatedApplicationForQuickPanel,
+           restoreTargetApplication,
+           let targetApplication,
+           !targetApplication.isTerminated {
+            targetApplication.activate()
+        }
+        activatedApplicationForQuickPanel = false
     }
 
     func performSelected(plainText: Bool, paste: Bool) {
@@ -166,7 +190,7 @@ final class QuickPanelController: NSObject {
 
     private func perform(_ clip: Clip, plainText: Bool, paste: Bool) {
         let target = targetApplication
-        close()
+        close(restoreTargetApplication: false)
         Task {
             do {
                 let result = try await pasteCoordinator.perform(clip, plainText: plainText, paste: paste, target: target)
@@ -230,16 +254,37 @@ final class QuickPanelController: NSObject {
             }
             if state.quickMetadataEditorActive {
                 if event.type == .rightMouseDown { return event }
-                if (event.keyCode == 36 || event.keyCode == 76) {
-                    if self.textInputHasMarkedText { return event }
+                let editorAction = QuickMetadataEditorNavigation.keyboardAction(
+                    keyCode: event.keyCode,
+                    command: modifiers.contains(.command),
+                    shift: modifiers.contains(.shift),
+                    option: modifiers.contains(.option),
+                    control: modifiers.contains(.control),
+                    focusedField: state.quickMetadataEditorFocusedField,
+                    hasMarkedText: textInputHasMarkedText
+                )
+                switch editorAction {
+                case .moveFocus(let backwards):
+                    state.quickMetadataEditorKeyCommand = .moveFocus(
+                        id: UUID(),
+                        backwards: backwards
+                    )
+                    return nil
+                case .moveCollection(let offset):
+                    state.quickMetadataEditorKeyCommand = .moveCollection(id: UUID(), offset: offset)
+                    return nil
+                case .toggleCollection:
+                    state.quickMetadataEditorKeyCommand = .toggleCollection(id: UUID())
+                    return nil
+                case .commit:
                     state.quickMetadataEditorCommitRequestID = UUID()
                     return nil
-                }
-                if event.keyCode == 53 || (event.keyCode == 13 && modifiers.contains(.command)) {
+                case .dismiss:
                     state.quickMetadataEditorDismissRequestID = UUID()
                     return nil
+                case .passThrough:
+                    return event
                 }
-                return event
             }
             if state.quickAggregationEditorActive {
                 if event.type == .rightMouseDown { return event }
@@ -319,6 +364,16 @@ final class QuickPanelController: NSObject {
                 performSelected(plainText: false, paste: true)
                 return nil
             }
+            if let offset = QuickPanelNavigation.scopeOffset(
+                forKeyCode: event.keyCode,
+                command: modifiers.contains(.command),
+                shift: modifiers.contains(.shift),
+                option: modifiers.contains(.option),
+                control: modifiers.contains(.control)
+            ) {
+                Task { await self.state.moveQuickScope(by: offset) }
+                return nil
+            }
             if let action {
                 self.perform(action)
                 return nil
@@ -330,8 +385,6 @@ final class QuickPanelController: NSObject {
                 return nil
             case 125: self.state.moveQuickSelection(by: 1); return nil
             case 126: self.state.moveQuickSelection(by: -1); return nil
-            case 123: Task { await self.state.moveQuickScope(by: -1) }; return nil
-            case 124: Task { await self.state.moveQuickScope(by: 1) }; return nil
             case 115:
                 if let first = self.state.quickListEntries.first { self.state.selectQuickEntry(first) }
                 return nil
@@ -356,7 +409,7 @@ final class QuickPanelController: NSObject {
             Task {
                 do {
                     try await clipOpenCoordinator.open(clip)
-                    close()
+                    close(restoreTargetApplication: false)
                 } catch {
                     state.presentStatus(error.localizedDescription, kind: .warning, dismissAfter: 5)
                     showFallbackNotification()
@@ -385,10 +438,19 @@ final class QuickPanelController: NSObject {
         case .editMetadata:
             hideCommandHelp()
             if state.quickSelectedAggregation != nil { Task { await state.prepareQuickAggregation() } }
-            else { state.quickMetadataEditorOpenRequestID = UUID() }
+            else if let clip = state.quickSelectedClip {
+                state.presentQuickMetadataEditor(for: clip.id, initialField: .title)
+            }
         case .setCollection:
             hideCommandHelp()
-            state.quickCollectionPickerOpenRequestID = UUID()
+            if state.quickSelectedAggregation != nil {
+                state.quickCollectionPickerOpenRequestID = UUID()
+            } else if let clip = state.quickSelectedClip {
+                state.presentQuickMetadataEditor(for: clip.id, initialField: .collections)
+            }
+        case .createCollection:
+            hideCommandHelp()
+            state.quickNewNormalCollectionActive = true
         case .aggregateContent:
             hideCommandHelp()
             Task { await state.prepareQuickAggregation() }
@@ -401,10 +463,10 @@ final class QuickPanelController: NSObject {
                 Task { await state.removeAggregation(aggregation) }
             } else if let clip = state.quickSelectedClip { state.moveToTrash(clip) }
         case .openLibrary:
-            close()
+            close(restoreTargetApplication: false)
             onOpenLibrary()
         case .openSettings:
-            close()
+            close(restoreTargetApplication: false)
             onOpenSettings()
         case .closePanel:
             close()
@@ -537,7 +599,7 @@ final class QuickPanelController: NSObject {
                       !self.state.quickCollectionPickerActive,
                       !self.state.quickCollectionManagerActive,
                       !self.state.quickAggregationEditorActive else { return }
-                self.close()
+                self.close(restoreTargetApplication: false)
             }
         }
     }

@@ -103,6 +103,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--debug-show-quick-window") {
+            return false
+        }
+#endif
         coordinator?.showSettings()
         return true
     }

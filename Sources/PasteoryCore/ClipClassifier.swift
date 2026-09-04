@@ -36,10 +36,28 @@ public enum ClipClassifier {
         let primary = primaryKind(from: kinds)
         let secondary = kinds.subtracting([primary])
         let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
-        let preview = previewCandidates.first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+        let fileURLs = primary == .file
+            ? capture.items.sorted(by: { $0.order < $1.order }).flatMap(FileReferenceDecoder.urls(in:))
+            : []
+        let fileMetadata: FileClipMetadata? = if fileURLs.isEmpty {
+            nil
+        } else {
+            FileClipMetadata(
+                fileNames: fileURLs.enumerated().map { index, url in
+                    if FileReferenceDecoder.isOpaqueFileReference(url) { return "文件 \(index + 1)" }
+                    return url.lastPathComponent.isEmpty ? url.path : url.lastPathComponent
+                },
+                filePaths: {
+                    let paths = fileURLs.compactMap(FileReferenceDecoder.stablePath(for:))
+                    return paths.count == fileURLs.count ? paths : nil
+                }()
+            )
+        }
+        let preview = fileMetadata?.displayName
+            ?? previewCandidates.first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
             ?? defaultPreview(for: primary, itemCount: capture.items.count)
 
-        return Clip(
+        var clip = Clip(
             createdAt: capture.capturedAt,
             updatedAt: capture.capturedAt,
             lastCopiedAt: capture.capturedAt,
@@ -50,8 +68,11 @@ public enum ClipClassifier {
             contentHash: digest,
             byteSize: totalBytes,
             items: convertedItems,
-            codeMetadata: codeCandidates.max(by: { $0.confidence < $1.confidence })
+            codeMetadata: codeCandidates.max(by: { $0.confidence < $1.confidence }),
+            fileMetadata: fileMetadata
         )
+        clip.identityKey = try? ClipIdentity.key(for: clip)
+        return clip
     }
 
     public static func isColor(_ text: String) -> Bool {
@@ -317,9 +338,8 @@ public enum ClipClassifier {
     }
 
     private static func filePreview(_ item: CapturedItem) -> String {
-        guard let data = item.representations.first(where: { $0.uti == "public.file-url" || $0.uti == "NSFilenamesPboardType" })?.data,
-              let value = String(data: data, encoding: .utf8), let url = URL(string: value) else { return "文件" }
-        return url.lastPathComponent.isEmpty ? value : url.lastPathComponent
+        guard let url = FileReferenceDecoder.urls(in: item).first else { return "文件" }
+        return url.lastPathComponent.isEmpty ? url.path : url.lastPathComponent
     }
 
     private static func primaryKind(from kinds: Set<ClipKind>) -> ClipKind {

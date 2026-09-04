@@ -406,6 +406,7 @@ public struct Clip: Codable, Hashable, Identifiable, Sendable {
     public var source: ClipSource
     public var previewText: String
     public var contentHash: String
+    public var identityKey: String?
     public var byteSize: Int
     public var copyCount: Int
     public var pasteCount: Int?
@@ -414,6 +415,7 @@ public struct Clip: Codable, Hashable, Identifiable, Sendable {
     public var items: [ClipItem]
     public var collectionIDs: Set<UUID>
     public var codeMetadata: CodeMetadata?
+    public var fileMetadata: FileClipMetadata?
     public var automaticTitle: String?
 
     public init(
@@ -433,6 +435,7 @@ public struct Clip: Codable, Hashable, Identifiable, Sendable {
         source: ClipSource,
         previewText: String,
         contentHash: String,
+        identityKey: String? = nil,
         byteSize: Int,
         copyCount: Int = 1,
         pasteCount: Int = 0,
@@ -441,6 +444,7 @@ public struct Clip: Codable, Hashable, Identifiable, Sendable {
         items: [ClipItem],
         collectionIDs: Set<UUID> = [],
         codeMetadata: CodeMetadata? = nil,
+        fileMetadata: FileClipMetadata? = nil,
         automaticTitle: String? = nil
     ) {
         self.id = id
@@ -459,6 +463,7 @@ public struct Clip: Codable, Hashable, Identifiable, Sendable {
         self.source = source
         self.previewText = previewText
         self.contentHash = contentHash
+        self.identityKey = identityKey
         self.byteSize = byteSize
         self.copyCount = copyCount
         self.pasteCount = pasteCount
@@ -467,6 +472,7 @@ public struct Clip: Codable, Hashable, Identifiable, Sendable {
         self.items = items
         self.collectionIDs = collectionIDs
         self.codeMetadata = codeMetadata
+        self.fileMetadata = fileMetadata
         self.automaticTitle = automaticTitle
     }
 
@@ -478,6 +484,34 @@ public struct Clip: Codable, Hashable, Identifiable, Sendable {
 
     public var recordedPasteCount: Int { pasteCount ?? 0 }
     public var lastUsedAt: Date { max(lastCopiedAt, lastPastedAt ?? lastCopiedAt) }
+    public var deduplicationKey: String { identityKey ?? "legacy:\(contentHash)" }
+    public var effectiveFileMetadata: FileClipMetadata? {
+        if let fileMetadata { return fileMetadata }
+        guard primaryKind == .file else { return nil }
+        let urls = items.sorted(by: { $0.order < $1.order }).flatMap { item -> [URL] in
+            for representation in item.representations.sorted(by: { $0.uti < $1.uti })
+            where representation.uti == "public.file-url" || representation.uti == "NSFilenamesPboardType" {
+                guard case .inline(let data) = representation.storage else { continue }
+                let values = FileReferenceDecoder.urls(from: data, uti: representation.uti)
+                if !values.isEmpty { return values }
+            }
+            return []
+        }
+        guard !urls.isEmpty else { return nil }
+        let fileNames = urls.enumerated().map { index, url in
+            if FileReferenceDecoder.isOpaqueFileReference(url),
+               urls.count == 1,
+               !previewText.isEmpty {
+                return previewText
+            }
+            if !url.lastPathComponent.isEmpty { return url.lastPathComponent }
+            if !url.path.isEmpty { return url.path }
+            if urls.count == 1, !previewText.isEmpty { return previewText }
+            return "文件 \(index + 1)"
+        }
+        let stablePaths = urls.compactMap(FileReferenceDecoder.stablePath(for:))
+        return FileClipMetadata(fileNames: fileNames, filePaths: stablePaths.count == urls.count ? stablePaths : nil)
+    }
 }
 
 public enum CollectionKind: String, Codable, Sendable { case normal, smart }

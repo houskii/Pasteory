@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import SQLite3
 
@@ -5,6 +6,7 @@ public actor SQLiteClipRepository: ClipRepository {
     nonisolated(unsafe) private let database: OpaquePointer
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
+    private let storageRoot: URL
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
     private struct LinkGroupAccumulator {
@@ -21,6 +23,7 @@ public actor SQLiteClipRepository: ClipRepository {
         self.database = pointer
         self.encoder = JSONEncoder()
         self.decoder = JSONDecoder()
+        self.storageRoot = databaseURL.deletingLastPathComponent().deletingLastPathComponent()
         self.encoder.dateEncodingStrategy = .millisecondsSince1970
         self.decoder.dateDecodingStrategy = .millisecondsSince1970
         do {
@@ -40,29 +43,40 @@ public actor SQLiteClipRepository: ClipRepository {
     deinit { sqlite3_close(database) }
 
     public func saveCaptured(_ clip: Clip, context: CapturedSourceContext?) throws -> Clip {
-        var stored = clip
+        var incoming = clip
+        if incoming.identityKey == nil {
+            incoming.identityKey = (try? ClipIdentity.key(for: incoming, loadData: loadRepresentationData))
+                ?? "legacy:\(incoming.contentHash)"
+        }
+        var stored = incoming
         try transaction {
-            if var previous = try activeClip(contentHash: clip.contentHash, kind: clip.primaryKind) {
-                previous.copyCount += max(1, clip.copyCount)
-                previous.lastCopiedAt = max(previous.lastCopiedAt, clip.createdAt)
-                previous.updatedAt = max(previous.updatedAt, clip.createdAt)
-                previous.source = clip.source
+            if var previous = try activeClip(identityKey: incoming.deduplicationKey, kind: incoming.primaryKind) {
+                previous.copyCount += max(1, incoming.copyCount)
+                previous.lastCopiedAt = max(previous.lastCopiedAt, incoming.createdAt)
+                previous.updatedAt = max(previous.updatedAt, incoming.createdAt)
+                previous.source = incoming.source
                 previous.isArchived = false
-                previous.byteSize = max(previous.byteSize, clip.byteSize)
-                previous.secondaryKinds.formUnion(clip.secondaryKinds)
+                previous.archivePath = nil
+                previous.previewText = incoming.previewText
+                previous.contentHash = incoming.contentHash
+                previous.identityKey = incoming.identityKey
+                previous.byteSize = incoming.byteSize
+                previous.items = incoming.items
+                previous.secondaryKinds.formUnion(incoming.secondaryKinds)
                 if previous.automaticTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
-                    previous.automaticTitle = clip.automaticTitle
+                    previous.automaticTitle = incoming.automaticTitle
                 }
-                if previous.codeMetadata == nil { previous.codeMetadata = clip.codeMetadata }
+                if incoming.codeMetadata != nil { previous.codeMetadata = incoming.codeMetadata }
+                if incoming.fileMetadata != nil { previous.fileMetadata = incoming.fileMetadata }
                 try save(previous)
                 stored = previous
             } else {
-                try save(clip)
+                try save(incoming)
             }
             try saveCaptureEvent(ClipCaptureEvent(
                 clipID: stored.id,
-                capturedAt: clip.createdAt,
-                source: clip.source,
+                capturedAt: incoming.createdAt,
+                source: incoming.source,
                 context: context
             ))
         }
@@ -75,8 +89,8 @@ public actor SQLiteClipRepository: ClipRepository {
         INSERT INTO clips (
           id, created_at, updated_at, last_copied_at, last_pasted_at, last_used_at, kind, title, note, priority,
           favorite, pinned, archived, source_name, source_bundle, source_confidence,
-          preview_text, content_hash, byte_size, copy_count, deleted_at, payload_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          preview_text, content_hash, identity_key, byte_size, copy_count, deleted_at, payload_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           updated_at=excluded.updated_at, last_copied_at=excluded.last_copied_at,
           last_pasted_at=excluded.last_pasted_at, last_used_at=excluded.last_used_at,
@@ -85,6 +99,7 @@ public actor SQLiteClipRepository: ClipRepository {
           archived=excluded.archived, source_name=excluded.source_name,
           source_bundle=excluded.source_bundle, source_confidence=excluded.source_confidence,
           preview_text=excluded.preview_text, content_hash=excluded.content_hash,
+          identity_key=excluded.identity_key,
           byte_size=excluded.byte_size, copy_count=excluded.copy_count,
           deleted_at=excluded.deleted_at, payload_json=excluded.payload_json;
         """
@@ -109,12 +124,13 @@ public actor SQLiteClipRepository: ClipRepository {
         bind(clip.source.confidence.rawValue, at: 16, to: statement)
         bind(clip.previewText, at: 17, to: statement)
         bind(clip.contentHash, at: 18, to: statement)
-        sqlite3_bind_int64(statement, 19, Int64(clip.byteSize))
-        sqlite3_bind_int(statement, 20, Int32(clip.copyCount))
-        if let deletedAt = clip.deletedAt { sqlite3_bind_double(statement, 21, deletedAt.timeIntervalSince1970) }
-        else { sqlite3_bind_null(statement, 21) }
+        bindOptional(clip.identityKey, at: 19, to: statement)
+        sqlite3_bind_int64(statement, 20, Int64(clip.byteSize))
+        sqlite3_bind_int(statement, 21, Int32(clip.copyCount))
+        if let deletedAt = clip.deletedAt { sqlite3_bind_double(statement, 22, deletedAt.timeIntervalSince1970) }
+        else { sqlite3_bind_null(statement, 22) }
         _ = payload.withUnsafeBytes { bytes in
-            sqlite3_bind_blob(statement, 22, bytes.baseAddress, Int32(payload.count), Self.transient)
+            sqlite3_bind_blob(statement, 23, bytes.baseAddress, Int32(payload.count), Self.transient)
         }
         try stepDone(statement)
         try syncCollections(for: clip)
@@ -130,6 +146,7 @@ public actor SQLiteClipRepository: ClipRepository {
     public func consolidateDuplicateClips() throws -> Int {
         var mergedCount = 0
         try transaction {
+            try backfillIdentityKeys()
             mergedCount = try consolidateActiveDuplicateClips()
         }
         return mergedCount
@@ -777,17 +794,32 @@ public actor SQLiteClipRepository: ClipRepository {
         return Int(sqlite3_column_int64(statement, 0))
     }
 
-    private func activeClip(contentHash: String, kind: ClipKind) throws -> Clip? {
-        let statement = try prepare("SELECT payload_json FROM clips WHERE deleted_at IS NULL AND content_hash=? AND kind=? ORDER BY created_at LIMIT 1;")
+    private func activeClip(identityKey: String, kind: ClipKind) throws -> Clip? {
+        let statement = try prepare("SELECT payload_json FROM clips WHERE deleted_at IS NULL AND identity_key=? AND kind=? ORDER BY created_at LIMIT 1;")
         defer { sqlite3_finalize(statement) }
-        bind(contentHash, at: 1, to: statement)
+        bind(identityKey, at: 1, to: statement)
         bind(kind.rawValue, at: 2, to: statement)
         guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
         return try decodeClip(statement, column: 0)
     }
 
+    private func backfillIdentityKeys() throws {
+        let statement = try prepare("SELECT payload_json FROM clips WHERE identity_key IS NULL OR identity_key='';")
+        var clips = [Clip]()
+        while sqlite3_step(statement) == SQLITE_ROW {
+            clips.append(try decodeClip(statement, column: 0))
+        }
+        sqlite3_finalize(statement)
+
+        for var clip in clips {
+            clip.identityKey = (try? ClipIdentity.key(for: clip, loadData: loadRepresentationData))
+                ?? "legacy:\(clip.contentHash)"
+            try save(clip)
+        }
+    }
+
     private func consolidateActiveDuplicateClips() throws -> Int {
-        let groups = try prepare("SELECT kind,content_hash FROM clips WHERE deleted_at IS NULL GROUP BY kind,content_hash HAVING COUNT(*)>1;")
+        let groups = try prepare("SELECT kind,identity_key FROM clips WHERE deleted_at IS NULL GROUP BY kind,identity_key HAVING COUNT(*)>1;")
         var identities = [(String, String)]()
         while sqlite3_step(groups) == SQLITE_ROW,
               let kind = sqlite3_column_text(groups, 0),
@@ -797,10 +829,10 @@ public actor SQLiteClipRepository: ClipRepository {
         sqlite3_finalize(groups)
 
         var removed = 0
-        for (kind, hash) in identities {
-            let statement = try prepare("SELECT payload_json FROM clips WHERE deleted_at IS NULL AND kind=? AND content_hash=? ORDER BY created_at,id;")
+        for (kind, identityKey) in identities {
+            let statement = try prepare("SELECT payload_json FROM clips WHERE deleted_at IS NULL AND kind=? AND identity_key=? ORDER BY created_at,id;")
             bind(kind, at: 1, to: statement)
-            bind(hash, at: 2, to: statement)
+            bind(identityKey, at: 2, to: statement)
             var members = [Clip]()
             while sqlite3_step(statement) == SQLITE_ROW { members.append(try decodeClip(statement, column: 0)) }
             sqlite3_finalize(statement)
@@ -822,6 +854,13 @@ public actor SQLiteClipRepository: ClipRepository {
         canonical.lastCopiedAt = members.map(\.lastCopiedAt).max() ?? canonical.lastCopiedAt
         canonical.lastPastedAt = members.compactMap(\.lastPastedAt).max()
         canonical.source = latest.source
+        canonical.previewText = latest.previewText
+        canonical.contentHash = latest.contentHash
+        canonical.identityKey = latest.identityKey
+        canonical.byteSize = latest.byteSize
+        canonical.items = latest.items
+        canonical.archivePath = latest.archivePath
+        canonical.fileMetadata = latest.fileMetadata
         canonical.copyCount = members.reduce(0) { $0 + max(1, $1.copyCount) }
         canonical.pasteCount = members.reduce(0) { $0 + $1.recordedPasteCount }
         canonical.isFavorite = members.contains(where: \.isFavorite)
@@ -830,7 +869,6 @@ public actor SQLiteClipRepository: ClipRepository {
         canonical.priority = members.map(\.priority).max() ?? canonical.priority
         canonical.collectionIDs = members.reduce(into: Set<UUID>()) { $0.formUnion($1.collectionIDs) }
         canonical.secondaryKinds = members.reduce(into: Set<ClipKind>()) { $0.formUnion($1.secondaryKinds) }
-        canonical.byteSize = members.map(\.byteSize).max() ?? canonical.byteSize
         canonical.title = firstNonempty(members.map(\.title))
         canonical.note = firstNonempty(members.map(\.note))
         canonical.automaticTitle = members.compactMap(\.automaticTitle).first {
@@ -958,6 +996,27 @@ public actor SQLiteClipRepository: ClipRepository {
         try decode(Clip.self, statement: statement, column: column)
     }
 
+    private func loadRepresentationData(_ representation: ClipRepresentation) throws -> Data {
+        let data: Data
+        let expectedChecksum: String?
+        switch representation.storage {
+        case .inline(let inline):
+            return inline
+        case .attachment(let relativePath, let checksum, _):
+            data = try Data(contentsOf: storageRoot.appendingPathComponent("Attachments").appendingPathComponent(relativePath))
+            expectedChecksum = checksum
+        case .archived(let relativePath, let checksum, let size):
+            let compressed = try Data(contentsOf: storageRoot.appendingPathComponent("Archives").appendingPathComponent(relativePath))
+            data = try LZFSE.decompress(compressed, expectedSize: size)
+            expectedChecksum = checksum
+        }
+        if let expectedChecksum {
+            let actual = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+            guard actual == expectedChecksum else { throw StorageError.checksumMismatch }
+        }
+        return data
+    }
+
     private func decode<T: Decodable>(_ type: T.Type, statement: OpaquePointer, column: Int32) throws -> T {
         guard let bytes = sqlite3_column_blob(statement, column) else { throw RepositoryError.encoding }
         let data = Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, column)))
@@ -1078,7 +1137,7 @@ public actor SQLiteClipRepository: ClipRepository {
           kind TEXT NOT NULL, title TEXT NOT NULL, note TEXT NOT NULL, priority INTEGER NOT NULL DEFAULT 0,
           favorite INTEGER NOT NULL DEFAULT 0, pinned INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0,
           source_name TEXT NOT NULL, source_bundle TEXT, source_confidence TEXT NOT NULL,
-          preview_text TEXT NOT NULL, content_hash TEXT NOT NULL, byte_size INTEGER NOT NULL,
+          preview_text TEXT NOT NULL, content_hash TEXT NOT NULL, identity_key TEXT, byte_size INTEGER NOT NULL,
           copy_count INTEGER NOT NULL DEFAULT 1, deleted_at REAL, payload_json BLOB NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_clips_recent ON clips(deleted_at, archived, last_copied_at DESC);
@@ -1200,10 +1259,13 @@ public actor SQLiteClipRepository: ClipRepository {
         """)
         try ensureColumn(database, table: "clips", column: "last_pasted_at", definition: "REAL")
         try ensureColumn(database, table: "clips", column: "last_used_at", definition: "REAL")
+        try ensureColumn(database, table: "clips", column: "identity_key", definition: "TEXT")
         try ensureColumn(database, table: "link_resources", column: "canonical_resource_key", definition: "TEXT")
         try execute(database, "UPDATE clips SET last_used_at=last_copied_at WHERE last_used_at IS NULL;")
         try execute(database, "CREATE INDEX IF NOT EXISTS idx_clips_used ON clips(deleted_at,archived,pinned DESC,last_used_at DESC);")
+        try execute(database, "CREATE INDEX IF NOT EXISTS idx_clips_identity ON clips(identity_key,kind,created_at);")
         try execute(database, "INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(6,strftime('%s','now'));")
+        try execute(database, "INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(8,strftime('%s','now'));")
     }
 
     private static func ensureColumn(

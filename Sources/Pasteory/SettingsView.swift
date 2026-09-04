@@ -528,7 +528,7 @@ struct SettingsView: View {
     private var organizeActions: [QuickPanelAction] {
         [
             .toggleFavorite, .togglePinned, .editMetadata, .setCollection,
-            .aggregateContent, .expandAggregation, .collapseAggregation, .moveToTrash
+            .createCollection, .aggregateContent, .expandAggregation, .collapseAggregation, .moveToTrash
         ]
     }
 

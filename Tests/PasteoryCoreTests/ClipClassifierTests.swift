@@ -20,6 +20,135 @@ import Testing
     #expect(first?.contentHash == second?.contentHash)
 }
 
+@Test func textIdentityIgnoresOuterWhitespaceAndRichTextRepresentations() throws {
+    let source = ClipSource(appName: "Chrome", bundleIdentifier: "com.google.Chrome", confidence: .high)
+    let plain = PasteboardCapture(items: [CapturedItem(order: 0, representations: [
+        CapturedRepresentation(uti: "public.utf8-plain-text", data: Data("4.4.93-alpha.0".utf8)),
+        CapturedRepresentation(uti: "public.html", data: Data("<span>4.4.93-alpha.0</span>".utf8))
+    ])], source: source)
+    let styled = PasteboardCapture(items: [CapturedItem(order: 0, representations: [
+        CapturedRepresentation(uti: "public.utf8-plain-text", data: Data(" \n4.4.93-alpha.0\t".utf8)),
+        CapturedRepresentation(uti: "public.html", data: Data("<span class='diff-line'>4.4.93-alpha.0</span>".utf8))
+    ])], source: source)
+
+    let first = try #require(ClipClassifier.makeClip(from: plain))
+    let second = try #require(ClipClassifier.makeClip(from: styled))
+    #expect(first.primaryKind == .text)
+    #expect(first.identityKey == second.identityKey)
+    #expect(first.contentHash != second.contentHash)
+
+    let internalWhitespace = try #require(makeTextClip("4.4.93 - alpha.0"))
+    #expect(first.identityKey != internalWhitespace.identityKey)
+}
+
+@Test func codeAndColorIdentityUseTheTrimmedTextRule() throws {
+    let terminal = ClipSource(appName: "终端", bundleIdentifier: "com.apple.Terminal", confidence: .high)
+    let code = try #require(makeTextClip("git status", source: terminal))
+    let paddedCode = try #require(makeTextClip("\n git status \t", source: terminal))
+    #expect(code.primaryKind == .code)
+    #expect(code.identityKey == paddedCode.identityKey)
+
+    let color = try #require(makeTextClip("#7C3AED"))
+    let paddedColor = try #require(makeTextClip("  #7C3AED\n"))
+    #expect(color.primaryKind == .color)
+    #expect(color.identityKey == paddedColor.identityKey)
+}
+
+@Test func linkIdentityUsesHostAndWholePathButIgnoresQueryAndFragment() throws {
+    let first = try #require(makeTextClip(
+        "https://bits.bytedance.net/devops/1486828802/code/detail/8390888?devops_space_type=client"
+    ))
+    let second = try #require(makeTextClip(
+        "https://bits.bytedance.net/devops/1486828802/code/detail/8390888?tab=changes#diff"
+    ))
+    let otherPath = try #require(makeTextClip(
+        "https://bits.bytedance.net/devops/1486828802/code/detail/8296613?tab=changes"
+    ))
+    #expect(first.primaryKind == .link)
+    #expect(first.identityKey == second.identityKey)
+    #expect(first.identityKey != otherPath.identityKey)
+}
+
+@Test func imageAndFileIdentityUseContentMD5() throws {
+    let source = ClipSource(appName: "测试", bundleIdentifier: "app.test", confidence: .high)
+    let firstImage = try #require(ClipClassifier.makeClip(from: PasteboardCapture(items: [
+        CapturedItem(order: 0, representations: [
+            CapturedRepresentation(uti: "public.png", data: Data([1, 2, 3])),
+            CapturedRepresentation(uti: "public.utf8-plain-text", data: Data("first label".utf8))
+        ])
+    ], source: source)))
+    let secondImage = try #require(ClipClassifier.makeClip(from: PasteboardCapture(items: [
+        CapturedItem(order: 0, representations: [
+            CapturedRepresentation(uti: "public.png", data: Data([1, 2, 3])),
+            CapturedRepresentation(uti: "public.utf8-plain-text", data: Data("second label".utf8))
+        ])
+    ], source: source)))
+    #expect(firstImage.primaryKind == .image)
+    #expect(firstImage.identityKey == secondImage.identityKey)
+    #expect(firstImage.contentHash != secondImage.contentHash)
+
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("PasteoryIdentity-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let firstURL = root.appendingPathComponent("first.hap")
+    let secondURL = root.appendingPathComponent("second.hap")
+    try Data("same file bytes".utf8).write(to: firstURL)
+    try Data("same file bytes".utf8).write(to: secondURL)
+    let makeFileClip: (URL) -> Clip? = { url in
+        ClipClassifier.makeClip(from: PasteboardCapture(items: [
+            CapturedItem(order: 0, representations: [
+                CapturedRepresentation(uti: "public.file-url", data: Data(url.absoluteString.utf8))
+            ])
+        ], source: source))
+    }
+    let firstFile = try #require(makeFileClip(firstURL))
+    let secondFile = try #require(makeFileClip(secondURL))
+    #expect(firstFile.primaryKind == .file)
+    #expect(firstFile.identityKey == secondFile.identityKey)
+}
+
+@Test func multipleFilesKeepEveryNameAcrossFinderPasteboardShapes() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("PasteoryMultiFile-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let firstURL = root.appendingPathComponent("first.hap")
+    let secondURL = root.appendingPathComponent("second.txt")
+    try Data("hap bytes".utf8).write(to: firstURL)
+    try Data("text bytes".utf8).write(to: secondURL)
+    let source = ClipSource(appName: "访达", bundleIdentifier: "com.apple.finder", confidence: .high)
+
+    let filenamesData = try PropertyListSerialization.data(
+        fromPropertyList: [firstURL.path, secondURL.path],
+        format: .binary,
+        options: 0
+    )
+    let bundled = try #require(ClipClassifier.makeClip(from: PasteboardCapture(items: [
+        CapturedItem(order: 0, representations: [
+            CapturedRepresentation(uti: "NSFilenamesPboardType", data: filenamesData)
+        ])
+    ], source: source)))
+    let separate = try #require(ClipClassifier.makeClip(from: PasteboardCapture(items: [
+        CapturedItem(order: 0, representations: [
+            CapturedRepresentation(uti: "public.file-url", data: Data(firstURL.absoluteString.utf8))
+        ]),
+        CapturedItem(order: 1, representations: [
+            CapturedRepresentation(uti: "public.file-url", data: Data(secondURL.absoluteString.utf8))
+        ])
+    ], source: source)))
+
+    #expect(bundled.primaryKind == .file)
+    #expect(bundled.previewText == "2 个文件")
+    #expect(bundled.fileMetadata?.fileNames == ["first.hap", "second.txt"])
+    #expect(bundled.fileMetadata?.filePaths == [firstURL.path, secondURL.path])
+    #expect(bundled.identityKey == separate.identityKey)
+    #expect(separate.fileMetadata?.namesSummary == "first.hap、second.txt")
+
+    var legacy = bundled
+    legacy.fileMetadata = nil
+    #expect(legacy.effectiveFileMetadata?.fileCount == 2)
+    #expect(legacy.effectiveFileMetadata?.displayName == "2 个文件")
+}
+
 @Test func recognizesExplicitSourceCodePasteboardType() throws {
     let clip = try #require(makeTextClip(
         "let value = service.load()",

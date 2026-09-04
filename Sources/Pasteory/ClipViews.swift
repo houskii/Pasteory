@@ -30,6 +30,7 @@ struct ClipRowView: View {
     let attachments: AttachmentStore?
     var compact = false
     var shortcutNumber: Int? = nil
+    var filePresentationRefreshID: UUID? = nil
     @State private var fileIsMissing = false
 
     private var rowHeight: CGFloat { ClipRowMetrics.height(for: clip, compact: compact) }
@@ -53,7 +54,9 @@ struct ClipRowView: View {
                         .monospacedDigit()
                         .fixedSize()
                         .layoutPriority(2)
-                    if clip.items.count > 1 { Text("\(clip.items.count) 项") }
+                    if clip.primaryKind != .file, clip.items.count > 1 {
+                        Text("\(clip.items.count) 项")
+                    }
                     if clip.primaryKind == .code,
                        let lineCount = clip.codeMetadata?.totalLineCount,
                        lineCount > 1 {
@@ -104,15 +107,11 @@ struct ClipRowView: View {
         .frame(height: rowHeight)
         .clipped()
         .modifier(ClipRowAccessibility(summary: accessibilitySummary))
-        .task(id: clip.id) {
-            guard clip.primaryKind == .file, let attachments else {
-                fileIsMissing = false
-                return
-            }
-            fileIsMissing = await ClipFilePresentationLoader.load(
-                clip: clip,
-                attachments: attachments
-            ).isMissing
+        .task(id: filePresentationTaskID) {
+            await refreshFileAvailability()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await refreshFileAvailability() }
         }
     }
 
@@ -153,7 +152,12 @@ struct ClipRowView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     if !clip.displayTitle.isEmpty { titleText }
                     if clip.primaryKind == .file {
-                        PasteoryFileMetadataDetailsView(clip: clip, attachments: attachments, compact: compact)
+                        PasteoryFileMetadataDetailsView(
+                            clip: clip,
+                            attachments: attachments,
+                            compact: compact,
+                            refreshID: filePresentationRefreshID
+                        )
                     } else {
                         PasteoryImageMetadataDetailsView(
                             clip: clip,
@@ -175,12 +179,25 @@ struct ClipRowView: View {
             )
         } else if clip.primaryKind == .file {
             HStack(spacing: 8) {
-                PasteoryFileIconView(fileName: FileIconResolver.normalizedFileName(clip.previewText))
+                if let metadata = clip.effectiveFileMetadata, metadata.isMultiple {
+                    PasteoryMultiFileIconView(
+                        fileNames: metadata.fileNames,
+                        accentColor: pasteoryAccentColor
+                    )
                     .frame(width: compact ? 52 : 60, height: compact ? 52 : 60)
+                } else {
+                    PasteoryFileIconView(fileName: FileIconResolver.normalizedFileName(clip.previewText))
+                        .frame(width: compact ? 52 : 60, height: compact ? 52 : 60)
+                }
                 VStack(alignment: .leading, spacing: 2) {
                     if !clip.displayTitle.isEmpty { titleText }
                     if let attachments {
-                        PasteoryFileMetadataDetailsView(clip: clip, attachments: attachments, compact: compact)
+                        PasteoryFileMetadataDetailsView(
+                            clip: clip,
+                            attachments: attachments,
+                            compact: compact,
+                            refreshID: filePresentationRefreshID
+                        )
                     } else {
                         Text(FileIconResolver.normalizedFileName(clip.previewText))
                             .strikethrough(fileIsMissing)
@@ -295,6 +312,22 @@ struct ClipRowView: View {
         return 1
     }
 
+    private var filePresentationTaskID: String {
+        "\(clip.id.uuidString):\(filePresentationRefreshID?.uuidString ?? "static")"
+    }
+
+    private func refreshFileAvailability() async {
+        guard clip.primaryKind == .file, let attachments else {
+            fileIsMissing = false
+            return
+        }
+        let presentations = await ClipFilePresentationLoader.loadAll(
+            clip: clip,
+            attachments: attachments
+        )
+        fileIsMissing = !presentations.isEmpty && presentations.allSatisfy(\.isMissing)
+    }
+
     private var accessibilitySummary: String {
         let title = String(clip.displayTitle.prefix(120))
         let preview = String(clip.previewText.prefix(240))
@@ -305,6 +338,7 @@ struct ClipRowView: View {
     private var hasImagePreview: Bool {
         if clip.primaryKind == .image { return true }
         if clip.primaryKind == .file {
+            if clip.effectiveFileMetadata?.isMultiple == true { return false }
             return ImageFormatLabel.fileNameIsImage(FileIconResolver.normalizedFileName(clip.previewText))
         }
         let supportedImageUTIs = Set(["public.png", "public.tiff", "public.jpeg", "public.jpeg-2000", "public.heic", "public.heif", "com.compuserve.gif", "org.webmproject.webp", "public.svg-image"])

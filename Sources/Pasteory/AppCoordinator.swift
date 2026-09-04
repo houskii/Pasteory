@@ -129,6 +129,19 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
                 guard let self else { return }
                 if ProcessInfo.processInfo.arguments.contains("--debug-seed") { await seedDebugData() }
                 try? await Task.sleep(for: .milliseconds(600)); quickPanel.show()
+                if ProcessInfo.processInfo.arguments.contains("--debug-open-metadata-editor") {
+                    state.quickSelectionID = state.quickClips.first(where: {
+                        $0.source.bundleIdentifier == "com.google.Chrome"
+                            && $0.previewText.contains("abmock-kmp-manager-optimize")
+                    })?.id ?? state.quickClips.first?.id
+                    let initialField: QuickMetadataEditorField = ProcessInfo.processInfo.arguments.contains("--debug-open-metadata-collections")
+                        ? .collections
+                        : .title
+                    try? await Task.sleep(for: .milliseconds(120))
+                    if let clipID = state.quickSelectionID {
+                        state.presentQuickMetadataEditor(for: clipID, initialField: initialField)
+                    }
+                }
             }
         }
         if ProcessInfo.processInfo.arguments.contains("--debug-open-library") {
@@ -196,8 +209,13 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
                     $0.source.bundleIdentifier == "com.google.Chrome"
                         && $0.previewText.contains("abmock-kmp-manager-optimize")
                 })?.id
+                let initialField: QuickMetadataEditorField = ProcessInfo.processInfo.arguments.contains("--debug-open-metadata-collections")
+                    ? .collections
+                    : .title
                 try? await Task.sleep(for: .milliseconds(120))
-                state.quickMetadataEditorOpenRequestID = UUID()
+                if let clipID = state.quickSelectionID {
+                    state.presentQuickMetadataEditor(for: clipID, initialField: initialField)
+                }
                 if ProcessInfo.processInfo.arguments.contains("--debug-dismiss-metadata-editor") {
                     try? await Task.sleep(for: .milliseconds(180))
                     state.quickMetadataEditorDismissRequestID = UUID()
@@ -308,6 +326,25 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
             source: ClipSource(appName: "访达", bundleIdentifier: "com.apple.finder", confidence: .high)
         )
         await state.accept(fileCapture)
+        if ProcessInfo.processInfo.arguments.contains("--debug-seed-multi-file") {
+            let packageURL = debugFileDirectory.appendingPathComponent("entry-default-signed.hap")
+            let logURL = debugFileDirectory.appendingPathComponent("install-result.log")
+            try? Data("debug hap".utf8).write(to: packageURL, options: .atomic)
+            try? Data("install succeeded".utf8).write(to: logURL, options: .atomic)
+            if let fileList = try? PropertyListSerialization.data(
+                fromPropertyList: [packageURL.path, logURL.path, debugFileURL.path],
+                format: .binary,
+                options: 0
+            ) {
+                let capture = PasteboardCapture(
+                    items: [CapturedItem(order: 0, representations: [
+                        CapturedRepresentation(uti: "NSFilenamesPboardType", data: fileList)
+                    ])],
+                    source: ClipSource(appName: "访达", bundleIdentifier: "com.apple.finder", confidence: .high)
+                )
+                await state.accept(capture)
+            }
+        }
         if ProcessInfo.processInfo.arguments.contains("--debug-seed-missing-file") {
             try? FileManager.default.removeItem(at: debugFileURL)
         }

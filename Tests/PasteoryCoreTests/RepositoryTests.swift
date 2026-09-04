@@ -167,6 +167,33 @@ private func textClip(_ value: String, date: Date = Date(), source: String = "ap
     #expect(try await repository.list(filter: .all, query: "命令", limit: 10).count == 1)
 }
 
+@Test func repositoryMergesSameTextWhenClipboardFormattingDiffers() async throws {
+    let directories = try temporaryDirectories()
+    defer { try? FileManager.default.removeItem(at: directories.root) }
+    let repository = try SQLiteClipRepository(databaseURL: directories.databaseFile)
+    let source = ClipSource(appName: "Chrome", bundleIdentifier: "com.google.Chrome", confidence: .high)
+    func richText(_ html: String, at date: Date) throws -> Clip {
+        try #require(ClipClassifier.makeClip(from: PasteboardCapture(items: [
+            CapturedItem(order: 0, representations: [
+                CapturedRepresentation(uti: "public.utf8-plain-text", data: Data("4.4.93-alpha.0".utf8)),
+                CapturedRepresentation(uti: "public.html", data: Data(html.utf8))
+            ])
+        ], source: source, capturedAt: date)))
+    }
+
+    let first = try richText("<span>4.4.93-alpha.0</span>", at: Date(timeIntervalSince1970: 100))
+    let second = try richText("<span class='diff'>4.4.93-alpha.0</span>", at: Date(timeIntervalSince1970: 200))
+    #expect(first.contentHash != second.contentHash)
+    let stored = try await repository.saveCaptured(first)
+    let merged = try await repository.saveCaptured(second)
+
+    #expect(merged.id == stored.id)
+    #expect(merged.copyCount == 2)
+    #expect(merged.contentHash == second.contentHash)
+    #expect(merged.items == second.items)
+    #expect(try await repository.allClips().count == 1)
+}
+
 @Test func repositoryReusesContentAcrossAppsAndTimeWhileKeepingCaptureEvents() async throws {
     let directories = try temporaryDirectories()
     defer { try? FileManager.default.removeItem(at: directories.root) }
@@ -222,10 +249,12 @@ private func textClip(_ value: String, date: Date = Date(), source: String = "ap
     let repository = try SQLiteClipRepository(databaseURL: directories.databaseFile)
     let firstDate = Date(timeIntervalSince1970: 100)
     var first = textClip("legacy duplicate", date: firstDate, source: "app.first")
+    first.identityKey = nil
     first.copyCount = 2
     first.title = "最早标题"
     let secondDate = Date(timeIntervalSince1970: 200)
     var second = textClip("legacy duplicate", date: secondDate, source: "app.second")
+    second.identityKey = nil
     second.copyCount = 3
     second.pasteCount = 4
     second.note = "后续备注"

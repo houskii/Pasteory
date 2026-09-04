@@ -47,6 +47,99 @@ private final class FileCommandLogCapture: @unchecked Sendable {
     }
 }
 
+struct FileCommandTerminalLaunch: Sendable {
+    let workspaceURL: URL
+    let launcherURL: URL
+    let commandURL: URL
+    let completionMarkerURL: URL
+
+    var terminalCommand: String {
+        Self.shellQuoted(launcherURL.path)
+    }
+
+    static func prepare(
+        invocation: FileCommandInvocation,
+        temporaryRootURL: URL = URL(fileURLWithPath: "/tmp", isDirectory: true),
+        identifier: UUID = UUID(),
+        fileManager: FileManager = .default
+    ) throws -> FileCommandTerminalLaunch {
+        let token = identifier.uuidString
+        let workspaceURL = temporaryRootURL
+            .appendingPathComponent("Pasteory-FileCommand-\(token)", isDirectory: true)
+        let launcherURL = workspaceURL.appendingPathComponent("run")
+        let commandURL = workspaceURL.appendingPathComponent("command")
+        let completionMarkerURL = temporaryRootURL
+            .appendingPathComponent("Pasteory-FileCommand-\(token).done")
+
+        try? fileManager.removeItem(at: completionMarkerURL)
+        try fileManager.createDirectory(
+            at: workspaceURL,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        do {
+            try Data((invocation.arguments.last ?? "").utf8).write(to: commandURL, options: .atomic)
+            try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: commandURL.path)
+
+            let launcher = Self.launcherScript(
+                invocation: invocation,
+                workspaceURL: workspaceURL,
+                commandURL: commandURL,
+                completionMarkerURL: completionMarkerURL
+            )
+            try Data(launcher.utf8).write(to: launcherURL, options: .atomic)
+            try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: launcherURL.path)
+        } catch {
+            try? fileManager.removeItem(at: workspaceURL)
+            throw error
+        }
+
+        return FileCommandTerminalLaunch(
+            workspaceURL: workspaceURL,
+            launcherURL: launcherURL,
+            commandURL: commandURL,
+            completionMarkerURL: completionMarkerURL
+        )
+    }
+
+    func cleanup(fileManager: FileManager = .default) {
+        try? fileManager.removeItem(at: workspaceURL)
+        try? fileManager.removeItem(at: completionMarkerURL)
+    }
+
+    private static func launcherScript(
+        invocation: FileCommandInvocation,
+        workspaceURL: URL,
+        commandURL: URL,
+        completionMarkerURL: URL
+    ) -> String {
+        let filePath = invocation.environment["file"] ?? ""
+        let executablePath = invocation.environment["PATH"] ?? ""
+        return """
+        #!/bin/sh
+        workspace=\(shellQuoted(workspaceURL.path))
+        cleanup() { /bin/rm -rf -- "$workspace"; }
+        trap cleanup EXIT
+        (
+          cd -- \(shellQuoted(invocation.currentDirectoryURL.path)) || exit $?
+          export file=\(shellQuoted(filePath))
+          export PATH=\(shellQuoted(executablePath))
+          command_text=$(/bin/cat \(shellQuoted(commandURL.path))) || exit $?
+          exec \(shellQuoted(invocation.executableURL.path)) -c "$command_text"
+        )
+        command_status=$?
+        /bin/sleep 3
+        /usr/bin/touch \(shellQuoted(completionMarkerURL.path))
+        exit "$command_status"
+
+        """
+    }
+
+    private static func shellQuoted(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
+    }
+}
+
 enum ClipOpenError: LocalizedError {
     case unsupportedKind(ClipKind)
     case browserNotConfigured
@@ -125,29 +218,49 @@ final class ClipOpenCoordinator {
             try await open(url, withBundleIdentifier: settings.codeEditorBundleIdentifier)
 
         case .file:
-            guard let url = await firstURL(in: clip, acceptedUTIs: ["public.file-url", "NSFilenamesPboardType"]), url.isFileURL else {
+            let urls = await fileURLs(in: clip)
+            guard !urls.isEmpty else {
                 throw ClipOpenError.contentUnavailable
             }
-            let resolvedURL = PasteboardFileURLDecoder.resolvedPathURL(url)
-            guard FileManager.default.fileExists(atPath: resolvedURL.path) else {
-                throw ClipOpenError.fileUnavailable
-            }
-            let uti = try? resolvedURL.resourceValues(forKeys: [.typeIdentifierKey]).typeIdentifier
-            let descriptor = FileIconResolver.descriptor(fileName: resolvedURL.lastPathComponent, uti: uti)
-            let fileTypeName = FileIconResolver.fileType(assetName: descriptor.assetName)?.displayName ?? descriptor.label
-            guard let rule = settings.fileOpenRule(fileName: resolvedURL.lastPathComponent, uti: uti) else {
-                throw ClipOpenError.fileRuleNotConfigured(fileTypeName)
-            }
-            switch rule.action {
-            case .application:
-                guard !rule.bundleIdentifier.isEmpty else {
-                    throw ClipOpenError.fileApplicationNotConfigured(fileTypeName)
+            var actions = [PreparedFileOpenAction]()
+            for url in urls {
+                let resolvedURL = PasteboardFileURLDecoder.resolvedPathURL(url)
+                guard !resolvedURL.path.isEmpty,
+                      FileManager.default.fileExists(atPath: resolvedURL.path) else {
+                    throw ClipOpenError.fileUnavailable
                 }
-                try await open(resolvedURL, withBundleIdentifier: rule.bundleIdentifier)
-            case .command:
-                let command = rule.command.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !command.isEmpty else { throw ClipOpenError.fileCommandNotConfigured(fileTypeName) }
-                try runFileCommand(command, fileURL: resolvedURL, fileType: rule.matchIdentifier)
+                let uti = try? resolvedURL.resourceValues(forKeys: [.typeIdentifierKey]).typeIdentifier
+                let descriptor = FileIconResolver.descriptor(fileName: resolvedURL.lastPathComponent, uti: uti)
+                let fileTypeName = FileIconResolver.fileType(assetName: descriptor.assetName)?.displayName ?? descriptor.label
+                guard let rule = settings.fileOpenRule(fileName: resolvedURL.lastPathComponent, uti: uti) else {
+                    throw ClipOpenError.fileRuleNotConfigured(fileTypeName)
+                }
+                switch rule.action {
+                case .application:
+                    guard !rule.bundleIdentifier.isEmpty else {
+                        throw ClipOpenError.fileApplicationNotConfigured(fileTypeName)
+                    }
+                    guard workspace.urlForApplication(withBundleIdentifier: rule.bundleIdentifier) != nil else {
+                        throw ClipOpenError.applicationUnavailable(rule.bundleIdentifier)
+                    }
+                    actions.append(.application(url: resolvedURL, bundleIdentifier: rule.bundleIdentifier))
+                case .command:
+                    let command = rule.command.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !command.isEmpty else { throw ClipOpenError.fileCommandNotConfigured(fileTypeName) }
+                    actions.append(.command(
+                        command: command,
+                        fileURL: resolvedURL,
+                        fileType: rule.matchIdentifier
+                    ))
+                }
+            }
+            for action in actions {
+                switch action {
+                case .application(let url, let bundleIdentifier):
+                    try await open(url, withBundleIdentifier: bundleIdentifier)
+                case .command(let command, let fileURL, let fileType):
+                    try runFileCommand(command, fileURL: fileURL, fileType: fileType)
+                }
             }
 
         case .text, .color, .mixed:
@@ -244,22 +357,19 @@ final class ClipOpenCoordinator {
     }
 
     private func runFileCommandInTerminal(_ invocation: FileCommandInvocation) throws {
+        let launch = try FileCommandTerminalLaunch.prepare(invocation: invocation)
         let process = Process()
-        let completionMarkerURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("Pasteory-FileCommand-\(UUID().uuidString).done")
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         process.arguments = [
             "-e", Self.terminalAppleScript,
-            invocation.executableURL.path,
-            invocation.environment["file"] ?? "",
-            invocation.currentDirectoryURL.path,
-            invocation.arguments.last ?? "",
-            invocation.environment["PATH"] ?? "",
-            completionMarkerURL.path
+            launch.terminalCommand,
+            launch.workspaceURL.path,
+            launch.completionMarkerURL.path
         ]
         let commandID = UUID()
         process.terminationHandler = { [weak self] _ in
             Task { @MainActor [weak self] in
+                launch.cleanup()
                 self?.runningFileCommands.removeValue(forKey: commandID)
             }
         }
@@ -268,34 +378,35 @@ final class ClipOpenCoordinator {
             try process.run()
         } catch {
             runningFileCommands.removeValue(forKey: commandID)
+            launch.cleanup()
             throw error
         }
     }
 
-    private static let terminalAppleScript = """
+    static let terminalAppleScript = """
     on run argv
-        set shellPath to item 1 of argv
-        set filePath to item 2 of argv
-        set directoryPath to item 3 of argv
-        set commandText to item 4 of argv
-        set executablePath to item 5 of argv
-        set completionMarker to item 6 of argv
-        set launchCommand to "cd " & quoted form of directoryPath & " && env file=" & quoted form of filePath & " PATH=" & quoted form of executablePath & " " & quoted form of shellPath & " -c " & quoted form of commandText & "; commandStatus=$?; sleep 3; /usr/bin/touch " & quoted form of completionMarker & "; (exit $commandStatus)"
+        set launchCommand to item 1 of argv
+        set workspacePath to item 2 of argv
+        set completionMarker to item 3 of argv
+        set windowWasClosed to false
         tell application "Terminal"
             activate
             set targetTab to do script launchCommand
             set targetWindow to first window whose selected tab is targetTab
             repeat
-                if not (exists targetWindow) then return
+                if not (exists targetWindow) then
+                    set windowWasClosed to true
+                    exit repeat
+                end if
                 try
                     POSIX file completionMarker as alias
                     exit repeat
                 end try
                 delay 0.2
             end repeat
-            if exists targetWindow then close targetWindow
+            if not windowWasClosed and exists targetWindow then close targetWindow
         end tell
-        do shell script "/bin/rm " & quoted form of completionMarker
+        do shell script "/bin/rm -rf " & quoted form of workspacePath & " " & quoted form of completionMarker
     end run
     """
 
@@ -305,6 +416,33 @@ final class ClipOpenCoordinator {
             if let url = decodeURL(data, uti: representation.uti) { return url }
         }
         return nil
+    }
+
+    private func fileURLs(in clip: Clip) async -> [URL] {
+        var result = [URL]()
+        let metadata = clip.effectiveFileMetadata
+        for item in clip.items.sorted(by: { $0.order < $1.order }) {
+            for representation in item.representations.sorted(by: { $0.uti < $1.uti })
+            where representation.uti == "public.file-url" || representation.uti == "NSFilenamesPboardType" {
+                guard let data = try? await attachments.data(for: representation) else { continue }
+                let urls = PasteboardFileURLDecoder.decodeAll(data, uti: representation.uti)
+                guard !urls.isEmpty else { continue }
+                for url in urls {
+                    let index = result.count
+                    let resolvedURL = PasteboardFileURLDecoder.resolvedPathURL(url)
+                    if !resolvedURL.path.isEmpty,
+                       !FileReferenceDecoder.isOpaqueFileReference(resolvedURL) {
+                        result.append(resolvedURL)
+                    } else if let paths = metadata?.filePaths, paths.indices.contains(index) {
+                        result.append(URL(fileURLWithPath: paths[index]))
+                    } else {
+                        result.append(resolvedURL)
+                    }
+                }
+                break
+            }
+        }
+        return result
     }
 
     private func decodeURL(_ data: Data, uti: String) -> URL? {
@@ -366,4 +504,9 @@ final class ClipOpenCoordinator {
         case nil: "txt"
         }
     }
+}
+
+private enum PreparedFileOpenAction {
+    case application(url: URL, bundleIdentifier: String)
+    case command(command: String, fileURL: URL, fileType: String)
 }

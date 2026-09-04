@@ -106,6 +106,7 @@ enum QuickPanelAction: String, CaseIterable, Codable, Identifiable {
     case togglePinned
     case editMetadata
     case setCollection
+    case createCollection
     case aggregateContent
     case expandAggregation
     case collapseAggregation
@@ -127,6 +128,7 @@ enum QuickPanelAction: String, CaseIterable, Codable, Identifiable {
         case .togglePinned: "置顶／取消置顶"
         case .editMetadata: "编辑信息"
         case .setCollection: "设置分组"
+        case .createCollection: "新建分组"
         case .aggregateContent: "聚合内容"
         case .expandAggregation: "展开聚合"
         case .collapseAggregation: "收起聚合"
@@ -299,7 +301,9 @@ final class AppSettings: ObservableObject {
             for (rawAction, shortcut) in stored {
                 if let action = QuickPanelAction(rawValue: rawAction) { values[action] = shortcut }
             }
-            let newlyAddedActions: [QuickPanelAction] = [.aggregateContent, .expandAggregation, .collapseAggregation]
+            let newlyAddedActions: [QuickPanelAction] = [
+                .createCollection, .aggregateContent, .expandAggregation, .collapseAggregation
+            ]
             for action in newlyAddedActions where stored[action.rawValue] == nil {
                 guard let proposed = Self.defaultQuickActionShortcuts[action],
                       stored.contains(where: { rawAction, shortcut in
@@ -634,6 +638,7 @@ final class AppSettings: ObservableObject {
             .togglePinned: PasteoryShortcut(keyCode: 17, modifiers: command),
             .editMetadata: PasteoryShortcut(keyCode: 14, modifiers: command),
             .setCollection: PasteoryShortcut(keyCode: 5, modifiers: command),
+            .createCollection: PasteoryShortcut(keyCode: 45, modifiers: command | shift),
             .aggregateContent: PasteoryShortcut(keyCode: 11, modifiers: command),
             .expandAggregation: PasteoryShortcut(keyCode: 125, modifiers: command),
             .collapseAggregation: PasteoryShortcut(keyCode: 126, modifiers: command),
