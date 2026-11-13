@@ -1,17 +1,17 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="utf-8">
     <link rel="stylesheet" href="popup.css">
   </head>
   <body>
-    <h1>Pasteory 网页来源</h1>
+    <h1 data-i18n="title">Pasteory Web Context</h1>
     <p id="site" class="site"></p>
-    <label class="row"><input id="enabled" type="checkbox"><span>允许采集此网站</span></label>
-    <p id="status" class="status">正在检查原生桥接…</p>
-    <p class="hint">只有 Pasteory 中的 Chrome 总开关和此网站开关同时打开，复制时才会读取选区附近的网页元素。</p>
+    <label class="row"><input id="enabled" type="checkbox"><span data-i18n="allow">Allow capture on this website</span></label>
+    <p id="status" class="status">Checking connection…</p>
+    <p class="hint" data-i18n="hint">Nearby page elements are read on copy only when Chrome capture in Pasteory and this website’s switch are both on.</p>
     <section id="blocked-section" hidden>
-      <h2>已关闭的网站</h2>
+      <h2 data-i18n="blocked">Blocked Websites</h2>
       <div id="blocked-list"></div>
     </section>
     <script src="popup.js"></script>

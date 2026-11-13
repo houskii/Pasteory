@@ -4,6 +4,7 @@ public enum AppLanguage: String, CaseIterable, Codable, Identifiable, Sendable {
     case english = "en"
     case simplifiedChinese = "zh-Hans"
 
+    public static let preferenceKey = "appLanguage"
     public var id: String { rawValue }
     public var nativeName: String {
         switch self {

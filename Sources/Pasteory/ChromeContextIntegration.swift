@@ -261,7 +261,8 @@ enum ChromeNativeMessagingHost {
             "type": "config",
             "requestId": requestID ?? "",
             "ok": true,
-            "chromeEnabled": chromeCaptureEnabled()
+            "chromeEnabled": chromeCaptureEnabled(),
+            "language": preferences().string(forKey: AppLanguage.preferenceKey) ?? AppLanguage.english.rawValue
         ])
     }
 

@@ -8,7 +8,7 @@ Pasteory 使用 Sparkle 2.10.1 校验并安装更新。更新索引位于
 ## 用户体验
 
 - 默认每 24 小时检查一次，Sparkle 保存检查时间并负责调度。启动、唤醒或重新激活应用时会恢复到期调度；退出期间不运行检查。手动检查不受每日间隔限制。
-- 自动检查只读取版本信息；发现新版后缓存可用版本，在快捷面板齿轮左侧显示 `更新 ↓`。没有新版时不预留按钮宽度。按钮为 56 × 26 pt，与齿轮间距 6 pt，保留面板右侧原有 12 pt 留白。
+- 自动检查只读取版本信息；发现新版后缓存可用版本，在快捷面板齿轮左侧显示 `更新 ↓`。没有新版时不预留按钮宽度。中文按钮为 56 × 26 pt、英文 `Update ↓` 为 70 × 26 pt，与齿轮间距 6 pt，保留面板右侧原有 12 pt 留白。
 - 更新入口使用独立语义色：橙色主题采用青色，其余六种主题采用琥珀金；两套颜色分别定义浅色、深色外观。文字对比度至少为 4.5:1，并通过文字、箭头和胶囊轮廓辅助识别。
 - 悬停说明为“发现新版本 v<版本>，查看更新内容”。按钮打开更新说明和当前／目标版本；选择“稍后”不下载，选择“下载并安装”后自动下载、验签、安装并重启。
 - 下载阶段可取消；校验／安装期间不允许关闭确认窗口。取消或失败保留旧应用，可重新检查和重试。安装目录需要额外权限时，由 Sparkle 请求系统授权。
@@ -50,9 +50,9 @@ make qa-verify
 make dmg
 make verify
 python3 scripts/prepare_update.py \
-  --tag v0.1.30 \
+  --tag v0.1.31 \
   --notes /path/to/release-notes.md \
-  --dmg dist/Pasteory-0.1.30-arm64.dmg
+  --dmg dist/Pasteory-0.1.31-arm64.dmg
 ```
 
 工具验证正式 Bundle ID、签名、版本递增、DMG、发布公钥和更新说明，生成：
@@ -62,6 +62,8 @@ python3 scripts/prepare_update.py \
 - `dist/update/release-tag.txt`：对应 tag。
 
 这个命令只准备文件，不上传或发布。正式交付沿用仓库的单一发布入口：先暂存已验证的源码与公钥，再执行 `make release RELEASE_NOTES=/absolute/path/to/release-notes.md`。
+
+源码与版本号也可以先通过 PR 合入 main，再在原发布 Mac 执行同一个 `make release` 命令；脚本此时与最近发布标签比较版本和 Build，不会因为 main 已包含本次版本号而拒绝打包。
 
 `release_beta.sh` 会重新验证、构建、准备签名索引并安装正式应用，将 DMG 和版本化的 `release/beta/appcast-<版本>.xml` 一起提交、打 tag 和推送。GitHub Actions 先发布并核对 DMG、SHA-256 和版本化签名索引，确认附件完整后才将当前索引更新到 `release/beta/appcast.xml`。旧版本的恢复发布不会覆盖新版本索引；旧标签与既有附件不被覆盖。发布脚本最后回读远端索引并核对内容。
 

@@ -5,6 +5,9 @@ import PasteoryCore
 enum PasteoryApplication {
     @MainActor
     static func main() {
+        let language = AppSettings.preferredLanguage(in: .standard)
+        UserDefaults.standard.set([language.rawValue], forKey: "AppleLanguages")
+        L10n.activate(language)
         do {
             try PasteoryRuntimeIdentity.validateCurrentBundleConfiguration()
         } catch {

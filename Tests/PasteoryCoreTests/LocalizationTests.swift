@@ -46,7 +46,7 @@ import Testing
     for (key, value) in L10n.english {
         #expect(!value.isEmpty, "Empty translation: \(key)")
         #expect(placeholders(key) == placeholders(value), "Mismatched placeholders: \(key)")
-        #expect(value.range(of: #"\p{Han}"#, options: .regularExpression) == nil, "Untranslated English label: \(key)")
+        #expect(value.range(of: #"[\u3400-\u9FFF]"#, options: .regularExpression) == nil, "Untranslated English label: \(key)")
     }
 }
 

@@ -75,7 +75,7 @@ public struct FileClipMetadata: Codable, Hashable, Sendable {
         return L10n.tr("\(fileCount) 个文件")
     }
     public var namesSummary: String {
-        let visible = fileNames.prefix(3).joined(separator: "、")
+        let visible = fileNames.prefix(3).joined(separator: L10n.language == .english ? ", " : "、")
         guard fileCount > 3 else { return visible }
         return L10n.tr("\(visible) 等")
     }

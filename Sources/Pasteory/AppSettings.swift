@@ -204,7 +204,7 @@ final class AppSettings: ObservableObject {
         static let automaticWebCacheCleanup = "automaticWebCacheCleanup"
         static let lastWebCacheCleanup = "lastWebCacheCleanup"
         static let themeColor = "themeColor"
-        static let appLanguage = "appLanguage"
+        static let appLanguage = AppLanguage.preferenceKey
         static let quickTabLayout = "quickTabLayout"
         static let browserBundleIdentifier = "browserBundleIdentifier"
         static let codeEditorBundleIdentifier = "codeEditorBundleIdentifier"
@@ -277,10 +277,15 @@ final class AppSettings: ObservableObject {
     private let defaults: UserDefaults
     let fileCommandLogsDirectory: URL?
 
+    static func preferredLanguage(in defaults: UserDefaults) -> AppLanguage {
+        AppLanguage(rawValue: defaults.string(forKey: Key.appLanguage) ?? "") ?? .english
+    }
+
     init(defaults: UserDefaults = .standard, logsDirectory: URL? = nil) {
         self.defaults = defaults
         fileCommandLogsDirectory = logsDirectory?.appendingPathComponent("FileCommands", isDirectory: true)
-        appLanguage = AppLanguage(rawValue: defaults.string(forKey: Key.appLanguage) ?? "") ?? .english
+        appLanguage = Self.preferredLanguage(in: defaults)
+        defaults.set([appLanguage.rawValue], forKey: "AppleLanguages")
         completedOnboarding = defaults.bool(forKey: Key.completedOnboarding)
         if defaults.integer(forKey: Key.monitoringDefaultVersion) < 2 {
             monitoringEnabled = true

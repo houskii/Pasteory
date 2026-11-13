@@ -26,7 +26,7 @@ import Testing
 }
 
 @Test func verificationRequiredHasExplicitUserFacingState() {
-    #expect(LinkRequestState.verificationRequired.displayName == "需要网页验证")
+    #expect(LinkRequestState.verificationRequired.displayName == "Page verification required")
     #expect(LinkRequestState.verificationRequired.needsAttention)
 }
 

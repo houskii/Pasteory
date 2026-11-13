@@ -34,6 +34,9 @@ otool -l "$BINARY" | grep -Fq '@executable_path/../Frameworks'
 arch -arm64 /usr/bin/swift "$PROJECT_DIR/scripts/verify_menu_bar_icon.swift" \
   "$APP_DIR/Contents/Resources/MenuBarIcon.png" \
   "$APP_DIR/Contents/Resources/MenuBarIcon@2x.png"
+[[ -s "$APP_DIR/Contents/Resources/Pasteory_PasteoryCore.bundle/en.json" || -s "$APP_DIR/Contents/Resources/Pasteory_PasteoryCore.bundle/Contents/Resources/en.json" ]]
+[[ -s "$APP_DIR/Contents/Resources/en.lproj/InfoPlist.strings" ]]
+[[ -s "$APP_DIR/Contents/Resources/zh-Hans.lproj/InfoPlist.strings" ]]
 [[ -d "$FILE_ICON_DIR" ]]
 [[ "$(find "$FILE_ICON_DIR" -maxdepth 1 -type f -name '*.png' | wc -l | tr -d ' ')" == "49" ]]
 while IFS= read -r -d '' icon; do
