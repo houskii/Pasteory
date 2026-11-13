@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR=${0:A:h}
 PROJECT_DIR=${SCRIPT_DIR:h}
 BIN_DIR=$(swift build --package-path "$PROJECT_DIR" --show-bin-path)
+APP_EXECUTABLE="$PROJECT_DIR/dist/Pasteory-QA.app/Contents/MacOS/Pasteory"
+[[ -x "$APP_EXECUTABLE" ]] || APP_EXECUTABLE="$BIN_DIR/Pasteory"
 OUTPUT_DIR=${1:-"$PROJECT_DIR/dist/ui-qa"}
 mkdir -p "$OUTPUT_DIR"
 OUTPUT_DIR=${OUTPUT_DIR:A}
@@ -14,7 +16,7 @@ capture() {
   local data_root
   data_root=$(mktemp -d "${TMPDIR:-/tmp}/pasteory-update-ui.XXXXXX")
   local screenshot="$OUTPUT_DIR/$name.png"
-  "$BIN_DIR/Pasteory" --debug-data-root "$data_root" --debug-ui-qa \
+  "$APP_EXECUTABLE" --debug-data-root "$data_root" --debug-ui-qa \
     --debug-disable-monitor --debug-disable-hotkey --debug-seed \
     --debug-snapshot-path "$screenshot" "$@" > "$OUTPUT_DIR/$name.log" 2>&1 &
   local app_pid=$!

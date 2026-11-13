@@ -60,23 +60,25 @@ final class UpdateService: NSObject, ObservableObject, SPUUserDriver, SPUUpdater
 
     func start() {
         guard updater == nil else { return }
-        guard PasteoryRuntimeIdentity.current.variant == .production else {
-            configurationMessage = "QA 版本使用隔离环境，不接收正式应用更新。"
-            availableUpdate = nil
-            return
-        }
 #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--debug-update-available") {
             availableUpdate = AppUpdate(
-                version: "0.1.26", build: "31", publishedAt: Date(),
+                version: "0.1.27", build: "32", publishedAt: Date(),
                 notes: "资料库已整合到设置。\n新增每日更新检查和 GitHub 自动下载安装。",
-                downloadURL: URL(string: "https://github.com/houskii/Pasteory/releases/download/v0.1.26/Pasteory-0.1.26-arm64.dmg"),
+                downloadURL: URL(string: "https://github.com/houskii/Pasteory/releases/download/v0.1.27/Pasteory-0.1.27-arm64.dmg"),
                 releaseURL: nil
             )
             releaseNotes = availableUpdate?.notes ?? ""
             configurationMessage = "更新预览使用演示数据，不执行下载安装。"
             return
         }
+#endif
+        guard PasteoryRuntimeIdentity.identity(for: bundle.bundleIdentifier).variant == .production else {
+            configurationMessage = "QA 版本使用隔离环境，不接收正式应用更新。"
+            availableUpdate = nil
+            return
+        }
+#if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--debug-ui-qa")
             || ProcessInfo.processInfo.arguments.contains("--debug-data-root") {
             configurationMessage = "隔离调试环境不检查正式更新。"
