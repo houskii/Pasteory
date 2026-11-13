@@ -14,15 +14,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  first-launch-helper:
+    runs-on: macos-15-intel
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Select OpenSSL 3
+        run: echo "$(brew --prefix openssl@3)/bin" >> "$GITHUB_PATH"
+      - name: Verify native first-launch behavior
+        run: python3 -m unittest discover -s scripts/tests -p test_first_launch.py -v
   test:
+    needs: first-launch-helper
     runs-on: macos-26
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Select OpenSSL 3 for local signing tools
         run: echo "$(brew --prefix openssl@3)/bin" >> "$GITHUB_PATH"
-      - name: Check native first-launch helper
-        run: python3 -m unittest discover -s scripts/tests -p test_first_launch.py -v
       - name: Swift tests and application type checking
         run: swift test
       - name: Release build

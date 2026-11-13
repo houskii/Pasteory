@@ -162,7 +162,8 @@ class NativeFirstLaunchTests(unittest.TestCase):
                 # check repeats this test with the real app, including Sparkle and its symlinks.
                 binary = app / "Contents/MacOS/Fixture"
                 binary.parent.mkdir(parents=True)
-                shutil.copy2("/usr/bin/true", binary)
+                shutil.copyfile("/usr/bin/true", binary)
+                binary.chmod(0o755)
                 (app / "Contents/Info.plist").write_bytes(plistlib.dumps({
                     "CFBundleIdentifier": "app.pasteory.Pasteory", "PasteoryBuildVariant": "production",
                     "CFBundleShortVersionString": "0.1.31", "CFBundleVersion": "36",
