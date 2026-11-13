@@ -75,6 +75,7 @@ final class UpdateService: NSObject, ObservableObject, SPUUserDriver, SPUUpdater
 #endif
         guard PasteoryRuntimeIdentity.identity(for: bundle.bundleIdentifier).variant == .production else {
             configurationMessage = "QA 版本使用隔离环境，不接收正式应用更新。"
+            automaticChecksEnabled = false
             availableUpdate = nil
             return
         }

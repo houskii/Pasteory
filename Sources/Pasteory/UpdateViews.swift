@@ -61,6 +61,7 @@ struct UpdateBadge: View {
 
 struct UpdateDialogView: View {
     @ObservedObject var service: UpdateService
+    @ObservedObject var settings: AppSettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -132,6 +133,7 @@ struct UpdateDialogView: View {
         }
         .padding(24)
         .frame(minWidth: 520, idealWidth: 560, maxWidth: .infinity, minHeight: 340, idealHeight: 540, maxHeight: .infinity)
+        .pasteoryTheme(settings.themeColor)
     }
 
     private var title: String {

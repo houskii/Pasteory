@@ -635,7 +635,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
 
     private func presentUpdateDialog() {
         if updateWindow == nil {
-            let controller = NSHostingController(rootView: UpdateDialogView(service: updateService))
+            let controller = NSHostingController(rootView: UpdateDialogView(service: updateService, settings: settings))
             controller.sizingOptions = []
             let window = NSWindow(contentViewController: controller)
             window.title = "Pasteory 更新"
