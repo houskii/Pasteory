@@ -50,7 +50,7 @@ make qa-verify
 make dmg
 make verify
 python3 scripts/prepare_update.py \
-  --tag v0.1.30-beta \
+  --tag v0.1.30 \
   --notes /path/to/release-notes.md \
   --dmg dist/Pasteory-0.1.30-arm64.dmg
 ```
@@ -61,10 +61,14 @@ python3 scripts/prepare_update.py \
 - `dist/update/release-notes.md`：GitHub Release 使用的同一份更新说明。
 - `dist/update/release-tag.txt`：对应 tag。
 
-这个命令只准备文件，不上传或发布。发布时先创建对应 GitHub Release 并上传完整 DMG，确认链接可下载后，再将生成的 `appcast.xml` 原样复制到 `release/beta/appcast.xml` 并发布到 `main`。签名后修改索引中的任何内容都必须重新签名。
+这个命令只准备文件，不上传或发布。正式交付沿用仓库的单一发布入口：先暂存已验证的源码与公钥，再执行 `make release RELEASE_NOTES=/absolute/path/to/release-notes.md`。
+
+`release_beta.sh` 会重新验证、构建、准备签名索引并安装正式应用，将 DMG 和版本化的 `release/beta/appcast-<版本>.xml` 一起提交、打 tag 和推送。GitHub Actions 先发布并核对 DMG、SHA-256 和版本化签名索引，确认附件完整后才将当前索引更新到 `release/beta/appcast.xml`。旧版本的恢复发布不会覆盖新版本索引；旧标签与既有附件不被覆盖。发布脚本最后回读远端索引并核对内容。
+
+签名后修改索引中的任何内容都必须重新签名。首次从其他机器发布前必须导入现有发布私钥，不能用新密钥替代已发布的密钥。
 
 仓库初始空索引用于占位，尚未签名。必须完成第一次正式发布，客户端才能验证更新源；不能把占位索引当作可用发布。
-旧版 0.1.25 不包含更新器，需要先手动安装一次包含更新器的新版本。
+0.1.29 及更早版本不包含更新器，需要先手动安装一次包含更新器的新版本。
 
 ## 验证
 
