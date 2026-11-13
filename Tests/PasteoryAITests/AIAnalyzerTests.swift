@@ -66,3 +66,22 @@ private actor UsageCollector {
     #expect(records.count == 1)
     #expect(records[0].estimated && !records[0].succeeded && records[0].totalTokens > 0)
 }
+
+@Test func aFiveThousandClipLibrarySendsOnlyTheCurrentBoundedBatch() async throws {
+    let docs = (0..<5000).map { aiTestDoc("Library item \($0): UNSENT_\($0)") }
+    let transport = ScriptedTransport { body, _ in
+        let request = try JSONDecoder().decode(JSONValue.self, from: body)
+        let messages = try #require(request["messages"].array)
+        let last = try #require(messages.last)
+        let content = try #require(last["content"].string)
+        #expect(!content.contains("UNSENT_4999"))
+        let payload = try JSONDecoder().decode(JSONValue.self, from: Data(content.utf8))
+        #expect((payload["current_batch"].array?.count ?? 0) <= 20)
+        #expect(body.count < 48_000)
+        return Data("{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"Complete\"}}],\"usage\":{\"prompt_tokens\":1000,\"completion_tokens\":50}}".utf8)
+    }
+    var configuration = AIConfiguration(); configuration.model = "test"
+    let result = try await AIAnalyzer(transport: transport).analyze(documents: docs, batchIDs: Array(docs.prefix(20).map(\.id)), groups: [], configuration: configuration, credential: "", ledger: [], trigger: "manual", onUsage: { _ in })
+    #expect(result.analyzedIDs.count == 20)
+    #expect(await transport.requests.count == 1)
+}

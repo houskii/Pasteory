@@ -16,6 +16,23 @@ func toolArguments(_ object: [String: JSONValue]) -> String { JSONValue.object(o
     #expect(!names.contains("shell"))
 }
 
+@Test func pagedBodyReadsKeepEvidenceFromEveryActuallyReadPage() throws {
+    let a = aiTestDoc(String(repeating: "x", count: 3000) + "A late source quote."), b = aiTestDoc("A second source")
+    var workspace = try AtomicWorkspace(documents: [a, b], writableIDs: [a.id, b.id], groups: [])
+    _ = try workspace.initialDocuments([a.id, b.id], characterBudget: 2000)
+    let page = try workspace.execute(name: "clips_get", arguments: toolArguments(["clip_ids": .array([.string(a.id.uuidString)]), "offset_chars": .number(3000), "max_chars": .number(200)]))
+    #expect(page.array?.first?["body"].string == "A late source quote.")
+    _ = try workspace.execute(name: "clips_get", arguments: toolArguments(["clip_ids": .array([.string(a.id.uuidString)]), "offset_chars": .number(0)]))
+    let bundle = try workspace.execute(name: "aggregations_create", arguments: toolArguments(["title": .string("Sources"), "clip_ids": .array([.string(a.id.uuidString), .string(b.id.uuidString)])]))
+    _ = try workspace.execute(name: "summaries_set", arguments: toolArguments([
+        "target_id": bundle["aggregation_id"], "claims": .array([.object([
+            "kind": .string("fact"), "text": .string("A quoted fact"), "evidence": .array([.object(["clip_id": .string(a.id.uuidString), "quote": .string("A late source quote.")])])
+        ])])
+    ]))
+    #expect(try workspace.finish().commands.last?.kind == .setSummary)
+    #expect(throws: AIError.self) { try workspace.execute(name: "clips_search", arguments: "{\"query\":\"x\",\"limit\":1e99}") }
+}
+
 @Test func creationReturnsAnIDThatSubsequentCallsCanUse() throws {
     let d = aiTestDoc()
     var w = try AtomicWorkspace(documents: [d], writableIDs: [d.id], groups: [])

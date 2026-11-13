@@ -25,6 +25,12 @@ struct AISettingsView: View {
         self.controller = controller
         _draft = State(initialValue: controller.settings.aiConfiguration)
         _credential = State(initialValue: (try? AICredentialStore.load()) ?? "")
+#if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("--debug-ai-lifecycle") { _tab = State(initialValue: .lifecycle) }
+        if arguments.contains("--debug-ai-usage") { _tab = State(initialValue: .usage) }
+        if arguments.contains("--debug-ai-analysis") { _tab = State(initialValue: .analysis) }
+#endif
     }
 
     var body: some View {

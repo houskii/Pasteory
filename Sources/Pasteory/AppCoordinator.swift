@@ -2,6 +2,7 @@ import AppKit
 import Carbon
 import Combine
 import PasteoryCore
+import PasteoryAI
 import SwiftUI
 
 @MainActor
@@ -150,7 +151,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
             Task { @MainActor in await state?.webCacheMaintenance.check() }
         }
         maintenanceTimer = Timer.scheduledTimer(withTimeInterval: 86_400, repeats: true) { [weak state] _ in
-            Task { @MainActor in await state?.runArchive() }
+            Task { @MainActor in await state?.runArchive(automatic: true) }
         }
         settings.monitoringEnabled = true
 #if DEBUG
@@ -372,9 +373,44 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
         state.selectedClipID = state.clips.first?.id
     }
 
+    private func seedAIData() async {
+        func localized(_ en: String, _ zh: String) -> String { settings.appLanguage == .english ? en : zh }
+        do {
+            let recent = Array(state.quickClips.filter { [.text, .code].contains($0.primaryKind) }.prefix(2))
+            guard recent.count == 2 else { return }
+            let capture = PasteboardCapture(
+                items: [CapturedItem(order: 0, representations: [CapturedRepresentation(uti: "public.utf8-plain-text", data: Data("Completed project: retain original decisions for future reference.".utf8))])],
+                source: ClipSource(appName: "Notes", bundleIdentifier: "com.apple.Notes", confidence: .high),
+                capturedAt: Date().addingTimeInterval(-90 * 86_400))
+            guard let old = ClipClassifier.makeClip(from: capture) else { return }
+            try await state.repository.save(old)
+            let activeID = UUID(), archivedID = UUID(), bundleID = UUID()
+            var changes = AIChangeSet()
+            changes.clipRevisions = Dictionary(uniqueKeysWithValues: (recent + [old]).map { ($0.id, $0.aiRevision) })
+            changes.commands = [
+                AICommand(kind: .createGroup, targetID: activeID, name: localized("Pasteory AI design", "Pasteory AI 设计"), definition: localized("Design decisions and implementation material for the next release.", "下个版本的产品设计决策与实现资料。")),
+                AICommand(kind: .addItems, targetID: activeID, clipIDs: recent.map(\.id)),
+                AICommand(kind: .updateOverview, targetID: activeID, clipIDs: recent.map(\.id), overview: localized("Two source items about organizing ideas and their implementation.", "两条关于想法整理与实现方式的资料，保留独立原文。")),
+                AICommand(kind: .createGroup, targetID: archivedID, name: localized("Completed project", "已完成项目"), definition: localized("Historical decisions for later reference.", "保留历史决策，供以后查阅。")),
+                AICommand(kind: .addItems, targetID: archivedID, clipIDs: [old.id]),
+                AICommand(kind: .createAggregation, targetID: bundleID, clipIDs: recent.map(\.id), name: localized("Next release brief", "下个版本资料包")),
+                AICommand(kind: .setSummary, targetID: bundleID, claims: [AIClaim(kind: .fact, text: localized("Keep the original source alongside reusable ideas.", "有用的想法与原始依据一起保留。"), evidence: [AIEvidence(clipID: recent[0].id, quote: String(recent[0].previewText.prefix(30)))])])
+            ]
+            try await state.repository.applyAIChangeSet(changes)
+            let usage = (0..<7).map { offset -> AIUsageRecord in
+                var record = AIUsageRecord(runID: UUID(), requestedModel: "demo/model", inputTokens: 1200 + offset * 250, outputTokens: 240 + offset * 30, estimated: true, succeeded: true, trigger: "demo")
+                record.date = Date().addingTimeInterval(-Double(offset) * 86_400); return record
+            }
+            try await state.repository.updateAIState { $0.usage = usage }
+            try await state.intelligence.reload()
+            await state.refreshCollections(); await state.refreshLibrary(); await state.refreshQuick(); await state.refreshAggregations()
+        } catch { state.show(error) }
+    }
+
     private func seedDebugData() async {
         if ProcessInfo.processInfo.arguments.contains("--debug-readme-seed") {
             await seedReadmeData()
+            if ProcessInfo.processInfo.arguments.contains("--debug-ai-seed") { await seedAIData() }
             return
         }
         let samples = [

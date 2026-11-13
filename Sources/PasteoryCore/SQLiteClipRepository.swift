@@ -1632,6 +1632,22 @@ public actor SQLiteClipRepository: ClipRepository {
 }
 
 extension SQLiteClipRepository {
+    public func aiContext(ids: [UUID], includeNotes: Bool, includeSource: Bool) throws -> [AIClipDocument] {
+        guard ids.count <= 100 else { throw AIError.invalid("Context batch is too large") }
+        return try clips(ids: ids).filter(\.mayParticipateInAI).compactMap { clip in
+            var body = clip.previewText
+            if [.text, .code, .color].contains(clip.primaryKind) {
+                for r in clip.items.flatMap(\.representations) where ["public.utf8-plain-text", "public.plain-text", "public.swift-source"].contains(r.uti) && r.storage.byteCount <= 2_097_152 {
+                    if let text = String(data: try loadRepresentationData(r), encoding: .utf8) { body = text; break }
+                }
+            }
+            guard Clip.isSafeAIText(body) else { return nil }
+            var doc = clip.aiDocument(includeNotes: includeNotes, includeSource: includeSource, body: String(body.prefix(60_000)))
+            doc.truncated = doc.truncated || body.count > 60_000
+            return doc
+        }
+    }
+
     public func aiState() throws -> AIOrganizationState {
         let s = try prepare("SELECT payload_json FROM intelligence_state WHERE id=1;")
         defer { sqlite3_finalize(s) }
@@ -1859,7 +1875,7 @@ extension SQLiteClipRepository {
     private func evidenceText(for clip: Clip) throws -> String {
         var body = clip.previewText
         if [.text, .code, .color].contains(clip.primaryKind) {
-            for r in clip.items.flatMap(\.representations) where ["public.utf8-plain-text", "public.plain-text"].contains(r.uti) && r.storage.byteCount <= 2_097_152 {
+            for r in clip.items.flatMap(\.representations) where ["public.utf8-plain-text", "public.plain-text", "public.swift-source"].contains(r.uti) && r.storage.byteCount <= 2_097_152 {
                 if let value = String(data: try loadRepresentationData(r), encoding: .utf8) { body = value; break }
             }
         }
@@ -1878,25 +1894,30 @@ extension SQLiteClipRepository {
             (groupID == nil || $0.collectionIDs.contains(groupID!)) && policy.evaluate($0.activity, now: now).compressionEligible
         }
         let beforeManifest = await intelligencePayloads.snapshot()
-        var touched = Set<String>()
-        for clip in selected {
-            try Task.checkCancellation()
-            for representation in clip.items.flatMap(\.representations) {
-                let data = try loadRepresentationData(representation)
-                guard data.count <= 536_870_912 else { continue }
-                let hash = AIHash.digest(data)
-                var owners = [String](); var toPack = [String]()
-                for other in initial {
-                    for rep in other.items.flatMap(\.representations) where payloadID(rep) == hash {
-                        let refs = payloadOwners(clip: other, representationID: rep.id, aggregations: aggregations)
-                        owners.append(contentsOf: refs)
-                        if other.id == clip.id {
-                            if let groupID {
-                                toPack.append(contentsOf: refs.filter { $0.hasPrefix("group:" + groupID.uuidString + ":") })
-                            } else { toPack.append(contentsOf: refs) }
-                        }
-                    }
+        let selectedIDs = Set(selected.map(\.id))
+        var ownersByHash = [String: Set<String>](), selectedOwners = [String: Set<String>]()
+        var representations = [String: ClipRepresentation](), activityByOwner = [String: Date]()
+        // Build the reverse index once. A 5,000-item library must not rehash and
+        // scan every other item for each selected representation.
+        for clip in initial {
+            for rep in clip.items.flatMap(\.representations) where rep.storage.byteCount <= 536_870_912 {
+                let hash = payloadID(rep)
+                let owners = payloadOwners(clip: clip, representationID: rep.id, aggregations: aggregations)
+                ownersByHash[hash, default: []].formUnion(owners)
+                for owner in owners { activityByOwner[owner] = clip.activity.lastUsedAt }
+                if selectedIDs.contains(clip.id) {
+                    let chosen = groupID.map { id in owners.filter { $0.hasPrefix("group:" + id.uuidString + ":") } } ?? owners
+                    selectedOwners[hash, default: []].formUnion(chosen); representations[hash] = rep
                 }
+            }
+        }
+        var touched = Set<String>()
+        for hash in representations.keys.sorted() {
+            try Task.checkCancellation()
+            if let representation = representations[hash] {
+                let data = try loadRepresentationData(representation)
+                guard AIHash.digest(data) == hash else { throw StorageError.checksumMismatch }
+                var owners = Array(ownersByHash[hash] ?? []), toPack = Array(selectedOwners[hash] ?? [])
                 let canonical = "canonical:" + hash
                 owners.append(canonical); toPack.append(canonical)
                 _ = try await intelligencePayloads.register(data, ownerIDs: owners)
@@ -1904,7 +1925,7 @@ extension SQLiteClipRepository {
                 // model-maintained overview timestamps never reach this check.
                 for owner in owners where !owner.hasPrefix("canonical:") {
                     if let old = beforeManifest.references[owner], old.mode == .packed,
-                       clip.activity.lastUsedAt > old.changedAt { try await intelligencePayloads.restoreRaw(ownerID: owner) }
+                       let lastUsed = activityByOwner[owner], lastUsed > old.changedAt { try await intelligencePayloads.restoreRaw(ownerID: owner) }
                 }
                 _ = try await intelligencePayloads.pack(ownerIDs: Array(Set(toPack)))
                 touched.insert(hash)

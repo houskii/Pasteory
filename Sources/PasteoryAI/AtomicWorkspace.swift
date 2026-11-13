@@ -52,7 +52,7 @@ public struct AIToolDefinition: Encodable, Sendable {
             ]), "required": .array([.string("kind"), .string("text"), .string("evidence")]), "additionalProperties": .bool(false)
         ])])
         return [
-            Self(name: "clips_get", description: "Read bounded title, body, note, source and time for known content IDs. Only supplied data may be cited.", properties: ["clip_ids": ids], required: ["clip_ids"]),
+            Self(name: "clips_get", description: "Read bounded content for known IDs. offset_chars and max_chars page through longer current-batch bodies (up to 60,000 characters loaded locally). Historical bodies may only contain previews. Only supplied data may be cited.", properties: ["clip_ids": ids, "offset_chars": .object(["type": .string("integer"), "minimum": .number(0), "maximum": .number(60_000)]), "max_chars": .object(["type": .string("integer"), "minimum": .number(200), "maximum": .number(8000)])], required: ["clip_ids"]),
             Self(name: "clips_search", description: "Find a small number of related clips in the authorized context. Reading does not authorize changing historical content.", properties: ["query": text, "limit": limit], required: ["query"]),
             Self(name: "groups_search", description: "Find existing AI groups by meaning and keywords before creating a group. Results include topic definitions and current overview coverage.", properties: ["query": text, "limit": limit], required: ["query"]),
             Self(name: "groups_get", description: "Read an existing or staged group's definition, overview and representative members.", properties: ["group_id": text], required: ["group_id"]),
@@ -74,6 +74,7 @@ public struct AtomicWorkspace: Sendable {
     public private(set) var groups: [UUID: AIGroupProfile]
     public private(set) var aggregations: [UUID: [UUID]] = [:]
     public private(set) var readDocuments: [UUID: AIClipDocument] = [:]
+    private var readEvidence: [UUID: [String]] = [:]
     private let documents: [UUID: AIClipDocument]
     private let writable: Set<UUID>
     private let reservedNames: Set<String>
@@ -128,12 +129,19 @@ public struct AtomicWorkspace: Sendable {
             guard let list = a[key].array, !list.isEmpty, list.count <= 100 else { throw AIError.invalid("Invalid \(key)") }
             return try Array(Set(list.map { value in guard let v = value.string.flatMap(UUID.init(uuidString:)) else { throw AIError.invalid("Invalid content ID") }; return v })).sorted { $0.uuidString < $1.uuidString }
         }
-        let limit = min(20, max(1, Int(a["limit"].number ?? 5)))
+        let rawLimit = a["limit"].number ?? 5
+        guard rawLimit.isFinite, rawLimit.rounded() == rawLimit, (1...20).contains(rawLimit) else { throw AIError.invalid("Invalid search limit") }
+        let limit = Int(rawLimit)
         let reason = String((a["reason"].string ?? "").prefix(1000))
         switch name {
         case "clips_get":
+            let offset = a["offset_chars"].number ?? 0, requested = a["max_chars"].number ?? 2400
+            guard offset.isFinite, offset.rounded() == offset, (0...60_000).contains(offset),
+                  requested.isFinite, requested.rounded() == requested, (200...8000).contains(requested) else { throw AIError.invalid("Invalid content page") }
             let values = try ids("clip_ids").map { id -> AIClipDocument in
-                guard let d = documents[id] else { throw AIError.invalid("Content outside authorized context") }; return d.bounded()
+                guard var d = documents[id] else { throw AIError.invalid("Content outside authorized context") }
+                let remaining = d.body.dropFirst(Int(offset)); d.body = String(remaining)
+                return d.bounded(to: Int(requested))
             }
             for value in values { try recordRead(value) }; return try .value(values)
         case "clips_search":
@@ -204,9 +212,9 @@ public struct AtomicWorkspace: Sendable {
                 }
                 let evidence = try rawEvidence.map { ref -> AIEvidence in
                     guard let clipID = ref["clip_id"].string.flatMap(UUID.init(uuidString:)), members.contains(clipID),
-                          let doc = readDocuments[clipID], let quote = ref["quote"].string,
+                          readDocuments[clipID] != nil, let quote = ref["quote"].string,
                           !quote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, quote.count <= 800,
-                          doc.evidenceText.contains(quote) else { throw AIError.invalid("Evidence must quote actually read member text") }
+                          readEvidence[clipID]?.contains(where: { $0.contains(quote) }) == true else { throw AIError.invalid("Evidence must quote actually read member text") }
                     return AIEvidence(clipID: clipID, quote: quote)
                 }
                 return AIClaim(kind: kind, text: text, evidence: evidence)
@@ -233,6 +241,7 @@ public struct AtomicWorkspace: Sendable {
     private mutating func recordRead(_ d: AIClipDocument) throws {
         guard readDocuments[d.id] != nil || readDocuments.count < readLimit else { throw AIError.invalid("Context read limit reached") }
         readDocuments[d.id] = d
+        readEvidence[d.id, default: []].append(d.evidenceText)
         if let old = draft.clipRevisions[d.id], old != d.revision { throw AIError.conflict(d.id.uuidString) }
         draft.clipRevisions[d.id] = d.revision
     }

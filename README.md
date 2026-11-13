@@ -19,6 +19,7 @@ Press **⌘⇧V** to open the Quick Panel. Search your history, switch groups, a
 - **Paste your way.** Paste the original content or use plain text. Open links, code, and files in your preferred apps.
 - **Make it yours.** Choose a theme color, a tab layout, custom shortcuts, and English or 简体中文. English is the first-launch default.
 - **Stay up to date.** Review release notes and confirm an update before Pasteory downloads and installs it.
+- **Organize with AI, optionally.** Connect Magpie or an OpenAI-compatible model, review topic groups and cited summaries, and configure content lifecycle and lossless compression. See the [AI preview guide](docs/AI_ORGANIZATION.md).
 
 ## A Library for the things you keep
 
@@ -45,7 +46,7 @@ Change the interface language anytime in **Settings → General → Interface La
 
 ## Privacy, by default
 
-Your clipboard history stays on your Mac. Pasteory has no cloud sync or AI analysis. Password apps and hidden or temporary clipboard content are ignored by default; you can exclude other apps in Settings.
+Your clipboard history is stored on your Mac with no cloud sync. AI analysis is off by default. If you enable it, permitted text excerpts and metadata are sent to your configured model endpoint; a local gateway may forward them to a cloud provider. Credentials stay in macOS Keychain and out of backups. Password apps and hidden or temporary clipboard content are ignored by default; you can exclude other apps in Settings.
 
 Optional page-title resolution visits the copied link’s website. Source-context capture for Chrome, Lark, and WeChat is opt-in. Update checks contact GitHub and never send clipboard content. You can turn them off in Settings → About.
 

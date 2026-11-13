@@ -36,7 +36,9 @@ public extension Clip {
     }
     var mayParticipateInAI: Bool {
         guard deletedAt == nil, aiAnalysisExcluded != true else { return false }
-        let text = previewText + "\n" + note
+        return Self.isSafeAIText(previewText + "\n" + note)
+    }
+    static func isSafeAIText(_ text: String) -> Bool {
         let patterns = [#"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"#,
                         #"\bsk-[A-Za-z0-9_-]{20,}"#, #"\bAKIA[A-Z0-9]{16}\b"#]
         return !patterns.contains { text.range(of: $0, options: .regularExpression) != nil }

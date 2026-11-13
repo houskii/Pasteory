@@ -3,6 +3,7 @@ import PasteoryAI
 
 public protocol ClipRepository: Sendable {
     func aiState() async throws -> AIOrganizationState
+    func aiContext(ids: [UUID], includeNotes: Bool, includeSource: Bool) async throws -> [AIClipDocument]
     func updateAIState(_ mutation: @Sendable (inout AIOrganizationState) throws -> Void) async throws
     func applyAIChangeSet(_ changeSet: AIChangeSet) async throws
     func undoAIChangeSet(_ id: UUID) async throws
@@ -58,6 +59,9 @@ public protocol ClipRepository: Sendable {
 
 public extension ClipRepository {
     func aiState() async throws -> AIOrganizationState { AIOrganizationState() }
+    func aiContext(ids: [UUID], includeNotes: Bool, includeSource: Bool) async throws -> [AIClipDocument] {
+        try await clips(ids: ids).filter(\.mayParticipateInAI).map { $0.aiDocument(includeNotes: includeNotes, includeSource: includeSource) }
+    }
     func updateAIState(_ mutation: @Sendable (inout AIOrganizationState) throws -> Void) async throws { throw AIError.unavailable }
     func applyAIChangeSet(_ changeSet: AIChangeSet) async throws { throw AIError.unavailable }
     func undoAIChangeSet(_ id: UUID) async throws { throw AIError.unavailable }

@@ -169,6 +169,14 @@ public actor BackupService {
             if fileManager.fileExists(atPath: aiFolder.appendingPathComponent("manifest.json").path) {
                 try await repository.importAIContent(from: aiFolder)
             }
+        } else {
+            // Older formats stored memberships without exporting collection rows.
+            // Recover their identities before inserting clips with foreign keys.
+            let existing = Set(try await repository.collections().map(\.id))
+            let missing = Set(clips.flatMap(\.collectionIDs)).subtracting(existing)
+            for id in missing.sorted(by: { $0.uuidString < $1.uuidString }) {
+                try await repository.saveCollection(ClipCollection(id: id, name: "Recovered " + id.uuidString, kind: .normal, sortOrder: 0))
+            }
         }
         try await repository.saveBatch(clips)
         if manifest.formatVersion >= 2 {

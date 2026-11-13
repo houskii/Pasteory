@@ -76,6 +76,11 @@ final class AIOrganizationController: ObservableObject {
         dirtyIDs.insert(id); newestDirty = Date()
         if oldestDirty == nil { oldestDirty = newestDirty }
     }
+    func synchronize(_ clip: Clip) {
+        clipIndex[clip.id] = clip
+        if clip.deletedAt == nil { clipActivities[clip.id] = settings.aiConfiguration.lifecycle.evaluate(clip.activity) }
+        else { clipActivities.removeValue(forKey: clip.id) }
+    }
     private func reconfigure() {
         let config = settings.aiConfiguration
         let fingerprint = AIHash.fingerprint(config)
@@ -105,7 +110,7 @@ final class AIOrganizationController: ObservableObject {
         let enoughChanges = dirtyIDs.count >= 5 || oldestDirty.map { now.timeIntervalSince($0) >= 120 } == true
         let quiet = newestDirty.map { now.timeIntervalSince($0) >= 30 } == true
         let minimumInterval = state.lastAutomaticRunAt.map { now.timeIntervalSince($0) >= 300 } ?? true
-        if minimumInterval && !dirtyIDs.isEmpty && (timerDue || (config.analyzeNew && enoughChanges && quiet)) {
+        if minimumInterval && (timerDue || (!dirtyIDs.isEmpty && config.analyzeNew && enoughChanges && quiet)) {
             analyze(trigger: timerDue ? "timer" : "new")
         }
     }
@@ -193,11 +198,15 @@ final class AIOrganizationController: ObservableObject {
             try Task.checkCancellation()
             let end = min(job.cursor + job.batchSize, job.clipIDs.count)
             let ids = Array(job.clipIDs[job.cursor..<end])
-            let liveIDs = ids.filter { clipIndex[$0]?.mayParticipateInAI == true }
+            let fullDocuments = try await repository.aiContext(ids: ids, includeNotes: config.includeNotes, includeSource: config.includeSource)
+            let fullByID = Dictionary(uniqueKeysWithValues: fullDocuments.map { ($0.id, $0) })
+            let liveIDs = ids.filter { fullByID[$0] != nil }
             if liveIDs.isEmpty { job.cursor = end }
             else {
                 status = L10n.tr("正在分批整理：\(job.cursor) / \(job.clipIDs.count)")
-                let result = try await analyzer.analyze(documents: documents, batchIDs: liveIDs,
+                let currentIDs = Set(ids)
+                let context = documents.filter { !currentIDs.contains($0.id) } + fullDocuments
+                let result = try await analyzer.analyze(documents: context, batchIDs: liveIDs,
                                                         groups: Array(state.groups.values), reservedNames: names, continuing: job.draft,
                                                         configuration: config, credential: credential, ledger: state.usage,
                                                         trigger: trigger, runID: job.id,

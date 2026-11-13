@@ -52,6 +52,37 @@ private func aiGrouping(_ clips: [Clip], group: UUID = UUID()) -> AIChangeSet {
     #expect(try await repo.aiState().changes.isEmpty)
 }
 
+@Test func aiContextLoadsLongTextOnDemandAndFiltersSecretsBeyondThePreview() async throws {
+    let dirs = try aiDirectories(); defer { try? FileManager.default.removeItem(at: dirs.root) }
+    let repo = try SQLiteClipRepository(databaseURL: dirs.databaseFile)
+    let ordinary = aiClip(String(repeating: "Project material. ", count: 300) + "Later evidence")
+    let secret = aiClip(String(repeating: "innocent text ", count: 300) + "sk-abcdefghijklmnopqrstuvwxyz123456")
+    try await repo.saveBatch([ordinary, secret])
+    let context = try await repo.aiContext(ids: [ordinary.id, secret.id], includeNotes: false, includeSource: false)
+    #expect(context.map(\.id) == [ordinary.id])
+    #expect(context[0].body.contains("Later evidence"))
+    #expect(context[0].source.isEmpty && context[0].note.isEmpty)
+}
+
+@Test func legacyBackupMembershipsRestoreWithoutForeignKeyFailures() async throws {
+    let source = try aiDirectories(), destination = try aiDirectories()
+    defer { for root in [source.root, destination.root] { try? FileManager.default.removeItem(at: root) } }
+    let repo = try SQLiteClipRepository(databaseURL: source.databaseFile)
+    let group = ClipCollection(name: "Legacy", kind: .normal, sortOrder: 0)
+    try await repo.saveCollection(group)
+    var clip = aiClip("Legacy grouped item"); clip.collectionIDs = [group.id]; try await repo.save(clip)
+    let path = source.backups.appendingPathComponent("legacy.pasteorybackup")
+    try await BackupService(repository: repo, directories: source).export(to: path)
+    let manifestURL = path.appendingPathComponent("manifest.json")
+    var manifest = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL)) as? [String: Any])
+    manifest["formatVersion"] = 4
+    try JSONSerialization.data(withJSONObject: manifest).write(to: manifestURL, options: .atomic)
+    let restored = try SQLiteClipRepository(databaseURL: destination.databaseFile)
+    _ = try await BackupService(repository: restored, directories: destination).importBackup(from: path)
+    #expect(try await restored.clip(id: clip.id)?.collectionIDs == [group.id])
+    #expect(try await restored.collections().first?.id == group.id)
+}
+
 @Test func aiDefinitionAndMembershipConflictsProtectHumanEdits() async throws {
     let dirs = try aiDirectories(); defer { try? FileManager.default.removeItem(at: dirs.root) }
     let repo = try SQLiteClipRepository(databaseURL: dirs.databaseFile), clip = aiClip("Project references")

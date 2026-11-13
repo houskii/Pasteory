@@ -169,7 +169,7 @@ final class AppState: ObservableObject {
     func recordHumanUse(_ clip: Clip, event: ContentActivity.Event) async {
         do {
             try await repository.recordHumanActivity(id: clip.id, event: event, at: Date())
-            try await intelligence.reload()
+            if let updated = try await repository.clip(id: clip.id) { replaceLocal(updated); intelligence.synchronize(updated) }
         } catch { show(error) }
     }
 
@@ -236,6 +236,7 @@ final class AppState: ObservableObject {
               !clip.previewText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         do {
             let stored = try await repository.saveCaptured(clip, context: capture.sourceContext)
+            intelligence.synchronize(stored)
             intelligence.contentChanged(stored.id)
             replaceLocal(stored)
             quickClips.removeAll { $0.id == stored.id }
@@ -763,7 +764,7 @@ final class AppState: ObservableObject {
         let value = changed
         replaceLocal(value)
         Task {
-            do { try await repository.updateExisting(value); intelligence.contentChanged(value.id) }
+            do { try await repository.updateExisting(value); intelligence.synchronize(value); intelligence.contentChanged(value.id) }
             catch { show(error) }
         }
     }
@@ -775,6 +776,7 @@ final class AppState: ObservableObject {
                 return false
             }
             replaceLocal(updated)
+            intelligence.synchronize(updated)
             await refreshLibrary()
             await refreshQuick()
             await refreshAggregations()
@@ -991,9 +993,15 @@ final class AppState: ObservableObject {
         catch { show(error); return [] }
     }
 
-    func runArchive() async {
+    func runArchive(automatic: Bool = false) async {
         guard !isBusy else { return }
         isBusy = true; defer { isBusy = false }
+        if settings.aiConfiguration.lifecycleEnabled {
+            if !automatic || settings.aiConfiguration.automaticCompression { await intelligence.compress(groupID: nil) }
+            do { _ = try await repository.purgeTrash(olderThan: Date().addingTimeInterval(-30 * 86_400)) }
+            catch { show(error) }
+            return
+        }
         do { let count = try await archive.run(); presentStatus(count > 0 ? L10n.tr("已归档 \(count) 条内容") : L10n.tr("当前没有需要归档的内容")); await refreshLibrary(); await refreshQuick(); await refreshQuickStats() }
         catch { show(error) }
     }
