@@ -39,3 +39,12 @@ import Testing
         control: false
     ) == nil)
 }
+
+@Test func verticalArrowsNeverSwitchGroups() {
+    for keyCode: UInt16 in [125, 126] {
+        #expect(QuickPanelNavigation.scopeOffset(
+            forKeyCode: keyCode,
+            command: false, shift: false, option: false, control: false
+        ) == nil)
+    }
+}

@@ -23,6 +23,7 @@ public actor ArchiveService {
     }
 
     public func archive(_ clip: Clip) async throws {
+        guard try await repository.clip(id: clip.id) != nil else { return }
         guard !clip.isFavorite, !clip.isPinned, !clip.isArchived else { return }
         let formatter = DateFormatter(); formatter.dateFormat = "yyyy-MM"
         let month = formatter.string(from: clip.createdAt)
@@ -30,20 +31,29 @@ public actor ArchiveService {
         let folderURL = directories.archives.appendingPathComponent(clipFolder, isDirectory: true)
         try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
         var archived = clip
+        var newFiles = [URL]()
+        var committed = false
+        defer {
+            if !committed {
+                for file in newFiles { try? FileManager.default.removeItem(at: file) }
+            }
+        }
         for itemIndex in archived.items.indices {
             for representationIndex in archived.items[itemIndex].representations.indices {
                 let representation = archived.items[itemIndex].representations[representationIndex]
                 guard case .inline(let data) = representation.storage else { continue }
                 let checksum = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-                let relative = "\(clipFolder)/\(representation.id.uuidString).lzfse"
+                let relative = "\(clipFolder)/\(UUID().uuidString).lzfse"
                 let compressed = try LZFSE.compress(data)
-                try compressed.write(to: directories.archives.appendingPathComponent(relative), options: .atomic)
+                let file = directories.archives.appendingPathComponent(relative)
+                try compressed.write(to: file, options: .atomic)
+                newFiles.append(file)
                 archived.items[itemIndex].representations[representationIndex].storage = .archived(relativePath: relative, checksum: checksum, size: data.count)
             }
         }
         archived.isArchived = true
         archived.archivePath = clipFolder
         archived.updatedAt = Date()
-        try await repository.save(archived)
+        committed = try await repository.saveArchived(archived, replacing: clip)
     }
 }

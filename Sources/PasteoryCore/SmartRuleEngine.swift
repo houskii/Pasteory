@@ -23,6 +23,7 @@ public enum SmartRuleError: LocalizedError {
             case .kind: "内容类型无效"
             case .sourceConfidence: "来源可信度无效"
             case .sourceApp: "请选择来源 App"
+            case .quickTextAction: "请选择快捷工具转换类型"
             case .title, .body, .note: "请输入匹配内容"
             }
         }
@@ -147,6 +148,13 @@ public struct SmartRuleEngine: Sendable {
         case .priority: string = String(clip.priority); number = Double(clip.priority)
         case .favorite: string = clip.isFavorite ? "true" : "false"; number = clip.isFavorite ? 1 : 0
         case .copyCount: string = String(clip.copyCount); number = Double(clip.copyCount)
+        case .quickTextAction:
+            let actions = clip.quickTextTransformations?.map(\.action) ?? []
+            switch condition.value {
+            case "any": return !actions.isEmpty
+            case "none": return actions.isEmpty
+            default: return actions.contains { $0.rawValue == condition.value }
+            }
         }
         switch condition.operation {
         case .contains:
@@ -196,6 +204,10 @@ public struct SmartRuleEngine: Sendable {
             guard condition.value == "true" || condition.value == "false" else { throw SmartRuleError.invalidValue(condition.field) }
         case .copyCount:
             guard let value = Int(condition.value), value >= 0 else { throw SmartRuleError.invalidValue(condition.field) }
+        case .quickTextAction:
+            guard ["any", "none"].contains(condition.value) || QuickTextAction(rawValue: condition.value) != nil else {
+                throw SmartRuleError.invalidValue(condition.field)
+            }
         }
     }
 }

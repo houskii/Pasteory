@@ -10,6 +10,10 @@ Pasteory 是一个本地优先的 macOS 剪贴板资料库。它运行在菜单�
 
 资料库已整合到可缩放的设置窗口，`⌘L` 直接定位“资料库”，`⌘,` 定位“通用”。“设置 → 关于”可手动检查更新；默认每 24 小时自动检查，发现新版时快捷面板显示“更新 ↓”，确认后从 GitHub 下载、校验、安装并重启。首次发布配置与签名流程见 [`docs/UPDATES.md`](docs/UPDATES.md)。
 
+![Pasteory 0.1.29 的资料库，展示文字、图像、链接和代码等演示内容](docs/pasteory-library.png)
+
+[下载最新 Beta 安装包](https://github.com/houskii/Pasteory/releases/tag/v0.1.29)
+
 ## 系统要求
 
 - macOS 14 或更高版本
@@ -39,6 +43,8 @@ PASTEORY_SIGN_IDENTITY="Apple Development: …" make install
 
 后续构建持续使用同一证书和 Bundle ID。脚本会锁定证书指纹，并在构建、安装和产物验证三个阶段拒绝 ad-hoc 签名或身份意外变化，避免更新后再次丢失辅助功能授权。不要删除签名目录，也不要把证书、私钥或密码放进仓库。
 
+更新时如需跳过本次启动的存量整理、归档和旧链接重试，使用 `PASTEORY_SKIP_EXISTING_MAINTENANCE=1 make install`。新复制的内容和快捷工具转换结果仍正常入库。
+
 从 ad-hoc 签名首次切换到 `Pasteory Local Build` 后，需要在“系统设置 → 隐私与安全性 → 辅助功能”中重新授权一次。之后只要保留签名目录，更新安装无需重复授权。
 
 ## 首次使用
@@ -54,12 +60,13 @@ PASTEORY_SIGN_IDENTITY="Apple Development: …" make install
 
 ## 隐私边界
 
-- 所有数据保存在 `~/Library/Application Support/Pasteory/`。
+- 剪贴板资料库保存在 `~/Library/Application Support/Pasteory/`。WebKit 网页缓存保存在 `~/Library/Caches/app.pasteory.Pasteory/WebKit/NetworkCache/`。
 - 默认每天向 GitHub 检查版本信息，不上传剪贴板内容，可在“设置 → 关于”关闭。用户在“设置 → 链接解析”中打开自动解析后，Pasteory 会先以不携带 Cookie 的普通请求获取网页标题。BITS、飞书、Codebase 以及用户添加的正则规则只有在建立 Pasteory 独立 WebKit 登录会话后才会使用该会话；保存规则时会统计并纳入当前覆盖的未解析链接，登录完成后批量重试，以后新复制的匹配链接也会自动使用该会话。会话不读取 Chrome Cookie，也不会保存网页正文。
 - 当前版本不包含 AI 分析或云同步。
 - 默认忽略钥匙串、密码应用及隐藏或临时剪贴板类型。
-- 文件只保存引用和元数据，不复制原始文件。
+- 复制文件时只保存引用和元数据；直接复制图片时，Pasteory 会保存剪贴板里的图片数据，原文件移走后仍可粘贴。
 - 自动归档不会删除内容；废纸篓内容保留 30 天。
+- “设置 → 存储与清理”会显示网页缓存占用。自动清理默认开启：距上次清理满 24 小时，或占用超过 100 MB，就等链接解析和登录结束后清空磁盘缓存。已有标题和登录状态会保留。也可以手动清缓存，或按最后使用时间和单条大小预览、删除历史。
 - 网页和会话上下文默认关闭，并与用户填写的标题、备注分开保存。完整边界见 [`docs/SOURCE_CONTEXT.md`](docs/SOURCE_CONTEXT.md)。
 
 ## 开发

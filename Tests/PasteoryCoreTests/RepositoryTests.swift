@@ -96,6 +96,136 @@ private func textClip(_ value: String, date: Date = Date(), source: String = "ap
     #expect(snapshot.totalStorageBytes >= usage.values.reduce(0, +))
 }
 
+@Test func storageAnalyticsIncludesOnlyCurrentVariantsNetworkCacheAndCountsHardLinksOnce() async throws {
+    let temporary = try temporaryDirectories()
+    defer { try? FileManager.default.removeItem(at: temporary.root) }
+    let cacheRoot = temporary.root.appendingPathComponent("Caches", isDirectory: true)
+    let support = temporary.root.appendingPathComponent("Support", isDirectory: true)
+    let directories = try AppDirectories(root: support, identity: .qa, cachesRoot: cacheRoot)
+    let production = try AppDirectories(root: support, identity: .production, cachesRoot: cacheRoot)
+    let repository = try SQLiteClipRepository(databaseURL: directories.databaseFile)
+    let cache = try #require(directories.webKitNetworkCache)
+    #expect(cache.path.hasSuffix("/app.pasteory.Pasteory.qa/WebKit/NetworkCache"))
+    let productionCache = try #require(production.webKitNetworkCache)
+    try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: productionCache, withIntermediateDirectories: true)
+    let resource = cache.appendingPathComponent("resource")
+    try Data(repeating: 1, count: 128_000).write(to: resource)
+    try FileManager.default.linkItem(at: resource, to: cache.appendingPathComponent("resource-link"))
+    try Data(repeating: 2, count: 256_000).write(to: productionCache.appendingPathComponent("resource"))
+    try Data(repeating: 3, count: 256_000).write(to: cache.deletingLastPathComponent().appendingPathComponent("other-webkit-data"))
+    let service = StorageAnalyticsService(repository: repository, directories: directories)
+    let snapshot = try await service.snapshot(period: .all)
+    let usage = try #require(snapshot.storageUsage.first { $0.category == .webKitNetworkCache })
+    let values = try resource.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .fileAllocatedSizeKey])
+    let allocated = try #require(values.totalFileAllocatedSize ?? values.fileAllocatedSize)
+    #expect(usage.byteCount == Int64(allocated))
+    #expect(usage.byteCount >= 128_000)
+}
+
+@Test func historyCleanupFiltersByLastUseAndActualBytesAndPreservesProtectedAndSharedFiles() async throws {
+    let directories = try temporaryDirectories()
+    defer { try? FileManager.default.removeItem(at: directories.root) }
+    let repository = try SQLiteClipRepository(databaseURL: directories.databaseFile)
+    let attachments = AttachmentStore(directories: directories)
+    let cutoff = Date(timeIntervalSince1970: 10_000)
+    let old = cutoff.addingTimeInterval(-100)
+    let shared = CapturedRepresentation(uti: "public.png", data: Data(repeating: 1, count: 128_000))
+    let privateImage = CapturedRepresentation(uti: "public.tiff", data: Data(repeating: 2, count: 128_000))
+    let sourceFile = directories.root.appendingPathComponent("original.png")
+    try Data(repeating: 3, count: 256_000).write(to: sourceFile)
+    let fileReference = CapturedRepresentation(uti: "public.file-url", data: Data(sourceFile.absoluteString.utf8))
+    func make(_ data: [CapturedRepresentation], at date: Date) throws -> Clip {
+        try #require(ClipClassifier.makeClip(from: PasteboardCapture(
+            items: [CapturedItem(order: 0, representations: data)],
+            source: ClipSource(), capturedAt: date
+        )))
+    }
+    var candidate = try make([shared, privateImage, fileReference], at: old)
+    candidate.title = "旧图片"
+    let stored = try await repository.saveCaptured(candidate)
+    var favorite = try make([shared], at: old)
+    favorite.isFavorite = true
+    let savedFavorite = try await attachments.externalize(favorite)
+    try await repository.save(savedFavorite)
+    var recentlyPasted = try make([privateImage], at: old)
+    recentlyPasted.lastPastedAt = cutoff
+    let savedRecent = try await attachments.externalize(recentlyPasted)
+    try await repository.save(savedRecent)
+    var pinned = try make([privateImage], at: old)
+    pinned.isPinned = true
+    let savedPinned = try await attachments.externalize(pinned)
+    try await repository.save(savedPinned)
+    let collection = ClipCollection(name: "保留", kind: .normal)
+    try await repository.saveCollection(collection)
+    var grouped = try make([shared], at: old)
+    grouped.collectionIDs.insert(collection.id)
+    try await repository.save(attachments.externalize(grouped))
+    let referenceOnly = try make([fileReference], at: old)
+    try await repository.save(referenceOnly)
+    let small = textClip("small", date: old)
+    try await repository.save(small)
+    let aggregation = ClipAggregation(title: "聚合", memberClipIDs: [small.id, savedRecent.id])
+    _ = try await repository.saveAggregation(aggregation)
+
+    let exact = try await repository.previewHistoryCleanup(olderThan: cutoff, largerThan: Int64(stored.byteSize))
+    #expect(exact.entries.isEmpty)
+    let sharedOnly = try await repository.previewHistoryCleanup(olderThan: cutoff, largerThan: 100_000)
+    #expect(sharedOnly.entries.map(\.id) == [stored.id])
+    #expect(sharedOnly.reclaimableBytes == 0)
+    try await repository.removePermanently(id: savedRecent.id)
+    try await repository.removePermanently(id: savedPinned.id)
+    let preview = try await repository.previewHistoryCleanup(olderThan: cutoff, largerThan: 100_000)
+    #expect(preview.entries.map(\.id) == [stored.id])
+    #expect(preview.reclaimableBytes >= 128_000)
+    let result = try await repository.cleanHistory(preview)
+    #expect(result.deletedCount == 1)
+    #expect(result.freedBytes == preview.reclaimableBytes)
+    #expect(result.failedFileCount == 0)
+    #expect(try await repository.clip(id: stored.id) == nil)
+    #expect(try await repository.clip(id: referenceOnly.id) != nil)
+    let retained = try #require(savedFavorite.items.first?.representations.first)
+    #expect(try await attachments.data(for: retained) == shared.data)
+    #expect(try Data(contentsOf: sourceFile) == Data(repeating: 3, count: 256_000))
+    let removed = try #require(stored.items.first?.representations.first { $0.uti == privateImage.uti })
+    guard case .attachment(let relativePath, _, _) = removed.storage else {
+        Issue.record("Expected a stored attachment")
+        return
+    }
+    #expect(!FileManager.default.fileExists(atPath: directories.attachments.appendingPathComponent(relativePath).path))
+}
+
+@Test func historyCleanupRejectsStalePreviewAndArchiveCannotRestoreADeletedClip() async throws {
+    let directories = try temporaryDirectories()
+    defer { try? FileManager.default.removeItem(at: directories.root) }
+    let repository = try SQLiteClipRepository(databaseURL: directories.databaseFile)
+    let archive = ArchiveService(repository: repository, directories: directories)
+    let cutoff = Date(timeIntervalSince1970: 10_000)
+    let clip = textClip(String(repeating: "这段历史可以清理", count: 100), date: cutoff.addingTimeInterval(-100))
+    try await repository.save(clip)
+    let preview = try await repository.previewHistoryCleanup(olderThan: cutoff, largerThan: 0)
+    #expect(preview.entries.count == 1)
+    _ = try await repository.recordPaste(id: clip.id, at: cutoff)
+    await #expect(throws: HistoryCleanupError.previewChanged) {
+        try await repository.cleanHistory(preview)
+    }
+    #expect(try await repository.clip(id: clip.id)?.lastPastedAt == cutoff)
+    let updated = try #require(try await repository.clip(id: clip.id))
+    try await archive.archive(updated)
+    #expect(try await repository.clip(id: clip.id)?.isArchived == true)
+    let later = try await repository.previewHistoryCleanup(olderThan: cutoff.addingTimeInterval(100), largerThan: 0)
+    #expect(later.reclaimableBytes > 0)
+    let result = try await repository.cleanHistory(later)
+    #expect(result.deletedCount == 1)
+    #expect(result.freedBytes == later.reclaimableBytes)
+    try await repository.updateExisting(clip)
+    try await archive.archive(clip)
+    var staleArchive = clip
+    staleArchive.isArchived = true
+    #expect(try await repository.saveArchived(staleArchive, replacing: clip) == false)
+    #expect(try await repository.clip(id: clip.id) == nil)
+}
+
 @Test func sevenDayStorageAnalyticsReturnsOneBucketPerNaturalDay() async throws {
     let directories = try temporaryDirectories()
     defer { try? FileManager.default.removeItem(at: directories.root) }

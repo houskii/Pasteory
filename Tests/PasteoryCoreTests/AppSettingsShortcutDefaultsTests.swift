@@ -19,6 +19,7 @@ import Testing
         .copyOnly: PasteoryShortcut(keyCode: 8, modifiers: 256),
         .plainTextPaste: PasteoryShortcut(keyCode: 36, modifiers: 2_048),
         .plainTextCopy: PasteoryShortcut(keyCode: 8, modifiers: 2_304),
+        .quickActions: PasteoryShortcut(keyCode: 40, modifiers: 768),
         .toggleFavorite: PasteoryShortcut(keyCode: 3, modifiers: 768),
         .togglePinned: PasteoryShortcut(keyCode: 17, modifiers: 256),
         .editMetadata: PasteoryShortcut(keyCode: 14, modifiers: 256),
@@ -38,6 +39,7 @@ import Testing
     #expect(settings.quickAction(keyCode: 5, modifiers: 256) == .setCollection)
     #expect(settings.quickAction(keyCode: 14, modifiers: 256) == .editMetadata)
     #expect(settings.quickAction(keyCode: 45, modifiers: 768) == .createCollection)
+    #expect(settings.quickAction(keyCode: 40, modifiers: 768) == .quickActions)
 
     settings.setGlobalShortcut(PasteoryShortcut(keyCode: 0, modifiers: 768))
     _ = settings.setQuickShortcut(PasteoryShortcut(keyCode: 1, modifiers: 256), for: .editMetadata)
@@ -67,4 +69,35 @@ import Testing
     let settings = AppSettings(defaults: defaults)
     #expect(settings.quickShortcut(for: .togglePinned) == PasteoryShortcut(keyCode: 45, modifiers: 768))
     #expect(settings.quickShortcut(for: .createCollection) == nil)
+}
+
+@MainActor
+@Test func quickActionsShortcutPreservesExistingAssignmentsAndDisabledState() throws {
+    let suiteName = "app.pasteory.tests.quick-actions.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let existing = [QuickPanelAction.togglePinned.rawValue: PasteoryShortcut(keyCode: 40, modifiers: 768)]
+    defaults.set(try JSONEncoder().encode(existing), forKey: "quickActionShortcuts")
+
+    let settings = AppSettings(defaults: defaults)
+    #expect(settings.quickShortcut(for: .togglePinned) == PasteoryShortcut(keyCode: 40, modifiers: 768))
+    #expect(settings.quickShortcut(for: .quickActions) == nil)
+    settings.resetAllShortcuts()
+    settings.clearQuickShortcut(for: .quickActions)
+    #expect(AppSettings(defaults: defaults).quickShortcut(for: .quickActions) == nil)
+}
+
+@MainActor
+@Test func quickTabLayoutDefaultsPersistsAndRecoversFromUnknownValue() throws {
+    let suite = "app.pasteory.tests.layout.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let settings = AppSettings(defaults: defaults)
+    #expect(settings.quickTabLayout == .horizontal)
+    settings.quickTabLayout = .sidebar
+    #expect(AppSettings(defaults: defaults).quickTabLayout == .sidebar)
+    settings.quickTabLayout = .horizontal
+    #expect(AppSettings(defaults: defaults).quickTabLayout == .horizontal)
+    defaults.set("unknown-layout", forKey: "quickTabLayout")
+    #expect(AppSettings(defaults: defaults).quickTabLayout == .horizontal)
 }

@@ -241,6 +241,15 @@ struct SettingsView: View {
 
     private var general: some View {
         Form {
+            Section("快捷面板") {
+                Picker("分组 Tab 位置", selection: $settings.quickTabLayout) {
+                    ForEach(QuickTabLayout.allCases) { layout in
+                        Text(layout.title).tag(layout)
+                    }
+                }
+                Text("两种布局均用 ↑↓ 选择内容、←→ 切换分组；搜索输入时保留文字编辑操作。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("外观") {
                 HStack(spacing: 14) {
                     Text("主题色")
@@ -460,7 +469,7 @@ struct SettingsView: View {
                 ForEach(windowActions) { action in quickShortcutSettingRow(action) }
             }
             Section("固定导航快捷键") {
-                LabeledContent("选择项目和分组", value: "↑↓←→")
+                LabeledContent("选择内容 / 切换分组", value: "↑↓ / ←→")
                 LabeledContent("快速粘贴前 9 项", value: "⌘1～⌘9")
                 LabeledContent("关闭当前编辑层", value: "Esc")
             }
@@ -491,7 +500,7 @@ struct SettingsView: View {
 
     private var organizeActions: [QuickPanelAction] {
         [
-            .toggleFavorite, .togglePinned, .editMetadata, .setCollection,
+            .quickActions, .toggleFavorite, .togglePinned, .editMetadata, .setCollection,
             .createCollection, .aggregateContent, .expandAggregation, .collapseAggregation, .moveToTrash
         ]
     }
@@ -665,7 +674,7 @@ struct SettingsView: View {
                     .frame(minHeight: 72)
                 }
 
-                Text("这里只统计 Pasteory 自己保存的数据。文件引用指向的原文件不计入占用；“图片与附件”包含直接复制后保存在 Pasteory 中的图片数据。")
+                Text("包含 Pasteory 的剪贴板数据和网页缓存。直接复制的图片存为独立副本；文件引用指向的原文件不计入占用。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 settingsActionRow {
@@ -677,7 +686,8 @@ struct SettingsView: View {
                     .disabled(state.storageAnalyticsLoading)
                 }
             }
-
+            WebCacheSettingsSection(settings: settings, cache: state.webCacheMaintenance)
+            HistoryCleanupSection(state: state, period: storageAnalyticsPeriod)
             Section("自动归档") {
                 Text("超过 30 天或热数据超过 10,000 条时归档。收藏、置顶和普通分组内容不会自动归档。")
                 settingsActionRow {
@@ -692,8 +702,8 @@ struct SettingsView: View {
             }
             Section("本地备份") {
                 settingsActionRow {
-                    Button("导出备份…", action: onExport)
-                    Button("导入备份…", action: onImport)
+                    Button("导出备份…", action: onExport).disabled(state.isBusy)
+                    Button("导入备份…", action: onImport).disabled(state.isBusy)
                 }
                 Text("备份包含 Pasteory 内保存的内容和元数据，不复制原始文件实体。")
             }
@@ -773,6 +783,7 @@ struct SettingsView: View {
         case .archives: .purple
         case .backups: .green
         case .logs: .teal
+        case .webKitNetworkCache: .orange
         case .other: .gray
         }
     }

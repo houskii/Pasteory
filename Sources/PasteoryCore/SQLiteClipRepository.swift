@@ -14,7 +14,7 @@ public actor SQLiteClipRepository: ClipRepository {
         var resourceIDs = Set<UUID>()
     }
 
-    public init(databaseURL: URL) throws {
+    public init(databaseURL: URL, normalizeExistingData: Bool = true) throws {
         var pointer: OpaquePointer?
         let flags = SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX
         guard sqlite3_open_v2(databaseURL.path, &pointer, flags, nil) == SQLITE_OK, let pointer else {
@@ -31,9 +31,11 @@ public actor SQLiteClipRepository: ClipRepository {
             try Self.execute(pointer, "PRAGMA foreign_keys=ON;")
             try Self.execute(pointer, "PRAGMA busy_timeout=5000;")
             try Self.migrate(pointer)
-            try Self.normalizeGeneratedFallbackRules(pointer, decoder: self.decoder, encoder: self.encoder)
-            try Self.normalizeStoredLinkRouteKeys(pointer, decoder: self.decoder)
-            try Self.normalizeStoredLinkCanonicalKeys(pointer, decoder: self.decoder, encoder: self.encoder)
+            if normalizeExistingData {
+                try Self.normalizeGeneratedFallbackRules(pointer, decoder: self.decoder, encoder: self.encoder)
+                try Self.normalizeStoredLinkRouteKeys(pointer, decoder: self.decoder)
+                try Self.normalizeStoredLinkCanonicalKeys(pointer, decoder: self.decoder, encoder: self.encoder)
+            }
         } catch {
             sqlite3_close(pointer)
             throw error
@@ -43,7 +45,8 @@ public actor SQLiteClipRepository: ClipRepository {
     deinit { sqlite3_close(database) }
 
     public func saveCaptured(_ clip: Clip, context: CapturedSourceContext?) throws -> Clip {
-        var incoming = clip
+        // Publish the attachment and its reference on the same actor as cleanup.
+        var incoming = try AttachmentStore.externalize(clip, into: storageRoot.appendingPathComponent("Attachments"))
         if incoming.identityKey == nil {
             incoming.identityKey = (try? ClipIdentity.key(for: incoming, loadData: loadRepresentationData))
                 ?? "legacy:\(incoming.contentHash)"
@@ -68,6 +71,12 @@ public actor SQLiteClipRepository: ClipRepository {
                 }
                 if incoming.codeMetadata != nil { previous.codeMetadata = incoming.codeMetadata }
                 if incoming.fileMetadata != nil { previous.fileMetadata = incoming.fileMetadata }
+                for transformation in incoming.quickTextTransformations ?? [] {
+                    if previous.quickTextTransformations?.contains(transformation) == true { continue }
+                    previous.quickTextTransformations = (previous.quickTextTransformations ?? []) + [transformation]
+                    if !previous.note.isEmpty { previous.note += "\n\n" }
+                    previous.note += transformation.note
+                }
                 try save(previous)
                 stored = previous
             } else {
@@ -141,6 +150,31 @@ public actor SQLiteClipRepository: ClipRepository {
         try transaction {
             for clip in clips { try save(clip) }
         }
+    }
+
+    public func updateExisting(_ clip: Clip) throws {
+        try transaction {
+            let statement = try prepare("SELECT 1 FROM clips WHERE id=?;")
+            defer { sqlite3_finalize(statement) }
+            bind(clip.id.uuidString, at: 1, to: statement)
+            switch sqlite3_step(statement) {
+            case SQLITE_ROW: try save(clip)
+            case SQLITE_DONE: return
+            default: throw sqliteError()
+            }
+        }
+    }
+
+    public func saveArchived(_ clip: Clip, replacing original: Clip) throws -> Bool {
+        // Compare at the same precision as the persisted record.
+        let expected = try decoder.decode(Clip.self, from: encoder.encode(original))
+        var saved = false
+        try transaction {
+            guard try self.clip(id: original.id) == expected else { return }
+            try save(clip)
+            saved = true
+        }
+        return saved
     }
 
     public func consolidateDuplicateClips() throws -> Int {
@@ -240,13 +274,114 @@ public actor SQLiteClipRepository: ClipRepository {
 
     public func removePermanently(id: UUID) throws {
         try transaction {
-            let fts = try prepare("DELETE FROM clip_fts WHERE id=?;")
-            bind(id.uuidString, at: 1, to: fts); try stepDone(fts); sqlite3_finalize(fts)
-            let clip = try prepare("DELETE FROM clips WHERE id=?;")
-            bind(id.uuidString, at: 1, to: clip); try stepDone(clip); sqlite3_finalize(clip)
-            try Self.execute(database, "DELETE FROM aggregations WHERE (SELECT COUNT(*) FROM aggregation_members m WHERE m.aggregation_id=aggregations.id)<2;")
-            try Self.execute(database, "DELETE FROM context_entities WHERE NOT EXISTS (SELECT 1 FROM capture_event_entities j WHERE j.entity_id=context_entities.id);")
+            try deleteClipRows(id: id)
+            try removeUnusedClipMetadata()
         }
+    }
+
+    private func deleteClipRows(id: UUID) throws {
+        try Self.execute(database, "DELETE FROM clip_fts WHERE id=?;", bindings: [id.uuidString])
+        try Self.execute(database, "DELETE FROM clips WHERE id=?;", bindings: [id.uuidString])
+    }
+
+    private func removeUnusedClipMetadata() throws {
+        try Self.execute(database, "DELETE FROM aggregations WHERE (SELECT COUNT(*) FROM aggregation_members m WHERE m.aggregation_id=aggregations.id)<2;")
+        try Self.execute(database, "DELETE FROM context_entities WHERE NOT EXISTS (SELECT 1 FROM capture_event_entities j WHERE j.entity_id=context_entities.id);")
+    }
+
+    public func previewHistoryCleanup(olderThan cutoff: Date, largerThan minimumBytes: Int64) throws -> HistoryCleanupPreview {
+        let statement = try prepare("""
+            SELECT c.payload_json FROM clips c
+            WHERE c.last_used_at < ? AND c.favorite=0 AND c.pinned=0
+              AND NOT EXISTS (SELECT 1 FROM clip_collections cc WHERE cc.clip_id=c.id)
+              AND NOT EXISTS (SELECT 1 FROM aggregation_members am WHERE am.clip_id=c.id)
+            ORDER BY c.last_used_at, c.id;
+            """)
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_double(statement, 1, cutoff.timeIntervalSince1970)
+        var entries = [HistoryCleanupEntry]()
+        var candidates = [HistoryStoredFile: HistoryFileSize]()
+        var sizes = [HistoryStoredFile: HistoryFileSize]()
+        var missing = Set<HistoryStoredFile>()
+        func size(of file: HistoryStoredFile) -> HistoryFileSize? {
+            if let size = sizes[file] { return size }
+            guard !missing.contains(file), let size = file.size(in: storageRoot) else {
+                missing.insert(file)
+                return nil
+            }
+            sizes[file] = size
+            return size
+        }
+        while true {
+            let step = sqlite3_step(statement)
+            if step == SQLITE_DONE { break }
+            guard step == SQLITE_ROW else { throw sqliteError() }
+            let clip = try decodeClip(statement, column: 0)
+            let files = clip.historyStoredFiles
+            let byteCount = clip.items.flatMap(\.representations).reduce(Int64(0)) { count, representation in
+                if case .inline(let data) = representation.storage { return count + Int64(data.count) }
+                return count
+            } + files.reduce(Int64(0)) { $0 + (size(of: $1)?.logical ?? 0) }
+            guard byteCount > minimumBytes else { continue }
+            entries.append(HistoryCleanupEntry(
+                id: clip.id, title: String((clip.displayTitle.isEmpty ? clip.previewText : clip.displayTitle).prefix(160)),
+                lastUsedAt: clip.lastUsedAt,
+                byteCount: byteCount, updatedAt: clip.updatedAt
+            ))
+            for file in files { candidates[file] = size(of: file) }
+        }
+
+        if !entries.isEmpty {
+            let selected = Set(entries.map { $0.id.uuidString })
+            let references = try prepare("""
+                SELECT b.id, b.canonical_id, b.payload_json FROM clip_merge_backups b
+                UNION ALL
+                SELECT c.id, NULL, c.payload_json FROM clips c;
+                """)
+            defer { sqlite3_finalize(references) }
+            var retained = Set<HistoryStoredFile>()
+            while true {
+                let step = sqlite3_step(references)
+                if step == SQLITE_DONE { break }
+                guard step == SQLITE_ROW, let rowID = sqlite3_column_text(references, 0) else { throw sqliteError() }
+                if let canonical = sqlite3_column_text(references, 1) {
+                    let files = try decodeClip(references, column: 2).historyStoredFiles
+                    if selected.contains(String(cString: canonical)) {
+                        for file in files { candidates[file] = size(of: file) }
+                    } else { retained.formUnion(files) }
+                } else if !selected.contains(String(cString: rowID)), !candidates.isEmpty {
+                    retained.formUnion(try decodeClip(references, column: 2).historyStoredFiles)
+                }
+            }
+            // Treat case variants as shared too on case-insensitive volumes.
+            let retainedPaths = Set(retained.map { "\($0.directory)/\($0.relativePath.lowercased())" })
+            candidates = candidates.filter { !retainedPaths.contains("\($0.key.directory)/\($0.key.relativePath.lowercased())") }
+        }
+        return HistoryCleanupPreview(
+            cutoff: cutoff, minimumBytes: minimumBytes, entries: entries,
+            reclaimableBytes: candidates.values.reduce(0) { $0 + $1.allocated }, files: candidates
+        )
+    }
+
+    public func cleanHistory(_ preview: HistoryCleanupPreview) throws -> HistoryCleanupResult {
+        guard !preview.entries.isEmpty else { return HistoryCleanupResult(deletedCount: 0, freedBytes: 0, failedFileCount: 0) }
+        try transaction {
+            guard try previewHistoryCleanup(olderThan: preview.cutoff, largerThan: preview.minimumBytes) == preview else {
+                throw HistoryCleanupError.previewChanged
+            }
+            for entry in preview.entries {
+                try deleteClipRows(id: entry.id)
+                try Self.execute(database, "DELETE FROM clip_merge_backups WHERE canonical_id=?;", bindings: [entry.id.uuidString])
+            }
+            try removeUnusedClipMetadata()
+        }
+        var freedBytes: Int64 = 0
+        var failedFileCount = 0
+        for (file, size) in preview.files {
+            if file.remove(in: storageRoot, expectedSize: size) { freedBytes += size.allocated }
+            else { failedFileCount += 1 }
+        }
+        return HistoryCleanupResult(deletedCount: preview.entries.count, freedBytes: freedBytes, failedFileCount: failedFileCount)
     }
 
     public func purgeTrash(olderThan date: Date) throws -> Int {
@@ -871,6 +1006,15 @@ public actor SQLiteClipRepository: ClipRepository {
         canonical.secondaryKinds = members.reduce(into: Set<ClipKind>()) { $0.formUnion($1.secondaryKinds) }
         canonical.title = firstNonempty(members.map(\.title))
         canonical.note = firstNonempty(members.map(\.note))
+        let transformations = members.flatMap { $0.quickTextTransformations ?? [] }
+            .reduce(into: [QuickTextTransformation]()) { values, value in
+                if !values.contains(value) { values.append(value) }
+            }
+        canonical.quickTextTransformations = transformations.isEmpty ? nil : transformations
+        for transformation in transformations where !canonical.note.contains(transformation.note) {
+            if !canonical.note.isEmpty { canonical.note += "\n\n" }
+            canonical.note += transformation.note
+        }
         canonical.automaticTitle = members.compactMap(\.automaticTitle).first {
             !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }

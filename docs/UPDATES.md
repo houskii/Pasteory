@@ -50,9 +50,9 @@ make qa-verify
 make dmg
 make verify
 python3 scripts/prepare_update.py \
-  --tag v0.1.26-beta \
+  --tag v0.1.30-beta \
   --notes /path/to/release-notes.md \
-  --dmg dist/Pasteory-0.1.26-arm64.dmg
+  --dmg dist/Pasteory-0.1.30-arm64.dmg
 ```
 
 工具验证正式 Bundle ID、签名、版本递增、DMG、发布公钥和更新说明，生成：

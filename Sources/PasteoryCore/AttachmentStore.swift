@@ -12,6 +12,10 @@ public actor AttachmentStore {
     }
 
     public func externalize(_ clip: Clip) throws -> Clip {
+        try Self.externalize(clip, into: directories.attachments, threshold: threshold)
+    }
+
+    static func externalize(_ clip: Clip, into directory: URL, threshold: Int = 64 * 1024) throws -> Clip {
         var result = clip
         for itemIndex in result.items.indices {
             for representationIndex in result.items[itemIndex].representations.indices {
@@ -20,7 +24,7 @@ public actor AttachmentStore {
                       data.count >= threshold || isBinaryAsset(representation.uti) else { continue }
                 let checksum = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
                 let relative = "\(checksum.prefix(2))/\(checksum)"
-                let destination = directories.attachments.appendingPathComponent(relative)
+                let destination = directory.appendingPathComponent(relative)
                 try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
                 if !FileManager.default.fileExists(atPath: destination.path) { try data.write(to: destination, options: .atomic) }
                 result.items[itemIndex].representations[representationIndex].storage = .attachment(relativePath: relative, checksum: checksum, size: data.count)
@@ -44,7 +48,7 @@ public actor AttachmentStore {
         }
     }
 
-    private func isBinaryAsset(_ uti: String) -> Bool {
+    private static func isBinaryAsset(_ uti: String) -> Bool {
         uti == "com.adobe.pdf" || UTType(uti)?.conforms(to: .image) == true
     }
 

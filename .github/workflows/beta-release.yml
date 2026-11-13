@@ -1,0 +1,84 @@
+name: Publish Pasteory Beta
+
+on:
+  push:
+    tags: ['v*']
+    branches: [main]
+    paths: ['.github/workflows/beta-release.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: beta-release
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check version and publish the signed DMG
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version_from_plist() {
+            python3 -c 'import plistlib; print(plistlib.load(open("Config/Info.plist","rb"))["CFBundleShortVersionString"])'
+          }
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            tag="$GITHUB_REF_NAME"
+          else
+            # First-time setup or manual recovery: only publish an existing tag.
+            tag="v$(version_from_plist)"
+            if ! git show-ref --verify --quiet "refs/tags/$tag"; then
+              echo "No release tag $tag yet."
+              exit 0
+            fi
+            git checkout --detach "refs/tags/$tag"
+          fi
+          version=$(version_from_plist)
+          [[ "$tag" == "v$version" && "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          git merge-base --is-ancestor HEAD origin/main
+          dmg="Pasteory-$version-arm64.dmg"
+          [[ "$(find release/beta -maxdepth 1 -name '*.dmg' -print)" == "release/beta/$dmg" ]]
+          (cd release/beta && sha256sum "$dmg") > "$RUNNER_TEMP/$dmg.sha256"
+          appcast="release/beta/appcast-$version.xml"
+          extra_assets=()
+          if [[ -f "$appcast" ]]; then extra_assets+=("$appcast"); fi
+          if gh release view "$tag" --json assets > "$RUNNER_TEMP/assets.json"; then
+            mkdir "$RUNNER_TEMP/existing"
+            gh release download "$tag" --pattern "$dmg" --pattern "$dmg.sha256" --dir "$RUNNER_TEMP/existing"
+            cmp "release/beta/$dmg" "$RUNNER_TEMP/existing/$dmg"
+            cmp "$RUNNER_TEMP/$dmg.sha256" "$RUNNER_TEMP/existing/$dmg.sha256"
+            if [[ -f "$appcast" ]]; then
+              gh release download "$tag" --pattern "appcast-$version.xml" --dir "$RUNNER_TEMP/existing"
+              cmp "$appcast" "$RUNNER_TEMP/existing/appcast-$version.xml"
+            fi
+          else
+            gh release create "$tag" "release/beta/$dmg" "$RUNNER_TEMP/$dmg.sha256" "${extra_assets[@]}" \
+              --verify-tag --notes-from-tag --title "Pasteory $version Beta" --prerelease
+          fi
+          if [[ -f "$appcast" ]]; then
+            # Only advertise the update after all immutable release assets are available.
+            # An older recovery run must never replace a newer release's feed.
+            cp "$appcast" "$RUNNER_TEMP/signed-appcast.xml"
+            git fetch origin main
+            git switch -C publish-update-feed origin/main
+            if [[ "$(version_from_plist)" != "$version" ]]; then
+              echo "A newer source version is present; keeping its update feed."
+              exit 0
+            fi
+            if ! cmp -s "$RUNNER_TEMP/signed-appcast.xml" release/beta/appcast.xml; then
+              cp "$RUNNER_TEMP/signed-appcast.xml" release/beta/appcast.xml
+              git add release/beta/appcast.xml
+              git -c user.name='github-actions[bot]' \
+                -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+                commit -m "Publish signed update feed for $version"
+              git -c 'credential.helper=!gh auth git-credential' push origin HEAD:main
+            fi
+          fi

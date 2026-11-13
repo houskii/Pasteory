@@ -50,6 +50,7 @@ public enum PasteoryStorageCategory: String, CaseIterable, Identifiable, Sendabl
     case archives
     case backups
     case logs
+    case webKitNetworkCache
     case other
 
     public var id: String { rawValue }
@@ -61,6 +62,7 @@ public enum PasteoryStorageCategory: String, CaseIterable, Identifiable, Sendabl
         case .archives: "归档"
         case .backups: "备份"
         case .logs: "日志"
+        case .webKitNetworkCache: "WebKit 网页缓存"
         case .other: "其他"
         }
     }
@@ -180,6 +182,7 @@ public actor StorageAnalyticsService {
         let archives = allocatedByteCount(at: directories.archives)
         let backups = allocatedByteCount(at: directories.backups)
         let logs = allocatedByteCount(at: directories.logs)
+        let webKitNetworkCache = webKitNetworkCacheBytes()
         let total = allocatedByteCount(at: directories.root)
         let known = database + attachments + archives + backups + logs
         let other = max(0, total - known)
@@ -189,14 +192,20 @@ public actor StorageAnalyticsService {
             PasteoryStorageUsage(category: .archives, byteCount: archives),
             PasteoryStorageUsage(category: .backups, byteCount: backups),
             PasteoryStorageUsage(category: .logs, byteCount: logs),
+            PasteoryStorageUsage(category: .webKitNetworkCache, byteCount: webKitNetworkCache),
             PasteoryStorageUsage(category: .other, byteCount: other)
         ]
+    }
+
+    public func webKitNetworkCacheBytes() -> Int64 {
+        directories.webKitNetworkCache.map { allocatedByteCount(at: $0) } ?? 0
     }
 
     private func allocatedByteCount(at url: URL) -> Int64 {
         let keys: Set<URLResourceKey> = [
             .isRegularFileKey,
             .isSymbolicLinkKey,
+            .fileResourceIdentifierKey,
             .totalFileAllocatedSizeKey,
             .fileAllocatedSizeKey,
             .fileSizeKey
@@ -209,10 +218,13 @@ public actor StorageAnalyticsService {
         ) else { return 0 }
 
         var total: Int64 = 0
+        var seenFileIDs = Set<AnyHashable>()
         for case let fileURL as URL in enumerator {
             guard let values = try? fileURL.resourceValues(forKeys: keys),
                   values.isRegularFile == true,
                   values.isSymbolicLink != true else { continue }
+            if let identifier = values.fileResourceIdentifier as? AnyHashable,
+               !seenFileIDs.insert(identifier).inserted { continue }
             let bytes = values.totalFileAllocatedSize ?? values.fileAllocatedSize ?? values.fileSize ?? 0
             total += Int64(max(bytes, 0))
         }

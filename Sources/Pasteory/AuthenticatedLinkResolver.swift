@@ -17,6 +17,14 @@ enum LinkWebKitConfiguration {
         return configuration
     }
 
+    static func clearNetworkCache() async {
+        await clearNetworkCache(in: sessionDataStore)
+    }
+
+    static func clearNetworkCache(in store: WKWebsiteDataStore) async {
+        await store.removeData(ofTypes: [WKWebsiteDataTypeDiskCache], modifiedSince: .distantPast)
+    }
+
     static func applyCompatibilityUserAgent(to webView: WKWebView) {
         webView.customUserAgent = compatibilityUserAgent
     }
@@ -176,12 +184,18 @@ enum AuthenticatedLinkResolverError: LocalizedError {
 
 @MainActor
 final class AuthenticatedLinkResolver {
+    private let cache: WebCacheMaintenance
     private var inFlight = [String: Task<AuthenticatedPageSnapshot, Error>]()
+
+    init(cache: WebCacheMaintenance) { self.cache = cache }
 
     func resolve(url: URL) async throws -> AuthenticatedPageSnapshot {
         let key = URLFallbackEngine.canonicalResourceKey(for: url)
         if let task = inFlight[key] { return try await task.value }
-        let task = Task { @MainActor in
+        let activity = cache.beginActivity()
+        let task = Task { @MainActor [cache] in
+            defer { cache.endActivity(activity) }
+            await cache.waitForClearance()
             let load = AuthenticatedPageLoad(url: url)
             return try await load.run()
         }
@@ -338,6 +352,7 @@ private final class AuthenticatedPageLoad: NSObject, WKNavigationDelegate {
 
 struct SiteLoginSheet: View {
     let request: LinkAuthenticationRequest
+    let cache: WebCacheMaintenance
     let onComplete: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -348,8 +363,9 @@ struct SiteLoginSheet: View {
     @State private var backRevision = UUID()
     @State private var reloadRevision = UUID()
 
-    init(request: LinkAuthenticationRequest, onComplete: @escaping () -> Void) {
+    init(request: LinkAuthenticationRequest, cache: WebCacheMaintenance, onComplete: @escaping () -> Void) {
         self.request = request
+        self.cache = cache
         self.onComplete = onComplete
         _address = State(initialValue: request.target.startURL.absoluteString)
         _requestedURL = State(initialValue: request.target.startURL)
@@ -378,6 +394,7 @@ struct SiteLoginSheet: View {
                 Button("打开") { navigateToAddress() }
             }
             SiteLoginWebView(
+                cache: cache,
                 requestedURL: requestedURL,
                 backRevision: backRevision,
                 reloadRevision: reloadRevision,
@@ -418,6 +435,7 @@ struct SiteLoginSheet: View {
 }
 
 private struct SiteLoginWebView: NSViewRepresentable {
+    let cache: WebCacheMaintenance
     let requestedURL: URL
     let backRevision: UUID
     let reloadRevision: UUID
@@ -440,11 +458,33 @@ private struct SiteLoginWebView: NSViewRepresentable {
         LinkWebKitConfiguration.applyCompatibilityUserAgent(to: webView)
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
-        webView.load(URLRequest(url: requestedURL))
+        let coordinator = context.coordinator
+        coordinator.activity = cache.beginActivity()
+        coordinator.initialLoad = Task { [weak webView, weak coordinator] in
+            await cache.waitForClearance()
+            guard !Task.isCancelled, let webView, let coordinator else { return }
+            coordinator.initialLoad = nil
+            webView.load(URLRequest(url: coordinator.requestedURL))
+        }
+        coordinator.cache = cache
         return webView
     }
 
+    static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
+        coordinator.initialLoad?.cancel()
+        webView.stopLoading()
+        webView.navigationDelegate = nil
+        webView.uiDelegate = nil
+        if let activity = coordinator.activity { coordinator.cache?.endActivity(activity) }
+    }
+
     func updateNSView(_ webView: WKWebView, context: Context) {
+        if context.coordinator.initialLoad != nil {
+            context.coordinator.requestedURL = requestedURL
+            context.coordinator.backRevision = backRevision
+            context.coordinator.reloadRevision = reloadRevision
+            return
+        }
         if context.coordinator.requestedURL != requestedURL {
             context.coordinator.requestedURL = requestedURL
             webView.load(URLRequest(url: requestedURL))
@@ -466,6 +506,9 @@ private struct SiteLoginWebView: NSViewRepresentable {
         var requestedURL: URL
         var backRevision: UUID
         var reloadRevision: UUID
+        var cache: WebCacheMaintenance?
+        var activity: UUID?
+        var initialLoad: Task<Void, Never>?
 
         init(
             requestedURL: URL,

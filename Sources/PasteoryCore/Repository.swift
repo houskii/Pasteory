@@ -3,6 +3,8 @@ import Foundation
 public protocol ClipRepository: Sendable {
     func saveCaptured(_ clip: Clip, context: CapturedSourceContext?) async throws -> Clip
     func save(_ clip: Clip) async throws
+    func updateExisting(_ clip: Clip) async throws
+    func saveArchived(_ clip: Clip, replacing original: Clip) async throws -> Bool
     func saveBatch(_ clips: [Clip]) async throws
     func consolidateDuplicateClips() async throws -> Int
     func clip(id: UUID) async throws -> Clip?
@@ -11,6 +13,8 @@ public protocol ClipRepository: Sendable {
     func list(filter: ClipFilter, query: String, limit: Int) async throws -> [Clip]
     func removePermanently(id: UUID) async throws
     func purgeTrash(olderThan date: Date) async throws -> Int
+    func previewHistoryCleanup(olderThan cutoff: Date, largerThan minimumBytes: Int64) async throws -> HistoryCleanupPreview
+    func cleanHistory(_ preview: HistoryCleanupPreview) async throws -> HistoryCleanupResult
     func archiveCandidates(olderThan date: Date, hotLimit: Int) async throws -> [Clip]
     func activeClipCount() async throws -> Int
     func recentClipCount(since date: Date) async throws -> Int

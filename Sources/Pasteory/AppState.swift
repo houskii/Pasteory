@@ -34,8 +34,11 @@ final class AppState: ObservableObject {
     @Published var libraryQuery = ""
     @Published var quickQuery = ""
     @Published var quickSearchFocused = false
+    @Published private(set) var quickTextActionRunning = false
     @Published var quickScope: QuickScope = .all
     @Published var quickPresentationID = UUID()
+    @Published private(set) var quickListResetID = UUID()
+    @Published private(set) var libraryListResetID = UUID()
     @Published var quickPanelPinned = false
     @Published var quickCommandKeyDown = false
     @Published var quickDayCount = 0
@@ -86,15 +89,24 @@ final class AppState: ObservableObject {
     let settings: AppSettings
     let repository: any ClipRepository
     let attachments: AttachmentStore
+    let quickTextActions: QuickTextActionCoordinator
+    let quickActionsMenu = QuickActionMenuController()
     let archive: ArchiveService
     let backup: BackupService
     let storageAnalyticsService: StorageAnalyticsService
+    let webCacheMaintenance: WebCacheMaintenance
     let linkResolutionService: LinkResolutionService
     private let authenticatedLinkResolver: AuthenticatedLinkResolver
     private var quickSearchTask: Task<Void, Never>?
     private var librarySearchTask: Task<Void, Never>?
+    private var appliedQuickQuery = ""
+    private var appliedQuickScope: QuickScope = .all
+    private var appliedLibraryQuery = ""
+    private var appliedLibraryFilter: ClipFilter = .all
     private var statusDismissTask: Task<Void, Never>?
     private var settingsObservation: AnyCancellable?
+    private var storageAnalyticsRequest = UUID()
+    private var storageAnalyticsRequestedPeriod: StorageAnalyticsPeriod?
     private let classificationPipeline = ClipClassificationPipeline()
 
     init(
@@ -108,12 +120,21 @@ final class AppState: ObservableObject {
     ) {
         self.repository = repository
         self.attachments = attachments
+        self.quickTextActions = QuickTextActionCoordinator(repository: repository, attachments: attachments)
         self.archive = archive
         self.backup = backup
         self.storageAnalyticsService = storageAnalyticsService
         self.settings = settings
         self.linkResolutionService = linkResolutionService
-        self.authenticatedLinkResolver = AuthenticatedLinkResolver()
+        let cache = WebCacheMaintenance(settings: settings, measure: {
+            await storageAnalyticsService.webKitNetworkCacheBytes()
+        }, clear: LinkWebKitConfiguration.clearNetworkCache)
+        self.webCacheMaintenance = cache
+        self.authenticatedLinkResolver = AuthenticatedLinkResolver(cache: cache)
+        cache.onCleared = { [weak self] in
+            guard let self, let period = self.storageAnalyticsRequestedPeriod else { return }
+            Task { await self.refreshStorageAnalytics(period: period) }
+        }
         self.settingsObservation = settings.objectWillChange.sink { [weak self] in
             Task { @MainActor in self?.objectWillChange.send() }
         }
@@ -129,17 +150,20 @@ final class AppState: ObservableObject {
         }
     }
 
-    func bootstrap() async {
-        do {
-            let merged = try await repository.consolidateDuplicateClips()
-            if merged > 0 { presentStatus("已合并 \(merged) 条重复内容") }
-        } catch { show(error) }
+    func bootstrap(processExistingClips: Bool = true) async {
+        if processExistingClips {
+            do {
+                let merged = try await repository.consolidateDuplicateClips()
+                if merged > 0 { presentStatus("已合并 \(merged) 条重复内容") }
+            } catch { show(error) }
+        }
         await refreshCollections()
         await refreshLibrary()
         await refreshQuick()
         await refreshAggregations()
         await refreshQuickStats()
         await refreshLinkResolutionData()
+        guard processExistingClips else { return }
         Task.detached(priority: .utility) { [archive] in _ = try? await archive.run() }
         Task { [weak self] in
             await self?.prepareExistingLinkFallbacks()
@@ -147,11 +171,44 @@ final class AppState: ObservableObject {
         }
     }
 
+    func performQuickTextAction(_ action: QuickTextAction, input: String, sourceClip: Clip?) async throws -> QuickTextActionCoordinator.Result {
+        let result = try await quickTextActions.perform(action, input: input, sourceClip: sourceClip)
+        replaceLocal(result.clip)
+        await refreshLibrary()
+        await refreshQuick()
+        await refreshQuickStats()
+        presentStatus("已复制转换结果并加入资料库")
+        return result
+    }
+
+    func presentQuickActions(for clip: Clip?, scope: QuickActionMenuScope, in window: NSWindow?) {
+        guard let clip, let window else {
+            presentStatus("请先选择要转换的内容", kind: .warning)
+            return
+        }
+        guard !quickTextActionRunning else { return }
+        quickActionsMenu.present(for: clip, scope: scope, in: window) { action in
+            self.runQuickTextAction(action, for: clip)
+        }
+    }
+
+    func runQuickTextAction(_ action: QuickTextAction, for clip: Clip?) {
+        guard let clip else { presentStatus("请先选择要转换的内容", kind: .warning); return }
+        guard !quickTextActionRunning else { return }
+        quickTextActionRunning = true
+        Task {
+            defer { quickTextActionRunning = false }
+            do {
+                let input = try await ClipTextReader.read(clip, attachments: attachments)
+                _ = try await performQuickTextAction(action, input: input, sourceClip: clip)
+            } catch { show(error) }
+        }
+    }
+
     func accept(_ capture: PasteboardCapture) async {
-        guard var clip = await classificationPipeline.makeClip(from: capture),
+        guard let clip = await classificationPipeline.makeClip(from: capture),
               !clip.previewText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         do {
-            clip = try await attachments.externalize(clip)
             let stored = try await repository.saveCaptured(clip, context: capture.sourceContext)
             replaceLocal(stored)
             quickClips.removeAll { $0.id == stored.id }
@@ -202,6 +259,8 @@ final class AppState: ObservableObject {
 
     private func refreshRecentLinkCaches() async {
         guard settings.linkResolutionEnabled else { return }
+        let activity = webCacheMaintenance.beginActivity()
+        defer { webCacheMaintenance.endActivity(activity) }
         do {
             let recent = try await repository.list(filter: .all, query: "", limit: LinkCacheRefreshPolicy.scanLimit)
             for clip in LinkCacheRefreshPolicy.maintenanceCandidates(from: recent) {
@@ -288,6 +347,8 @@ final class AppState: ObservableObject {
         }
         linkResolutionBusyRouteKeys.insert(routeKey)
         defer { linkResolutionBusyRouteKeys.remove(routeKey) }
+        let activity = webCacheMaintenance.beginActivity()
+        defer { webCacheMaintenance.endActivity(activity) }
         do {
             let resources = try await repository.unresolvedLinkResources(routeKey: routeKey)
             var resolvedCount = 0
@@ -316,6 +377,8 @@ final class AppState: ObservableObject {
     }
 
     func retryAuthenticatedLinkResolutions(for target: LinkAuthenticationTarget) async {
+        let activity = webCacheMaintenance.beginActivity()
+        defer { webCacheMaintenance.endActivity(activity) }
         do {
             let groups = try await repository.unresolvedLinkGroups(limit: 500)
                 .filter {
@@ -458,14 +521,27 @@ final class AppState: ObservableObject {
                         result = try await repository.list(filter: .collection(id), query: query, limit: 500)
                     }
                 }
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, query == quickQuery, scope == quickScope else { return }
+                let searchChanged = query != appliedQuickQuery || scope != appliedQuickScope
                 quickClips = SearchRanker.rank(result, query: query)
-                if resetSelection {
-                    quickSelectedAggregationID = nil
-                    quickSelectionID = quickClips.first?.id
-                } else if quickSelectedAggregationID == nil,
-                          !quickClips.contains(where: { $0.id == quickSelectionID }) {
-                    quickSelectionID = quickClips.first?.id
+                appliedQuickQuery = query
+                appliedQuickScope = scope
+                let entries = quickListEntries
+                let selectionIsVisible = entries.contains { entry in
+                    switch entry.content {
+                    case .aggregation(let aggregation): aggregation.id == quickSelectedAggregationID
+                    case .clip(let clip, _): quickSelectedAggregationID == nil && clip.id == quickSelectionID
+                    }
+                }
+                if resetSelection || searchChanged || !selectionIsVisible {
+                    if let first = entries.first { selectQuickEntry(first) }
+                    else {
+                        quickSelectedAggregationID = nil
+                        quickSelectionID = nil
+                    }
+                }
+                if resetSelection || searchChanged {
+                    quickListResetID = UUID()
                 }
             } catch { show(error) }
         }
@@ -492,13 +568,30 @@ final class AppState: ObservableObject {
     }
 
     func refreshStorageAnalytics(period: StorageAnalyticsPeriod, now: Date = Date()) async {
+        let request = UUID()
+        storageAnalyticsRequest = request
+        storageAnalyticsRequestedPeriod = period
         storageAnalyticsLoading = true
-        defer { storageAnalyticsLoading = false }
+        defer { if storageAnalyticsRequest == request { storageAnalyticsLoading = false } }
         do {
-            storageAnalyticsSnapshot = try await storageAnalyticsService.snapshot(period: period, now: now)
+            let snapshot = try await storageAnalyticsService.snapshot(period: period, now: now)
+            if storageAnalyticsRequest == request { storageAnalyticsSnapshot = snapshot }
         } catch {
-            show(error)
+            if storageAnalyticsRequest == request { show(error) }
         }
+    }
+
+    func cleanHistory(_ preview: HistoryCleanupPreview) async throws -> HistoryCleanupResult {
+        guard !isBusy else { throw HistoryCleanupError.previewChanged }
+        isBusy = true
+        defer { isBusy = false }
+        let result = try await repository.cleanHistory(preview)
+        await refreshLibrary()
+        await refreshQuick()
+        await refreshAggregations()
+        await refreshQuickStats()
+        await refreshLinkResolutionData()
+        return result
     }
 
     func moveQuickSelection(by offset: Int) {
@@ -573,11 +666,27 @@ final class AppState: ObservableObject {
                 } else {
                     result = try await repository.list(filter: filter, query: query, limit: query.isEmpty ? 10_000 : 500)
                 }
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, query == libraryQuery, filter == libraryFilter else { return }
+                let searchChanged = query != appliedLibraryQuery || filter != appliedLibraryFilter
                 clips = SearchRanker.rank(result, query: query)
-                if selectedAggregationID == nil,
-                   !clips.contains(where: { $0.id == selectedClipID }) {
-                    selectedClipID = clips.first?.id
+                appliedLibraryQuery = query
+                appliedLibraryFilter = filter
+                let entries = libraryListEntries
+                let selectionIsVisible = entries.contains { entry in
+                    switch entry.content {
+                    case .aggregation(let aggregation): aggregation.id == selectedAggregationID
+                    case .clip(let clip, _): selectedAggregationID == nil && clip.id == selectedClipID
+                    }
+                }
+                if searchChanged || !selectionIsVisible {
+                    if let first = entries.first { selectLibraryEntry(first) }
+                    else {
+                        selectedAggregationID = nil
+                        selectedClipID = nil
+                    }
+                }
+                if searchChanged {
+                    libraryListResetID = UUID()
                 }
             } catch { show(error) }
         }
@@ -620,7 +729,7 @@ final class AppState: ObservableObject {
     func update(_ clip: Clip) {
         replaceLocal(clip)
         Task {
-            do { try await repository.save(clip) }
+            do { try await repository.updateExisting(clip) }
             catch { show(error) }
         }
     }
@@ -790,7 +899,7 @@ final class AppState: ObservableObject {
         do {
             for var clip in try await repository.allClips() where clip.collectionIDs.contains(collection.id) {
                 clip.collectionIDs.remove(collection.id)
-                try await repository.save(clip)
+                try await repository.updateExisting(clip)
             }
             try await repository.removeCollection(id: collection.id)
             if libraryFilter == .collection(collection.id) { libraryFilter = .all }
@@ -849,18 +958,21 @@ final class AppState: ObservableObject {
     }
 
     func runArchive() async {
+        guard !isBusy else { return }
         isBusy = true; defer { isBusy = false }
         do { let count = try await archive.run(); presentStatus(count > 0 ? "已归档 \(count) 条内容" : "当前没有需要归档的内容"); await refreshLibrary(); await refreshQuick(); await refreshQuickStats() }
         catch { show(error) }
     }
 
     func exportBackup(to url: URL) async {
+        guard !isBusy else { return }
         isBusy = true; defer { isBusy = false }
         do { try await backup.export(to: url); presentStatus("备份已导出") }
         catch { show(error) }
     }
 
     func importBackup(from url: URL) async {
+        guard !isBusy else { return }
         isBusy = true; defer { isBusy = false }
         do { let count = try await backup.importBackup(from: url); presentStatus("已导入 \(count) 条内容"); await refreshLibrary(); await refreshQuick(); await refreshQuickStats() }
         catch { show(error) }
@@ -923,7 +1035,7 @@ final class AppState: ObservableObject {
         var value = condition
         value.operation = condition.field.supportedOperators[0]
         switch condition.field {
-        case .sourceConfidence, .kind, .priority, .favorite:
+        case .sourceConfidence, .kind, .priority, .favorite, .quickTextAction:
             value.value = condition.field.defaultValue
         default:
             if value.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

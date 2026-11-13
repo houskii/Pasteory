@@ -91,6 +91,14 @@ public enum ClipClassifier {
         previewCandidates: inout [String]
     ) -> ItemClassification {
         let types = Set(item.representations.map(\.uti))
+        // WeChat also supplies a temporary file URL when copying image pixels.
+        // Prefer the embedded image; a file URL alone still represents a file.
+        if item.representations.contains(where: {
+            !$0.data.isEmpty && UTType($0.uti)?.conforms(to: .image) == true
+        }) {
+            previewCandidates.append("图像")
+            return ItemClassification(kind: .image)
+        }
         if types.contains(where: { $0 == "public.file-url" || $0 == "NSFilenamesPboardType" }) {
             previewCandidates.append(filePreview(item))
             return ItemClassification(kind: .file)
