@@ -59,6 +59,7 @@ jobs:
           python3 scripts/check_localizations.py
           node --test scripts/tests/test_chrome_popup.cjs
           zsh -n scripts/release_beta.sh scripts/build_app.sh scripts/capture_update_ui.sh
+          bash -n scripts/publish_beta.sh scripts/prepare_ci_release.sh
       - name: Verify DMG and signed appcast preparation
         timeout-minutes: 6
         run: |

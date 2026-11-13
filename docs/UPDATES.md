@@ -17,7 +17,9 @@ Pasteory 使用 Sparkle 2.10.1 校验并安装更新。更新索引位于
 
 ## 签名与首次配置
 
-应用的稳定代码签名身份和更新包的 Ed25519 密钥承担不同职责，两者都需要持续保留。
+默认使用 macOS 构建脚本自动生成的本地开发代码签名，无需用户预先提供稳定身份。该证书不是 Apple 颁发的 Apple Development 或 Developer ID 证书；当前 Beta 未经过 Apple 公证。已有 Apple 证书时可通过 `PASTEORY_SIGN_IDENTITY` 指定。
+
+应用代码签名和更新包的 Ed25519 密钥承担不同职责。首次发布自动创建两者，之后保留恢复材料以便复用；已安装客户端信任的更新公钥不能随意替换。
 `make app` 会嵌入 Sparkle.framework、按从内到外的顺序签名辅助程序和宿主应用，并写入更新公钥。
 
 更新公钥按以下优先级读取：
@@ -26,7 +28,7 @@ Pasteory 使用 Sparkle 2.10.1 校验并安装更新。更新索引位于
 2. 仓库文件 `Config/UpdatePublicKey.txt`。
 3. 发布 Mac 登录钥匙串中的 `app.pasteory.Pasteory.updates` 账户。没有现有密钥时，构建脚本用 Sparkle `generate_keys` 创建一次；后续构建复用同一密钥。
 
-首次正式发布前，在发布 Mac 上构建，然后将该公钥保存到 `Config/UpdatePublicKey.txt` 并提交，保证不同构建机器嵌入相同公钥：
+在本地 Mac 首次发布时，可先构建，然后将该公钥保存到 `Config/UpdatePublicKey.txt` 并提交，保证不同构建机器嵌入相同公钥：
 
 ```bash
 make app
@@ -37,6 +39,28 @@ make app
 公钥可以进入仓库。私钥留在发布者钥匙串中，不进入仓库、安装包、发布说明或日志。
 发布工具会拒绝本地签名密钥与应用内公钥不一致的安装包。不要因为缺少密钥而重新生成并替换已发布公钥。
 迁移发布机器时，按 Sparkle 官方流程转移现有密钥，并继续使用原有应用代码签名身份。
+
+## 从 Linux 触发 macOS 发布
+
+运行 GitHub Actions 的 `Build and release Pasteory Beta`（`build-beta.yml`），输入 main 已准备好的版本，例如 `0.1.31`。也可将当前 main 推送到 `release-build/v0.1.31` 触发同一流程。首次发布无需预置证书或 Secret。
+
+工作流会生成本地开发签名和 Sparkle 更新密钥，执行 `make release`，并将公钥、DMG、签名索引及加密恢复包与版本标签一起提交。发布脚本直接上传 GitHub 附件、回读核对，再更新当前索引；因此即使 `GITHUB_TOKEN` 推送标签不触发其他工作流，也能完成发布。已存在的标签只恢复同一安装包的发布，不重新构建或覆盖附件。
+
+恢复包位于 `release/signing/recovery-<版本>.cms`，采用 CMS AES-256-GCM 和 RSA-OAEP 加密，接收方公钥证书为 `Config/SigningRecovery.crt`。恢复私钥留在仓库外的受限目录；私钥、P12、密码和明文更新密钥不进入 Git 或公开附件。`Config/SigningRecoveryArchive.txt` 指向当前恢复包。
+
+后续发布可将恢复 PEM 私钥安全配置到 GitHub Actions Secret `PASTEORY_RECOVERY_PRIVATE_KEY`。工作流先解密恢复已发布身份和更新密钥，并核对固定更新公钥，再构建新版。也可在自己的 Mac 或受限工作区恢复：
+
+```bash
+python3 scripts/signing_recovery.py restore \
+  --certificate Config/SigningRecovery.crt \
+  --private-key /secure/path/recovery-private.pem \
+  --encrypted release/signing/recovery-0.1.31.cms \
+  --signing-directory "$HOME/Library/Application Support/Pasteory/Signing" \
+  --update-key /secure/path/update-key \
+  --update-public-key Config/UpdatePublicKey.txt
+```
+
+只有首次发布会创建新的更新密钥；没有恢复材料时，不以新密钥替换客户端已信任的公钥。
 
 ## 准备发布
 
@@ -63,7 +87,7 @@ python3 scripts/prepare_update.py \
 
 这个命令只准备文件，不上传或发布。正式交付沿用仓库的单一发布入口：先暂存已验证的源码与公钥，再执行 `make release RELEASE_NOTES=/absolute/path/to/release-notes.md`。
 
-源码与版本号也可以先通过 PR 合入 main，再在原发布 Mac 执行同一个 `make release` 命令；脚本此时与最近发布标签比较版本和 Build，不会因为 main 已包含本次版本号而拒绝打包。
+源码与版本号也可以先通过 PR 合入 main，再在构建 Mac 执行同一个 `make release` 命令；脚本此时与最近发布标签比较版本和 Build，不会因为 main 已包含本次版本号而拒绝打包。
 
 `release_beta.sh` 会重新验证、构建、准备签名索引并安装正式应用，将 DMG 和版本化的 `release/beta/appcast-<版本>.xml` 一起提交、打 tag 和推送。GitHub Actions 先发布并核对 DMG、SHA-256 和版本化签名索引，确认附件完整后才将当前索引更新到 `release/beta/appcast.xml`。旧版本的恢复发布不会覆盖新版本索引；旧标签与既有附件不被覆盖。发布脚本最后回读远端索引并核对内容。
 

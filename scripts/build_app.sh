@@ -39,7 +39,7 @@ LOCAL_SIGNING_DIR="$HOME/Library/Application Support/Pasteory/Signing"
 LOCAL_SIGNING_KEYCHAIN="$LOCAL_SIGNING_DIR/PasteoryBuild.keychain-db"
 LOCAL_SIGNING_PASSWORD_FILE="$LOCAL_SIGNING_DIR/keychain-password"
 USE_LOCAL_SIGNING_KEYCHAIN=false
-BUILD_PHASE="初始化稳定代码签名身份"
+BUILD_PHASE="初始化代码签名身份"
 if [[ -n ${PASTEORY_SIGN_IDENTITY:-} ]]; then
   [[ "$PASTEORY_SIGN_IDENTITY" != "-" ]] || {
     echo "PASTEORY_SIGN_IDENTITY 不允许使用 ad-hoc 身份 '-'。" >&2
@@ -49,7 +49,7 @@ if [[ -n ${PASTEORY_SIGN_IDENTITY:-} ]]; then
 else
   SIGN_IDENTITY=$($SCRIPT_DIR/ensure_local_signing_identity.sh)
   [[ -f "$LOCAL_SIGNING_KEYCHAIN" && -f "$LOCAL_SIGNING_PASSWORD_FILE" ]] || {
-    echo "Pasteory 稳定签名身份初始化后文件仍不完整。" >&2
+    echo "Pasteory 本地开发签名身份初始化后文件仍不完整。" >&2
     exit 1
   }
   LOCAL_SIGNING_PASSWORD=$(<"$LOCAL_SIGNING_PASSWORD_FILE")
