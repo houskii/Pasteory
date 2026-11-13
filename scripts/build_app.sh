@@ -1,5 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
+BUILD_PHASE="读取构建配置"
+trap 'print -u2 "Pasteory 构建失败：$BUILD_PHASE"' ZERR
 
 SCRIPT_DIR=${0:A:h}
 PROJECT_DIR=${SCRIPT_DIR:h}
@@ -37,6 +39,7 @@ LOCAL_SIGNING_DIR="$HOME/Library/Application Support/Pasteory/Signing"
 LOCAL_SIGNING_KEYCHAIN="$LOCAL_SIGNING_DIR/PasteoryBuild.keychain-db"
 LOCAL_SIGNING_PASSWORD_FILE="$LOCAL_SIGNING_DIR/keychain-password"
 USE_LOCAL_SIGNING_KEYCHAIN=false
+BUILD_PHASE="初始化稳定代码签名身份"
 if [[ -n ${PASTEORY_SIGN_IDENTITY:-} ]]; then
   [[ "$PASTEORY_SIGN_IDENTITY" != "-" ]] || {
     echo "PASTEORY_SIGN_IDENTITY 不允许使用 ad-hoc 身份 '-'。" >&2
@@ -96,9 +99,11 @@ codesign_with_local_keychain() {
   )
 }
 
+BUILD_PHASE="编译 Swift 应用"
 arch -arm64 /usr/bin/swift build --package-path "$PROJECT_DIR" -c "$BUILD_CONFIGURATION" --arch arm64
 BIN_DIR=$(arch -arm64 /usr/bin/swift build --package-path "$PROJECT_DIR" -c "$BUILD_CONFIGURATION" --arch arm64 --show-bin-path)
 
+BUILD_PHASE="组装应用与 Sparkle 框架"
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 ditto "$BIN_DIR/Pasteory" "$MACOS_DIR/Pasteory"
@@ -107,6 +112,7 @@ SPARKLE_FRAMEWORK="$PROJECT_DIR/.build/artifacts/sparkle/Sparkle/Sparkle.xcframe
 [[ -d "$SPARKLE_FRAMEWORK" ]] || { echo "找不到 SwiftPM Sparkle.framework 产物。" >&2; exit 1; }
 mkdir -p "$CONTENTS_DIR/Frameworks"
 ditto "$SPARKLE_FRAMEWORK" "$CONTENTS_DIR/Frameworks/Sparkle.framework"
+BUILD_PHASE="配置更新公钥"
 UPDATE_PUBLIC_KEY=$("$SCRIPT_DIR/ensure_update_signing_key.sh")
 [[ ${#UPDATE_PUBLIC_KEY} == 44 && "$(print -rn -- "$UPDATE_PUBLIC_KEY" | base64 -D | wc -c | tr -d ' ')" == 32 ]] \
   || { echo "更新公钥格式无效。" >&2; exit 1; }
@@ -123,6 +129,7 @@ ditto "$PROJECT_DIR/ChromeExtension" "$RESOURCES_DIR/ChromeExtension"
 /usr/libexec/PlistBuddy -c "Set :PasteoryNativeMessagingHostName $NATIVE_MESSAGING_HOST" "$CONTENTS_DIR/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :PasteoryChromeIntegrationEnabled $CHROME_INTEGRATION_ENABLED" "$CONTENTS_DIR/Info.plist"
 
+BUILD_PHASE="生成和复制应用资源"
 SOURCE_APP_ICONS_DIR="$RESOURCES_DIR/SourceAppIcons"
 mkdir -p "$SOURCE_APP_ICONS_DIR"
 SOURCE_APP_ICON_SPECS=(
@@ -171,10 +178,12 @@ arch -arm64 /usr/bin/swift "$PROJECT_DIR/scripts/verify_menu_bar_icon.swift" \
 [[ -d "$RESOURCES_DIR/FileIcons" ]] || { echo "文件图标资源在签名前丢失：$RESOURCES_DIR/FileIcons" >&2; exit 1; }
 plutil -lint "$CONTENTS_DIR/Info.plist" >/dev/null
 
+BUILD_PHASE="签名应用与更新辅助程序"
 if [[ "$USE_LOCAL_SIGNING_KEYCHAIN" == true ]]; then
   codesign_with_local_keychain
 else
   "$SCRIPT_DIR/sign_app_bundle.sh" "$APP_DIR" "$SIGN_IDENTITY"
 fi
+BUILD_PHASE="验证应用签名"
 "$SCRIPT_DIR/verify_signing.sh" "$APP_DIR" "$APP_BUNDLE_IDENTIFIER" >/dev/null
 echo "$APP_DIR"
