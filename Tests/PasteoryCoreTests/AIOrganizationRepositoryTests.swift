@@ -25,13 +25,19 @@ private func aiGrouping(_ clips: [Clip], group: UUID = UUID()) -> AIChangeSet {
     var original = aiClip("Project implementation notes")
     original.note = "A user-authored note"; original.isFavorite = true
     try await repo.save(original)
+    let before = try #require(await repo.clip(id: original.id))
     let draft = aiGrouping([original]), group = draft.commands[0].targetID
     try await repo.applyAIChangeSet(draft)
     try await repo.applyAIChangeSet(draft)
     var saved = try #require(await repo.clip(id: original.id))
     #expect(saved.collectionIDs == [group])
     #expect(saved.note == original.note && saved.isFavorite && saved.items == original.items)
-    #expect(saved.activity == original.activity)
+    #expect(abs(saved.activity.lastUsedAt.timeIntervalSince(before.activity.lastUsedAt)) < 0.001)
+    #expect(saved.activity.samples.count == before.activity.samples.count)
+    for (actual, expected) in zip(saved.activity.samples, before.activity.samples) {
+        #expect(actual.event == expected.event)
+        #expect(abs(actual.at.timeIntervalSince(expected.at)) < 0.001)
+    }
     #expect(try await repo.list(filter: .collection(group), query: "", limit: 10).map(\.id) == [original.id])
     saved.note = "Edited after AI organization"; try await repo.updateExisting(saved)
     try await repo.undoAIChangeSet(draft.id)
