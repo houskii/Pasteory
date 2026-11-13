@@ -14,6 +14,7 @@ struct LibraryView: View {
     @State private var inspectorLinkResource: LinkResource?
     @State private var availableWidth: CGFloat = 0
     @State private var showingCompactInspector = false
+    @State private var pendingAggregationDraft: AggregationDraft?
 
     private var accentColor: Color { state.settings.themeColor.accentColor }
     private var brandGradient: LinearGradient { state.settings.themeColor.gradient }
@@ -44,7 +45,12 @@ struct LibraryView: View {
         }
         .frame(minWidth: embedded ? 663 : 900, maxWidth: .infinity, minHeight: 600, maxHeight: .infinity)
         .pasteoryTheme(state.settings.themeColor)
-        .sheet(isPresented: $showingCompactInspector) {
+        .sheet(isPresented: $showingCompactInspector, onDismiss: {
+            if let draft = pendingAggregationDraft {
+                pendingAggregationDraft = nil
+                state.libraryAggregationDraft = draft
+            }
+        }) {
             VStack(spacing: 0) {
                 HStack { Spacer(); Button("完成") { showingCompactInspector = false } }
                     .padding(12)
@@ -381,13 +387,19 @@ struct LibraryView: View {
             LibraryAggregationInspector(
                 state: state,
                 aggregation: aggregation,
-                onEdit: { state.libraryAggregationDraft = AggregationDraft(
-                    aggregationID: aggregation.id,
-                    memberClipIDs: aggregation.memberClipIDs,
-                    title: aggregation.title,
-                    note: aggregation.note,
-                    origin: aggregation.origin
-                ) }
+                onEdit: {
+                    let draft = AggregationDraft(
+                        aggregationID: aggregation.id,
+                        memberClipIDs: aggregation.memberClipIDs,
+                        title: aggregation.title,
+                        note: aggregation.note,
+                        origin: aggregation.origin
+                    )
+                    if showingCompactInspector {
+                        pendingAggregationDraft = draft
+                        showingCompactInspector = false
+                    } else { state.libraryAggregationDraft = draft }
+                }
             )
         } else if let clip = state.selectedClip {
             VStack(spacing: 0) {

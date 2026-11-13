@@ -108,7 +108,8 @@ SPARKLE_FRAMEWORK="$PROJECT_DIR/.build/artifacts/sparkle/Sparkle/Sparkle.xcframe
 mkdir -p "$CONTENTS_DIR/Frameworks"
 ditto "$SPARKLE_FRAMEWORK" "$CONTENTS_DIR/Frameworks/Sparkle.framework"
 UPDATE_PUBLIC_KEY=$("$SCRIPT_DIR/ensure_update_signing_key.sh")
-[[ ${#UPDATE_PUBLIC_KEY} == 44 ]] || { echo "更新公钥格式无效。" >&2; exit 1; }
+[[ ${#UPDATE_PUBLIC_KEY} == 44 && "$(print -rn -- "$UPDATE_PUBLIC_KEY" | base64 -D | wc -c | tr -d ' ')" == 32 ]] \
+  || { echo "更新公钥格式无效。" >&2; exit 1; }
 /usr/libexec/PlistBuddy -c "Set :SUPublicEDKey $UPDATE_PUBLIC_KEY" "$CONTENTS_DIR/Info.plist"
 if [[ "$BUILD_VARIANT" == qa ]]; then
   /usr/libexec/PlistBuddy -c 'Set :SUEnableAutomaticChecks false' "$CONTENTS_DIR/Info.plist"

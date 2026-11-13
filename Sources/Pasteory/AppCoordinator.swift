@@ -108,6 +108,12 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
            let theme = PasteoryThemeColor(rawValue: String(argument.dropFirst("--debug-theme=".count))) {
             settings.themeColor = theme
         }
+        if ProcessInfo.processInfo.arguments.contains("--debug-dark") {
+            NSApp.appearance = NSAppearance(named: .darkAqua)
+        }
+        if ProcessInfo.processInfo.arguments.contains("--debug-ui-qa") {
+            settings.completedOnboarding = true
+        }
 #endif
         configureStatusItem()
         updateService.start()
@@ -176,6 +182,9 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
                 openSettings()
             }
         }
+        if ProcessInfo.processInfo.arguments.contains("--debug-open-update") {
+            updateService.checkForUpdates()
+        }
 #endif
     }
 
@@ -185,6 +194,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
 
 #if DEBUG
     private func openDebugQuickWindow() {
+        let width: CGFloat = ProcessInfo.processInfo.arguments.contains("--debug-panel-narrow") ? 340 : 380
         let view = QuickPanelView(
             state: state,
             updateService: updateService,
@@ -195,14 +205,14 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
             onCreateTextClip: {}
         )
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 380, height: 660),
+            contentRect: NSRect(x: 0, y: 0, width: width, height: 660),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Pasteory 快捷面板实际测试"
-        window.contentViewController = NSHostingController(rootView: view.frame(width: 380, height: 660))
-        window.setContentSize(NSSize(width: 380, height: 660))
+        window.contentViewController = NSHostingController(rootView: view.frame(width: width, height: 660))
+        window.setContentSize(NSSize(width: width, height: 660))
         window.center()
         window.isReleasedWhenClosed = false
         debugQuickWindow = window
@@ -600,6 +610,14 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
             window.isReleasedWhenClosed = false
             if !window.setFrameUsingName("PasteorySettingsWindow") { window.center() }
             window.setFrameAutosaveName("PasteorySettingsWindow")
+#if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--debug-settings-wide") {
+                window.setContentSize(NSSize(width: 1360, height: 820))
+            }
+            if ProcessInfo.processInfo.arguments.contains("--debug-settings-narrow") {
+                window.setContentSize(NSSize(width: 1120, height: 720))
+            }
+#endif
             settingsWindow = window
         }
         activateAndShow(settingsWindow)
@@ -629,6 +647,16 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
             updateWindow = window
         }
         activateAndShow(updateWindow)
+#if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("--debug-open-update"), let window = updateWindow,
+           let index = arguments.firstIndex(of: "--debug-snapshot-path"), arguments.indices.contains(index + 1) {
+            Task {
+                try? await Task.sleep(for: .milliseconds(500))
+                saveDebugSnapshot(of: window, to: arguments[index + 1])
+            }
+        }
+#endif
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {

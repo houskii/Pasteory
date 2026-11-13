@@ -122,6 +122,13 @@ final class UpdateService: NSObject, ObservableObject, SPUUserDriver, SPUUpdater
 
     func checkForUpdates() {
         if isShowingDialog { onPresent?(); return }
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--debug-update-available") {
+            stage = .available
+            presentDialog()
+            return
+        }
+#endif
         guard let updater else {
             lastError = configurationMessage ?? "更新服务尚未就绪。"
             stage = .failed

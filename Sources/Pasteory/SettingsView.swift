@@ -63,74 +63,74 @@ struct SettingsView: View {
     }
 
     private var settingsContent: some View {
-                VStack(spacing: 0) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(selectedDestination.title)
-                                .font(.system(size: 22, weight: .bold))
-                            Text(selectedDestination.subtitle)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                    }
-                    .padding(.horizontal, 22)
-                    .padding(.vertical, 16)
-
-                    Rectangle()
-                        .fill(Color(nsColor: .separatorColor).opacity(0.55))
-                        .frame(height: 1)
-
-                    destinationContent
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                        .clipped()
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(selectedDestination.title)
+                        .font(.system(size: 22, weight: .bold))
+                    Text(selectedDestination.subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
+                Spacer()
+            }
+            .padding(.horizontal, 22)
+            .padding(.vertical, 16)
+
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor).opacity(0.55))
+                .frame(height: 1)
+
+            destinationContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .clipped()
+        }
     }
 
 #if DEBUG
     private func configureDebugSettings() {
-            if ProcessInfo.processInfo.arguments.contains("--debug-settings-privacy") { selectedDestination = .privacy }
-            if ProcessInfo.processInfo.arguments.contains("--debug-settings-open") { selectedDestination = .openBehavior }
-            if ProcessInfo.processInfo.arguments.contains("--debug-settings-file-rules"),
-               settings.fileOpenRules.isEmpty {
-                settings.addCustomFileOpenRule()
-                if let customRule = settings.fileOpenRules.last {
-                    settings.updateFileOpenRuleExtension(id: customRule.id, fileExtension: "hap")
-                }
-                settings.addFileOpenRule()
-                if let applicationRule = settings.fileOpenRules.last,
-                   let pdf = FileIconResolver.fileExtension("pdf") {
-                    settings.updateFileOpenRuleCatalogExtension(id: applicationRule.id, descriptor: pdf)
-                    var applicationRule = settings.fileOpenRules.last!
-                    applicationRule.bundleIdentifier = "com.apple.Preview"
-                    settings.updateFileOpenRule(applicationRule)
-                }
-                settings.addFileOpenRule()
-                if let commandRule = settings.fileOpenRules.last,
-                   let swift = FileIconResolver.fileExtension("swift") {
-                    settings.updateFileOpenRuleCatalogExtension(id: commandRule.id, descriptor: swift)
-                    var commandRule = settings.fileOpenRules.last!
-                    commandRule.action = .command
-                    commandRule.command = "wc -l \"$file\""
-                    settings.updateFileOpenRule(commandRule)
-                }
+        if ProcessInfo.processInfo.arguments.contains("--debug-settings-privacy") { selectedDestination = .privacy }
+        if ProcessInfo.processInfo.arguments.contains("--debug-settings-open") { selectedDestination = .openBehavior }
+        if ProcessInfo.processInfo.arguments.contains("--debug-settings-file-rules"),
+           settings.fileOpenRules.isEmpty {
+            settings.addCustomFileOpenRule()
+            if let customRule = settings.fileOpenRules.last {
+                settings.updateFileOpenRuleExtension(id: customRule.id, fileExtension: "hap")
             }
-            if ProcessInfo.processInfo.arguments.contains("--debug-settings-file-rules"),
-               settings.recentFileCommandExecution(for: "extension:swift") == nil,
-               let (execution, handle) = settings.beginFileCommandLog(fileType: "extension:swift", shell: .zsh) {
-                try? handle.write(contentsOf: Data("8 Sources/Pasteory/AppState.swift\n".utf8))
-                try? handle.close()
-                settings.finishFileCommandLog(execution: execution, exitCode: 0)
+            settings.addFileOpenRule()
+            if let applicationRule = settings.fileOpenRules.last,
+               let pdf = FileIconResolver.fileExtension("pdf") {
+                settings.updateFileOpenRuleCatalogExtension(id: applicationRule.id, descriptor: pdf)
+                var applicationRule = settings.fileOpenRules.last!
+                applicationRule.bundleIdentifier = "com.apple.Preview"
+                settings.updateFileOpenRule(applicationRule)
             }
-            if ProcessInfo.processInfo.arguments.contains("--debug-settings-links") { selectedDestination = .linkResolution }
-            if ProcessInfo.processInfo.arguments.contains("--debug-settings-shortcuts") { selectedDestination = .shortcuts }
-            if ProcessInfo.processInfo.arguments.contains("--debug-settings-storage") { selectedDestination = .storage }
-            if ProcessInfo.processInfo.arguments.contains("--debug-settings-storage-thirty-days") {
-                selectedDestination = .storage
-                storageAnalyticsPeriod = .thirtyDays
+            settings.addFileOpenRule()
+            if let commandRule = settings.fileOpenRules.last,
+               let swift = FileIconResolver.fileExtension("swift") {
+                settings.updateFileOpenRuleCatalogExtension(id: commandRule.id, descriptor: swift)
+                var commandRule = settings.fileOpenRules.last!
+                commandRule.action = .command
+                commandRule.command = "wc -l \"$file\""
+                settings.updateFileOpenRule(commandRule)
             }
-            if ProcessInfo.processInfo.arguments.contains("--debug-settings-advanced") { selectedDestination = .advanced }
-            if ProcessInfo.processInfo.arguments.contains("--debug-settings-about") { selectedDestination = .about }
+        }
+        if ProcessInfo.processInfo.arguments.contains("--debug-settings-file-rules"),
+           settings.recentFileCommandExecution(for: "extension:swift") == nil,
+           let (execution, handle) = settings.beginFileCommandLog(fileType: "extension:swift", shell: .zsh) {
+            try? handle.write(contentsOf: Data("8 Sources/Pasteory/AppState.swift\n".utf8))
+            try? handle.close()
+            settings.finishFileCommandLog(execution: execution, exitCode: 0)
+        }
+        if ProcessInfo.processInfo.arguments.contains("--debug-settings-links") { selectedDestination = .linkResolution }
+        if ProcessInfo.processInfo.arguments.contains("--debug-settings-shortcuts") { selectedDestination = .shortcuts }
+        if ProcessInfo.processInfo.arguments.contains("--debug-settings-storage") { selectedDestination = .storage }
+        if ProcessInfo.processInfo.arguments.contains("--debug-settings-storage-thirty-days") {
+            selectedDestination = .storage
+            storageAnalyticsPeriod = .thirtyDays
+        }
+        if ProcessInfo.processInfo.arguments.contains("--debug-settings-advanced") { selectedDestination = .advanced }
+        if ProcessInfo.processInfo.arguments.contains("--debug-settings-about") { selectedDestination = .about }
     }
 #endif
 

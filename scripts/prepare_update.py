@@ -16,6 +16,36 @@ ACCOUNT = "app.pasteory.Pasteory.updates"
 REPOSITORY = "https://github.com/houskii/Pasteory"
 
 
+def verify_dmg_contents(app, dmg, info, verifier):
+    """Make sure the asset being signed actually contains the app we inspected."""
+    attached = plistlib.loads(subprocess.check_output([
+        "hdiutil", "attach", "-readonly", "-nobrowse", "-plist", str(dmg)
+    ]))
+    mounts = [Path(e["mount-point"]) for e in attached["system-entities"] if "mount-point" in e]
+    try:
+        if len(mounts) != 1:
+            raise ValueError("DMG 必须只包含一个可挂载卷")
+        packaged_app = mounts[0] / "Pasteory.app"
+        packaged_info = plistlib.loads((packaged_app / "Contents/Info.plist").read_bytes())
+        if packaged_info != info:
+            raise ValueError("DMG 内应用信息与待发布应用不一致，请重新打包")
+        subprocess.run([str(verifier), str(packaged_app)], check=True)
+
+        def cdhash(bundle):
+            details = subprocess.run(["codesign", "-d", "--verbose=4", str(bundle)],
+                                     check=True, capture_output=True, text=True)
+            match = re.search(r"^CDHash=(.+)$", details.stderr, re.MULTILINE)
+            if match is None:
+                raise ValueError("无法读取应用签名摘要")
+            return match.group(1)
+
+        if cdhash(app) != cdhash(packaged_app):
+            raise ValueError("DMG 内应用代码与待发布应用不一致，请重新打包")
+    finally:
+        for mount in mounts:
+            subprocess.run(["hdiutil", "detach", str(mount)], check=True)
+
+
 def appcast_bytes(info, tag, notes, asset_name, size, signature, published_at):
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", tag):
         raise ValueError("发布 tag 只能包含字母、数字、点、下划线和连字符")
@@ -71,6 +101,7 @@ def prepare(args):
         raise ValueError("安装包内公钥与发布钥匙串不一致，已拒绝发布")
     subprocess.run([str(root / "scripts/verify_signing.sh"), str(args.app)], check=True)
     subprocess.run(["hdiutil", "verify", str(args.dmg)], check=True)
+    verify_dmg_contents(args.app, args.dmg, info, root / "scripts/verify_signing.sh")
     signature = subprocess.check_output([
         str(args.tools / "sign_update"), "--account", ACCOUNT, "-p", str(args.dmg)
     ], text=True).strip()
