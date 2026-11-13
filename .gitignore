@@ -12,3 +12,9 @@ Pasteory.local/
 *.pasteorybackup
 *.dmg
 !release/beta/*.dmg
+
+# Private signing material stays outside the repository.
+*.p12
+*.key
+*-private.pem
+.release-secrets/

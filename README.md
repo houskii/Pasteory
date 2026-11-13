@@ -37,6 +37,8 @@ Requires **macOS 14 or later** on an **Apple Silicon Mac**.
 
 Use **⌥Return** to paste as plain text. **Space** opens the selected item; choose your browser, code editor, and file actions in **Settings → Open With** first.
 
+This Beta uses a local development code signature and is not Apple-notarized. If macOS blocks the first launch, review the app in System Settings → Privacy & Security and choose Open Anyway.
+
 Change the interface language anytime in **Settings → General → Interface Language**. To switch to Chinese, choose **简体中文**.
 
 ## Privacy, by default

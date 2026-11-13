@@ -1,0 +1,83 @@
+name: Build and release Pasteory Beta
+
+on:
+  push:
+    branches: ['release-build/v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version already present on main, without the v prefix
+        required: true
+        default: '0.1.31'
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pasteory-build-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PASTEORY_RELEASE_VERSION: ${{ inputs.version }}
+      PASTEORY_RELEASE_PUBLISH_DIRECTLY: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check version and preserve an existing release
+        id: preflight
+        run: |
+          set -euo pipefail
+          version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Config/Info.plist)
+          if [[ -z "$PASTEORY_RELEASE_VERSION" ]]; then
+            [[ "$GITHUB_REF_NAME" == "release-build/v$version" ]]
+            echo "PASTEORY_RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+          else
+            [[ "$PASTEORY_RELEASE_VERSION" == "$version" ]]
+          fi
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          git switch -C main origin/main
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git config credential.helper '!gh auth git-credential'
+          if git show-ref --verify --quiet "refs/tags/v$version"; then
+            echo 'existing=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'existing=false' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Recover publication of the same immutable tag
+        if: steps.preflight.outputs.existing == 'true'
+        run: ./scripts/publish_beta.sh "v$PASTEORY_RELEASE_VERSION"
+      - name: Select OpenSSL 3
+        if: steps.preflight.outputs.existing == 'false'
+        run: echo "$(brew --prefix openssl@3)/bin" >> "$GITHUB_PATH"
+      - name: Prepare local development signing and encrypted recovery
+        if: steps.preflight.outputs.existing == 'false'
+        env:
+          PASTEORY_RECOVERY_PRIVATE_KEY: ${{ secrets.PASTEORY_RECOVERY_PRIVATE_KEY }}
+        run: ./scripts/prepare_ci_release.sh
+      - name: Test release tooling
+        if: steps.preflight.outputs.existing == 'false'
+        run: |
+          python3 -m unittest discover -s scripts/tests -v
+          python3 scripts/check_localizations.py
+          node --test scripts/tests/test_chrome_popup.cjs
+      - name: Build, verify, install, and publish the Release package
+        if: steps.preflight.outputs.existing == 'false'
+        run: make release RELEASE_NOTES="$PWD/docs/releases/v$PASTEORY_RELEASE_VERSION.md"
+      - name: Save encrypted recovery archive
+        if: always() && steps.preflight.outputs.existing == 'false'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signing-recovery
+          path: release/signing/*.cms
+          if-no-files-found: ignore
+          retention-days: 90

@@ -19,7 +19,7 @@ make install
 
 QA 包通过 `make qa-app` 构建为 `dist/Pasteory-QA.app`，通过 `make qa-install` 安装到 `/Applications/Pasteory QA.app`。正式包与 QA 包分别使用 `app.pasteory.Pasteory` 和 `app.pasteory.Pasteory.qa`，数据目录分别为 `Pasteory` 和 `Pasteory QA`。`make qa-verify` 会同时校验 Bundle ID、显示名称、数据目录、Chrome 原生消息桥和签名 requirement，防止测试包再次复用正式身份。QA 包默认不注册 Chrome 原生消息桥。
 
-首次执行 `make app`、`make install` 或 `make signing` 时，脚本会在 `~/Library/Application Support/Pasteory/Signing/` 自动创建隔离的 `Pasteory Local Build` 签名身份。钥匙串、加密恢复文件和随机密码仅对当前用户可读，不会进入仓库。本机已有其他稳定代码签名证书时，也可以通过环境变量指定身份：
+首次执行 `make app`、`make install` 或 `make signing` 时，脚本会在 `~/Library/Application Support/Pasteory/Signing/` 自动创建隔离的 `Pasteory Local Build` 签名身份。钥匙串、加密恢复文件和随机密码仅对当前用户可读，不会进入仓库。本机已有 Apple Development、Developer ID 或其他代码签名证书时，也可以通过环境变量指定身份：
 
 ```bash
 PASTEORY_SIGN_IDENTITY="Apple Development: …" make install
@@ -29,7 +29,7 @@ PASTEORY_SIGN_IDENTITY="Apple Development: …" make install
 
 更新时如需跳过本次启动的存量整理、归档和旧链接重试，使用 `PASTEORY_SKIP_EXISTING_MAINTENANCE=1 make install`。新复制的内容和快捷工具转换结果仍正常入库。
 
-从 ad-hoc 签名首次切换到 `Pasteory Local Build` 后，需要在“系统设置 → 隐私与安全性 → 辅助功能”中重新授权一次。之后只要保留签名目录，更新安装无需重复授权。
+从 ad-hoc 签名首次切换到 `Pasteory Local Build` 后，需要在“系统设置 → 隐私与安全性 → 辅助功能”中重新授权一次。保留签名目录有助于后续更新继续使用同一身份。
 
 ## Localization
 
@@ -39,6 +39,8 @@ Run `python3 scripts/check_localizations.py` after adding UI text. The packaged 
 
 ## Releases
 
-Release is the optimized build configuration; it does not choose a signing identity. From Linux, trigger the GitHub macOS workflow to use Apple’s SDK and tools. Official packaging still needs the publisher’s existing code-signing certificate and private key (Developer ID, Apple Development, or the established local identity), plus the stable Sparkle key. Keep those in the publisher Mac’s keychain or an approved secure CI configuration.
+Release is the optimized build configuration; it does not choose a signing identity. No pre-existing signing identity is required: the macOS build script creates a local development code-signing certificate on first use. This certificate is not an Apple-issued Apple Development or Developer ID certificate, and these Beta builds are not notarized. An existing Apple certificate can still be selected with `PASTEORY_SIGN_IDENTITY`.
 
-See [UPDATES.md](UPDATES.md) for the stable signing identity, Sparkle key, and publishing workflow. Follow [AGENTS.md](../AGENTS.md) for delivery checks. CI generates disposable identities only for validation; its packages are not official releases.
+From Linux, trigger the **Build and release Pasteory Beta** workflow on GitHub. It runs the same `make release` command on a macOS runner, tests and packages the app, installs that app on the runner, and publishes the DMG plus SHA-256 and signed update feed. It encrypts code-signing and update-key recovery files to `Config/SigningRecovery.crt`; only that public certificate and the encrypted archive enter Git. The recovery private key stays outside the repository.
+
+The **macOS verification** workflow keeps its own disposable test identities. Its output is separate from the publishing workflow. See [UPDATES.md](UPDATES.md) for recovery and subsequent releases, and [AGENTS.md](../AGENTS.md) for delivery checks.

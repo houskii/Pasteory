@@ -47,7 +47,7 @@ make test
 PASTEORY_BUILD_VARIANT=production PASTEORY_BUILD_CONFIGURATION=release make verify
 dmg="Pasteory-$version-arm64.dmg"
 phase="准备签名更新索引"
-python3 "$SCRIPT_DIR/prepare_update.py" --tag "$tag" --notes "$notes" --dmg "dist/$dmg"
+python3 "$SCRIPT_DIR/prepare_update.py" --tag "$tag" --notes "$notes" --dmg "dist/$dmg"   --tools "${PASTEORY_SPARKLE_TOOLS:-$PWD/.build/artifacts/sparkle/Sparkle/bin}"
 phase="安装已验证的 App"
 PASTEORY_SKIP_EXISTING_MAINTENANCE=1 "$SCRIPT_DIR/install.sh"
 
@@ -63,6 +63,10 @@ git commit -m "Release Pasteory $version"
 git tag -a "$tag" -F "$notes"
 phase="推送源码和标签"
 git push --atomic origin HEAD:refs/heads/main "refs/tags/$tag"
+if [[ ${PASTEORY_RELEASE_PUBLISH_DIRECTLY:-0} == 1 ]]; then
+  phase="发布 GitHub Release 和更新索引"
+  "$SCRIPT_DIR/publish_beta.sh" "$tag"
+fi
 
 phase="等待 GitHub Release 并核对下载"
 download=$(mktemp -d)

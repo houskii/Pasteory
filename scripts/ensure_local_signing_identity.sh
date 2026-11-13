@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
-SIGNING_PHASE="初始化稳定代码签名身份"
-trap 'print -u2 "Pasteory 稳定签名失败：$SIGNING_PHASE"' ZERR
+SIGNING_PHASE="初始化本地开发代码签名身份"
+trap 'print -u2 "Pasteory 本地开发签名失败：$SIGNING_PHASE"' ZERR
 
 SIGNING_DIR="$HOME/Library/Application Support/Pasteory/Signing"
 BUILD_KEYCHAIN="$SIGNING_DIR/PasteoryBuild.keychain-db"
@@ -16,7 +16,7 @@ mkdir -p "$SIGNING_DIR"
 chmod 700 "$SIGNING_DIR"
 
 fail() {
-  echo "Pasteory 稳定签名初始化失败：$1" >&2
+  echo "Pasteory 本地开发签名初始化失败：$1" >&2
   exit 1
 }
 
