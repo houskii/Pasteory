@@ -133,6 +133,7 @@ struct UpdateDialogView: View {
         }
         .padding(24)
         .frame(minWidth: 520, idealWidth: 560, maxWidth: .infinity, minHeight: 340, idealHeight: 540, maxHeight: .infinity)
+        .background(Color(nsColor: .windowBackgroundColor))
         .pasteoryTheme(settings.themeColor)
     }
 

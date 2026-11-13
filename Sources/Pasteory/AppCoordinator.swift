@@ -622,7 +622,13 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
             )
             let hostingController = NSHostingController(rootView: view)
             hostingController.sizingOptions = []
+#if DEBUG
+            let window = SettingsSnapshotWindow(contentViewController: hostingController)
+            window.allowsOffscreenSnapshot = ProcessInfo.processInfo.arguments.contains("--debug-settings-wide")
+                || ProcessInfo.processInfo.arguments.contains("--debug-settings-narrow")
+#else
             let window = NSWindow(contentViewController: hostingController)
+#endif
             window.title = "Pasteory 设置"
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             let visibleSize = (NSScreen.main?.visibleFrame.size ?? NSSize(width: 1440, height: 900))
@@ -725,3 +731,15 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
         NSApplication.shared.activate(ignoringOtherApps: true); window.makeKeyAndOrderFront(nil)
     }
 }
+
+#if DEBUG
+/// Render the requested QA layout even when the hosted runner has a small virtual display.
+@MainActor
+private final class SettingsSnapshotWindow: NSWindow {
+    var allowsOffscreenSnapshot = false
+
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        allowsOffscreenSnapshot ? frameRect : super.constrainFrameRect(frameRect, to: screen)
+    }
+}
+#endif

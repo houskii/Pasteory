@@ -42,3 +42,9 @@ capture settings-library-wide --debug-open-library --debug-settings-wide
 capture settings-library-narrow --debug-open-library --debug-settings-narrow
 capture settings-about --debug-open-settings --debug-settings-about
 capture update-confirmation --debug-update-available --debug-open-update
+
+# A runner's small virtual display must not silently turn both cases into the same layout.
+wide_width=$(sips -g pixelWidth "$OUTPUT_DIR/settings-library-wide.png" | awk '/pixelWidth/{print $2}')
+narrow_width=$(sips -g pixelWidth "$OUTPUT_DIR/settings-library-narrow.png" | awk '/pixelWidth/{print $2}')
+[[ "$wide_width" == 1360 || "$wide_width" == 2720 ]]
+[[ "$narrow_width" == 1120 || "$narrow_width" == 2240 ]]
