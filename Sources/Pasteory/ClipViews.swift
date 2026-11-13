@@ -62,10 +62,7 @@ struct ClipRowView: View {
                        lineCount > 1 {
                         Text(L10n.tr("\(lineCount) 行")).fixedSize()
                     }
-                    Text(
-                        L10n.tr("复制 ×\(CompactCountFormatter.string(for: clip.copyCount)) · ")
-                            + L10n.tr("粘贴 ×\(CompactCountFormatter.string(for: clip.recordedPasteCount))")
-                    )
+                    usageCount
                         .fixedSize()
                         .layoutPriority(2)
                         .help(L10n.tr("复制 \(clip.copyCount) 次，通过 Pasteory 粘贴 \(clip.recordedPasteCount) 次"))
@@ -112,6 +109,24 @@ struct ClipRowView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await refreshFileAvailability() }
+        }
+    }
+
+    @ViewBuilder
+    private var usageCount: some View {
+        if compact && L10n.language == .english {
+            HStack(spacing: 3) {
+                Image(systemName: "doc.on.doc")
+                Text(CompactCountFormatter.string(for: clip.copyCount))
+                Text("·")
+                Image(systemName: "doc.on.clipboard")
+                Text(CompactCountFormatter.string(for: clip.recordedPasteCount))
+            }
+        } else {
+            Text(
+                L10n.tr("复制 ×\(CompactCountFormatter.string(for: clip.copyCount)) · ")
+                    + L10n.tr("粘贴 ×\(CompactCountFormatter.string(for: clip.recordedPasteCount))")
+            )
         }
     }
 

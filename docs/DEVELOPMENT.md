@@ -39,4 +39,6 @@ Run `python3 scripts/check_localizations.py` after adding UI text. The packaged 
 
 ## Releases
 
+Release is the optimized build configuration; it does not choose a signing identity. From Linux, trigger the GitHub macOS workflow to use Apple’s SDK and tools. Official packaging still needs the publisher’s existing code-signing certificate and private key (Developer ID, Apple Development, or the established local identity), plus the stable Sparkle key. Keep those in the publisher Mac’s keychain or an approved secure CI configuration.
+
 See [UPDATES.md](UPDATES.md) for the stable signing identity, Sparkle key, and publishing workflow. Follow [AGENTS.md](../AGENTS.md) for delivery checks. CI generates disposable identities only for validation; its packages are not official releases.
