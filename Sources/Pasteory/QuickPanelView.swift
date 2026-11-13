@@ -26,7 +26,7 @@ struct QuickPanelView: View {
 
     var body: some View {
         panelSurface
-        .pasteoryTheme(state.settings.themeColor)
+        .pasteoryTheme(state.settings.themeColor, language: state.settings.appLanguage)
         .sheet(isPresented: $state.quickNewNormalCollectionActive) {
             CollectionNameEditor(state: state, existing: nil)
         }
@@ -37,21 +37,21 @@ struct QuickPanelView: View {
             SmartCollectionEditor(state: state, existing: $0)
         }
         .alert(
-            deletingCollection.map { "删除“\($0.name)”？" } ?? "删除分组？",
+            deletingCollection.map { L10n.tr("删除“\($0.name)”？") } ?? L10n.tr("删除分组？"),
             isPresented: Binding(
                 get: { deletingCollection != nil },
                 set: { if !$0 { deletingCollection = nil } }
             ),
             presenting: deletingCollection
         ) { collection in
-            Button("删除", role: .destructive) {
+            Button(L10n.tr("删除"), role: .destructive) {
                 Task { await state.deleteCollection(collection) }
             }
-            Button("取消", role: .cancel) {}
+            Button(L10n.tr("取消"), role: .cancel) {}
         } message: { collection in
             Text(collection.kind == .smart
-                ? "智能规则会一并删除，剪贴板内容不会被删除。"
-                : "内容只会移出这个分组，不会从资料库删除。")
+                ? L10n.tr("智能规则会一并删除，剪贴板内容不会被删除。")
+                : L10n.tr("内容只会移出这个分组，不会从资料库删除。"))
         }
         .onAppear {
             searchFocused = false
@@ -120,11 +120,11 @@ struct QuickPanelView: View {
                 Image(systemName: state.quickPanelPinned ? "pin.fill" : "pin")
                     .foregroundStyle(state.quickPanelPinned ? state.settings.themeColor.accentColor : Color.secondary)
             }
-            .buttonStyle(.plain).help(state.quickPanelPinned ? "取消固定" : "固定面板")
+            .buttonStyle(.plain).help(state.quickPanelPinned ? L10n.tr("取消固定") : L10n.tr("固定面板"))
 
             HStack(spacing: 7) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("输入开始搜索…", text: $state.quickQuery)
+                TextField(L10n.tr("输入开始搜索…"), text: $state.quickQuery)
                     .textFieldStyle(.plain)
                     .focused($searchFocused)
                     .onChange(of: state.quickQuery) { _, _ in Task { await state.refreshQuick(debounce: true) } }
@@ -140,12 +140,12 @@ struct QuickPanelView: View {
             QuickActionsToolbarMenu(state: state, clip: state.quickSelectedClip, compact: true)
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                .buttonStyle(.plain).help("快捷操作")
+                .buttonStyle(.plain).help(L10n.tr("快捷操作"))
 
             HStack(spacing: 6) {
                 UpdateBadge(service: updateService, theme: state.settings.themeColor, onOpen: onOpenUpdate)
                 Button(action: onOpenSettings) { Image(systemName: "gearshape") }
-                .buttonStyle(.plain).help("打开设置")
+                .buttonStyle(.plain).help(L10n.tr("打开设置"))
             }
         }
         .padding(12)
@@ -201,13 +201,13 @@ struct QuickPanelView: View {
                     Text(message).font(.caption.weight(.medium)).lineLimit(2)
                     Spacer(minLength: 4)
                     if state.undoableAggregation != nil {
-                        Button("撤销") { Task { await state.undoLastAggregation() } }
+                        Button(L10n.tr("撤销")) { Task { await state.undoLastAggregation() } }
                             .buttonStyle(.plain)
                             .font(.caption.weight(.semibold))
                     }
                     Button { state.clearStatus() } label: { Image(systemName: "xmark") }
                         .buttonStyle(.plain)
-                        .help("关闭提示")
+                        .help(L10n.tr("关闭提示"))
                 }
                 .foregroundStyle(statusColor)
                 .padding(.horizontal, 12)
@@ -223,14 +223,14 @@ struct QuickPanelView: View {
     private var groupSidebar: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("分组").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Text(L10n.tr("分组")).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 Spacer()
                 collectionManagerButton
             }
             HStack(spacing: 3) {
                 directionKeycap("arrow.left")
                 directionKeycap("arrow.right")
-                Text("切换分组").font(.system(size: 10))
+                Text(L10n.tr("切换分组")).font(.system(size: 10))
             }
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .trailing)
@@ -278,7 +278,7 @@ struct QuickPanelView: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(showingCollectionOverview ? state.settings.themeColor.accentColor : Color.secondary)
-        .help("查看和管理全部分组")
+        .help(L10n.tr("查看和管理全部分组"))
         .popover(isPresented: $showingCollectionOverview, arrowEdge: .bottom) {
             QuickCollectionOverview(
                 state: state,
@@ -348,7 +348,7 @@ struct QuickPanelView: View {
             }
 
             HStack(spacing: 8) {
-                Text("当前：\(currentQuickGroupTitle)")
+                Text(L10n.tr("当前：\(currentQuickGroupTitle)"))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .help(currentQuickGroupTitle)
@@ -367,16 +367,16 @@ struct QuickPanelView: View {
 
     private var currentQuickGroupTitle: String {
         guard case .collection(let id) = state.quickScope,
-              let collection = state.collections.first(where: { $0.id == id }) else { return "全部内容" }
+              let collection = state.collections.first(where: { $0.id == id }) else { return L10n.tr("全部内容") }
         return collection.name
     }
 
     private var currentQuickGroupPosition: String {
         guard case .collection(let id) = state.quickScope,
               let index = state.collections.firstIndex(where: { $0.id == id }) else {
-            return "共 \(state.collections.count) 个分组"
+            return L10n.tr("共 \(state.collections.count) 个分组")
         }
-        return "第 \(index + 1) / \(state.collections.count) 个分组"
+        return L10n.tr("第 \(index + 1) / \(state.collections.count) 个分组")
     }
 
     private func directionKeycap(_ symbol: String) -> some View {
@@ -416,12 +416,12 @@ struct QuickPanelView: View {
         .contextMenu {
             if case .collection(let id) = tab.scope,
                let collection = state.collections.first(where: { $0.id == id }) {
-                Button(collection.kind == .smart ? "编辑名称和规则…" : "重命名…") {
+                Button(collection.kind == .smart ? L10n.tr("编辑名称和规则…") : L10n.tr("重命名…")) {
                     if collection.kind == .smart { editingSmartCollection = collection }
                     else { editingNormalCollection = collection }
                 }
                 Divider()
-                Button("删除分组", role: .destructive) { deletingCollection = collection }
+                Button(L10n.tr("删除分组"), role: .destructive) { deletingCollection = collection }
             }
         }
     }
@@ -516,14 +516,14 @@ struct QuickPanelView: View {
 
     private var aggregationSearchBar: some View {
         HStack(spacing: 8) {
-            Text("找到 \(state.quickTopLevelResultCount) 个结果")
+            Text(L10n.tr("找到 \(state.quickTopLevelResultCount) 个结果"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 8)
             Button {
                 Task { await state.prepareQuickAggregation() }
             } label: {
-                Label("聚合结果", systemImage: "square.stack.3d.up")
+                Label(L10n.tr("聚合结果"), systemImage: "square.stack.3d.up")
             }
             .buttonStyle(.borderless)
             .font(.caption.weight(.semibold))
@@ -537,18 +537,18 @@ struct QuickPanelView: View {
 
     private var multiSelectionBar: some View {
         HStack(spacing: 8) {
-            Text("已选 \(state.quickMultiSelectionIDs.count) 项")
+            Text(L10n.tr("已选 \(state.quickMultiSelectionIDs.count) 项"))
                 .font(.caption.weight(.semibold))
-            Text("Space 勾选 · Esc 退出")
+            Text(L10n.tr("Space 勾选 · Esc 退出"))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 8)
-            Button("取消") { state.exitQuickMultiSelect() }
+            Button(L10n.tr("取消")) { state.exitQuickMultiSelect() }
                 .buttonStyle(.borderless)
             Button {
                 Task { await state.prepareQuickAggregation() }
             } label: {
-                Label("聚合", systemImage: "square.stack.3d.up")
+                Label(L10n.tr("聚合"), systemImage: "square.stack.3d.up")
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
@@ -563,16 +563,16 @@ struct QuickPanelView: View {
     private func quickTabHelp(_ tab: QuickTab) -> String {
         guard case .collection(let id) = tab.scope,
               let collection = state.collections.first(where: { $0.id == id }) else {
-            return "全部内容"
+            return L10n.tr("全部内容")
         }
-        return "\(collection.kind == .smart ? "智能分组" : "普通分组")：\(collection.name) · 拖动调整顺序"
+        return L10n.tr("\(collection.kind == .smart ? L10n.tr("智能分组") : L10n.tr("普通分组"))：\(collection.name) · 拖动调整顺序")
     }
 
     private var aggregateResultsHelp: String {
         guard let shortcut = state.settings.quickShortcut(for: .aggregateContent) else {
-            return "聚合当前搜索结果"
+            return L10n.tr("聚合当前搜索结果")
         }
-        return "聚合当前搜索结果（\(ShortcutFormatter.display(keyCode: shortcut.keyCode, modifiers: shortcut.modifiers))）"
+        return L10n.tr("聚合当前搜索结果（\(ShortcutFormatter.display(keyCode: shortcut.keyCode, modifiers: shortcut.modifiers))）")
     }
 
     private func quickTabIconColor(_ tab: QuickTab) -> Color {
@@ -591,16 +591,16 @@ struct QuickPanelView: View {
         let description: String
         let symbol: String
         if needsRules {
-            title = "智能分组尚未设置规则"
-            description = "右键点击上方分组标签，选择“编辑名称和规则”。"
+            title = L10n.tr("智能分组尚未设置规则")
+            description = L10n.tr("右键点击上方分组标签，选择“编辑名称和规则”。")
             symbol = "sparkles"
         } else if activeCollection != nil, state.quickQuery.isEmpty {
-            title = "分组中还没有内容"
-            description = activeCollection?.kind == .smart ? "当前没有内容符合这组规则。" : "右键点击剪辑，可以把内容加入这个分组。"
+            title = L10n.tr("分组中还没有内容")
+            description = activeCollection?.kind == .smart ? L10n.tr("当前没有内容符合这组规则。") : L10n.tr("右键点击剪辑，可以把内容加入这个分组。")
             symbol = activeCollection?.kind == .smart ? "sparkles" : "folder"
         } else {
-            title = state.quickQuery.isEmpty ? "还没有剪贴板内容" : "没有找到匹配内容"
-            description = "复制一段文字、链接或图片后，它会出现在这里。"
+            title = state.quickQuery.isEmpty ? L10n.tr("还没有剪贴板内容") : L10n.tr("没有找到匹配内容")
+            description = L10n.tr("复制一段文字、链接或图片后，它会出现在这里。")
             symbol = state.quickQuery.isEmpty ? "clipboard" : "magnifyingglass"
         }
         return ContentUnavailableView(
@@ -639,14 +639,14 @@ struct QuickPanelView: View {
     private var footer: some View {
         HStack(spacing: 8) {
             Button(action: onOpenLibrary) { Image(systemName: "list.star") }
-                .buttonStyle(.plain).help("打开资料库（⌘L）")
-            Text("今日·\(state.quickDayCount)条｜近7日·\(state.quickWeekCount)条")
+                .buttonStyle(.plain).help(L10n.tr("打开资料库（⌘L）"))
+            Text(L10n.tr("今日·\(state.quickDayCount)条｜近7日·\(state.quickWeekCount)条"))
                 .monospacedDigit()
-                .help("按本机时区的自然日统计：今日从 0 点开始，近 7 日包含今天；不包含废纸篓")
+                .help(L10n.tr("按本机时区的自然日统计：今日从 0 点开始，近 7 日包含今天；不包含废纸篓"))
             Spacer(minLength: 12)
             Text(state.settings.quickTabLayout == .sidebar
-                 ? "↑↓ 内容　长按 Command 提示"
-                 : "↑↓ 内容　←→ 分组　长按 Command 提示")
+                 ? L10n.tr("↑↓ 内容　长按 Command 提示")
+                 : L10n.tr("↑↓ 内容　←→ 分组　长按 Command 提示"))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .font(.caption2)
@@ -694,13 +694,13 @@ private struct QuickCollectionOverview: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("全部分组").font(.headline)
-                    Text("拖动分组可调整快捷面板中的顺序")
+                    Text(L10n.tr("全部分组")).font(.headline)
+                    Text(L10n.tr("拖动分组可调整快捷面板中的顺序"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text("\(state.collections.count) 个")
+                Text(L10n.tr("\(state.collections.count) 个"))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
                 Button {
@@ -710,7 +710,7 @@ private struct QuickCollectionOverview: View {
                         .foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
-                .help("关闭")
+                .help(L10n.tr("关闭"))
             }
             .padding(14)
 
@@ -720,7 +720,7 @@ private struct QuickCollectionOverview: View {
                 ScrollView {
                     LazyVStack(spacing: 4) {
                         overviewRow(
-                            title: "全部内容",
+                            title: L10n.tr("全部内容"),
                             symbol: "clock",
                             selected: state.quickScope == .all,
                             highlighted: highlightedScope == .all
@@ -736,7 +736,7 @@ private struct QuickCollectionOverview: View {
 
                         HStack(spacing: 6) {
                             Image(systemName: "arrow.down.to.line")
-                            Text("拖到这里移到末尾")
+                            Text(L10n.tr("拖到这里移到末尾"))
                         }
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
@@ -762,19 +762,19 @@ private struct QuickCollectionOverview: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 actionButton(
-                    "新建分组",
+                    L10n.tr("新建分组"),
                     symbol: "folder.badge.plus",
                     shortcut: state.settings.quickShortcut(for: .createCollection),
                     action: onCreateNormal
                 )
-                actionButton("新建智能分组", symbol: "sparkles", action: onCreateSmart)
+                actionButton(L10n.tr("新建智能分组"), symbol: "sparkles", action: onCreateSmart)
                 Divider().padding(.vertical, 3)
-                actionButton("新建文本内容", symbol: "doc.badge.plus", action: onCreateText)
+                actionButton(L10n.tr("新建文本内容"), symbol: "doc.badge.plus", action: onCreateText)
             }
             .padding(10)
         }
         .frame(width: 340)
-        .pasteoryTheme(state.settings.themeColor)
+        .pasteoryTheme(state.settings.themeColor, language: state.settings.appLanguage)
         .focusable()
         .focusEffectDisabled()
         .focused($overviewFocused)
@@ -820,11 +820,11 @@ private struct QuickCollectionOverview: View {
             return true
         }
         .contextMenu {
-            Button(collection.kind == .smart ? "编辑名称和规则…" : "重命名…") {
+            Button(collection.kind == .smart ? L10n.tr("编辑名称和规则…") : L10n.tr("重命名…")) {
                 onEdit(collection)
             }
             Divider()
-            Button("删除分组", role: .destructive) { onDelete(collection) }
+            Button(L10n.tr("删除分组"), role: .destructive) { onDelete(collection) }
         }
     }
 
@@ -951,9 +951,9 @@ struct QuickCommandHelpView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack {
-                Text("Command 快捷操作").font(.caption.weight(.semibold))
+                Text(L10n.tr("Command 快捷操作")).font(.caption.weight(.semibold))
                 Spacer()
-                Text("松开 ⌘ 隐藏").font(.caption2).foregroundStyle(.tertiary)
+                Text(L10n.tr("松开 ⌘ 隐藏")).font(.caption2).foregroundStyle(.tertiary)
             }
 
             if scrollEnabled {
@@ -972,23 +972,23 @@ struct QuickCommandHelpView: View {
 
     private var commandHelpSections: some View {
         VStack(alignment: .leading, spacing: 11) {
-            commandHelpSection("粘贴与复制", actions: [.directPaste, .copyOnly, .plainTextPaste, .plainTextCopy])
-            commandHelpSection("内容打开", actions: [.openSelected])
-            commandHelpSection("搜索", actions: [.toggleSearch])
-            commandHelpSection("文本工具", actions: [.quickActions])
+            commandHelpSection(L10n.tr("粘贴与复制"), actions: [.directPaste, .copyOnly, .plainTextPaste, .plainTextCopy])
+            commandHelpSection(L10n.tr("内容打开"), actions: [.openSelected])
+            commandHelpSection(L10n.tr("搜索"), actions: [.toggleSearch])
+            commandHelpSection(L10n.tr("文本工具"), actions: [.quickActions])
             commandHelpSection(
-                "整理当前项目",
+                L10n.tr("整理当前项目"),
                 actions: [
                     .toggleFavorite, .togglePinned, .editMetadata, .setCollection,
                     .createCollection, .aggregateContent, .expandAggregation, .collapseAggregation, .moveToTrash
                 ]
             )
-            commandHelpSection("窗口与页面", actions: [.openLibrary, .openSettings, .closePanel])
+            commandHelpSection(L10n.tr("窗口与页面"), actions: [.openLibrary, .openSettings, .closePanel])
             VStack(alignment: .leading, spacing: 6) {
-                commandHelpSectionTitle("固定导航快捷键")
-                commandHelpItem(shortcut: "↑↓ / ←→", title: "选择内容 / 切换分组")
-                commandHelpItem(shortcut: "⌘1～⌘9", title: "快速粘贴前 9 项")
-                commandHelpItem(shortcut: "Esc", title: "关闭当前编辑层")
+                commandHelpSectionTitle(L10n.tr("固定导航快捷键"))
+                commandHelpItem(shortcut: "↑↓ / ←→", title: L10n.tr("选择内容 / 切换分组"))
+                commandHelpItem(shortcut: "⌘1～⌘9", title: L10n.tr("快速粘贴前 9 项"))
+                commandHelpItem(shortcut: "Esc", title: L10n.tr("关闭当前编辑层"))
             }
         }
     }
@@ -1074,31 +1074,31 @@ private struct QuickClipCard: View {
                 onCopy(clip, false, true)
             })
             .contextMenu {
-                Button("直接粘贴") { onCopy(clip, false, true) }
+                Button(L10n.tr("直接粘贴")) { onCopy(clip, false, true) }
                     .quickActionShortcut(state.settings.quickShortcut(for: .directPaste))
-                Button("只复制") { onCopy(clip, false, false) }
+                Button(L10n.tr("只复制")) { onCopy(clip, false, false) }
                     .quickActionShortcut(state.settings.quickShortcut(for: .copyOnly))
-                Button("纯文本粘贴") { onCopy(clip, true, true) }
+                Button(L10n.tr("纯文本粘贴")) { onCopy(clip, true, true) }
                     .quickActionShortcut(state.settings.quickShortcut(for: .plainTextPaste))
-                Button("纯文本复制") { onCopy(clip, true, false) }
+                Button(L10n.tr("纯文本复制")) { onCopy(clip, true, false) }
                     .quickActionShortcut(state.settings.quickShortcut(for: .plainTextCopy))
                 QuickActionsMenu { action in
                     state.runQuickTextAction(action, for: clip)
                 }
                 Divider()
-                Button(clip.isFavorite ? "取消收藏" : "收藏") { state.toggleFavorite(clip) }
+                Button(clip.isFavorite ? L10n.tr("取消收藏") : L10n.tr("收藏")) { state.toggleFavorite(clip) }
                     .quickActionShortcut(state.settings.quickShortcut(for: .toggleFavorite))
-                Button(clip.isPinned ? "取消置顶" : "置顶") { state.togglePinned(clip) }
+                Button(clip.isPinned ? L10n.tr("取消置顶") : L10n.tr("置顶")) { state.togglePinned(clip) }
                     .quickActionShortcut(state.settings.quickShortcut(for: .togglePinned))
-                Button("编辑信息…") {
+                Button(L10n.tr("编辑信息…")) {
                     state.presentQuickMetadataEditor(for: clip.id, initialField: .title)
                 }
                     .quickActionShortcut(state.settings.quickShortcut(for: .editMetadata))
-                Button("设置分组…") {
+                Button(L10n.tr("设置分组…")) {
                     state.presentQuickMetadataEditor(for: clip.id, initialField: .collections)
                 }
                     .quickActionShortcut(state.settings.quickShortcut(for: .setCollection))
-                Button("聚合内容…") {
+                Button(L10n.tr("聚合内容…")) {
                     state.quickSelectionID = clip.id
                     state.quickSelectedAggregationID = nil
                     Task { await state.prepareQuickAggregation() }
@@ -1107,12 +1107,12 @@ private struct QuickClipCard: View {
                 Divider()
                 if let parentAggregationID,
                    let aggregation = state.aggregations.first(where: { $0.id == parentAggregationID }) {
-                    Button("移出当前聚合") {
+                    Button(L10n.tr("移出当前聚合")) {
                         Task { await state.removeClip(clip.id, from: aggregation) }
                     }
                     Divider()
                 }
-                Button("移到废纸篓", role: .destructive) { state.moveToTrash(clip) }
+                Button(L10n.tr("移到废纸篓"), role: .destructive) { state.moveToTrash(clip) }
                     .quickActionShortcut(state.settings.quickShortcut(for: .moveToTrash))
             }
     }
@@ -1142,7 +1142,7 @@ private struct QuickAggregationCard: View {
                 }
                 HStack(spacing: 6) {
                     Text(aggregation.origin.displayName)
-                    if aggregation.membershipMode == .automatic { Text("· 自动更新") }
+                    if aggregation.membershipMode == .automatic { Text(L10n.tr("· 自动更新")) }
                 }
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -1191,30 +1191,30 @@ private struct QuickAggregationCard: View {
             showCollectionPicker = true
         }
         .contextMenu {
-            Button(state.quickExpandedAggregationIDs.contains(aggregation.id) ? "收起内容" : "展开内容") {
+            Button(state.quickExpandedAggregationIDs.contains(aggregation.id) ? L10n.tr("收起内容") : L10n.tr("展开内容")) {
                 state.toggleQuickAggregation(aggregation.id)
             }
             .quickActionShortcut(state.settings.quickShortcut(
                 for: state.quickExpandedAggregationIDs.contains(aggregation.id) ? .collapseAggregation : .expandAggregation
             ))
-            Button("编辑聚合…") {
+            Button(L10n.tr("编辑聚合…")) {
                 state.quickSelectedAggregationID = aggregation.id
                 state.quickSelectionID = nil
                 Task { await state.prepareQuickAggregation() }
             }
             .quickActionShortcut(state.settings.quickShortcut(for: .editMetadata))
             Divider()
-            Button(aggregation.isFavorite ? "取消收藏聚合" : "收藏聚合") {
+            Button(aggregation.isFavorite ? L10n.tr("取消收藏聚合") : L10n.tr("收藏聚合")) {
                 Task { await state.toggleAggregationFavorite(aggregation) }
             }
             .quickActionShortcut(state.settings.quickShortcut(for: .toggleFavorite))
-            Button(aggregation.isPinned ? "取消置顶聚合" : "置顶聚合") {
+            Button(aggregation.isPinned ? L10n.tr("取消置顶聚合") : L10n.tr("置顶聚合")) {
                 Task { await state.toggleAggregationPinned(aggregation) }
             }
             .quickActionShortcut(state.settings.quickShortcut(for: .togglePinned))
-            Menu("设置聚合分组") {
+            Menu(L10n.tr("设置聚合分组")) {
                 let groups = state.collections.filter { $0.kind == .normal }
-                if groups.isEmpty { Text("还没有普通分组") }
+                if groups.isEmpty { Text(L10n.tr("还没有普通分组")) }
                 else {
                     ForEach(groups) { collection in
                         Button {
@@ -1227,15 +1227,15 @@ private struct QuickAggregationCard: View {
             }
             .quickActionShortcut(state.settings.quickShortcut(for: .setCollection))
             Divider()
-            Menu("整理全部成员") {
+            Menu(L10n.tr("整理全部成员")) {
                 let members = state.aggregationMembers[aggregation.id] ?? []
-                Button(members.allSatisfy(\.isFavorite) ? "取消收藏全部成员" : "收藏全部成员") {
+                Button(members.allSatisfy(\.isFavorite) ? L10n.tr("取消收藏全部成员") : L10n.tr("收藏全部成员")) {
                     Task { await state.toggleFavoriteForAllMembers(of: aggregation) }
                 }
-                Button(members.allSatisfy(\.isPinned) ? "取消置顶全部成员" : "置顶全部成员") {
+                Button(members.allSatisfy(\.isPinned) ? L10n.tr("取消置顶全部成员") : L10n.tr("置顶全部成员")) {
                     Task { await state.togglePinnedForAllMembers(of: aggregation) }
                 }
-                Menu("设置全部成员的分组") {
+                Menu(L10n.tr("设置全部成员的分组")) {
                     ForEach(state.collections.filter { $0.kind == .normal }) { collection in
                         let allIncluded = members.allSatisfy { $0.collectionIDs.contains(collection.id) }
                         Button {
@@ -1247,7 +1247,7 @@ private struct QuickAggregationCard: View {
                 }
             }
             Divider()
-            Button("删除聚合但保留内容", role: .destructive) {
+            Button(L10n.tr("删除聚合但保留内容"), role: .destructive) {
                 Task { await state.removeAggregation(aggregation) }
             }
             .quickActionShortcut(state.settings.quickShortcut(for: .moveToTrash))
@@ -1256,12 +1256,12 @@ private struct QuickAggregationCard: View {
 
     private var memberCountLabel: String {
         let query = state.quickQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return "\(aggregation.memberClipIDs.count) 项内容" }
+        guard !query.isEmpty else { return L10n.tr("\(aggregation.memberClipIDs.count) 项内容") }
         let visible = Set(state.quickClips.map(\.id)).intersection(aggregation.memberClipIDs).count
         guard visible > 0, visible < aggregation.memberClipIDs.count else {
-            return "\(aggregation.memberClipIDs.count) 项内容"
+            return L10n.tr("\(aggregation.memberClipIDs.count) 项内容")
         }
-        return "匹配 \(visible) / \(aggregation.memberClipIDs.count)"
+        return L10n.tr("匹配 \(visible) / \(aggregation.memberClipIDs.count)")
     }
 }
 
@@ -1285,15 +1285,15 @@ private struct QuickAggregationEditor: View {
         ZStack {
             Color.black.opacity(0.12).ignoresSafeArea()
             VStack(alignment: .leading, spacing: 12) {
-                Text(draft.isEditing ? "编辑聚合" : "聚合内容")
+                Text(draft.isEditing ? L10n.tr("编辑聚合") : L10n.tr("聚合内容"))
                     .font(.headline)
-                Text(draft.isEditing ? "当前包含 \(memberIDs.count) 项内容" : "将 \(memberIDs.count) 项不同内容保存为一个聚合")
+                Text(draft.isEditing ? L10n.tr("当前包含 \(memberIDs.count) 项内容") : L10n.tr("将 \(memberIDs.count) 项不同内容保存为一个聚合"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                TextField("聚合标题", text: $title)
+                TextField(L10n.tr("聚合标题"), text: $title)
                     .textFieldStyle(.roundedBorder)
                     .focused($titleFocused)
-                TextField("备注（可选）", text: $note, axis: .vertical)
+                TextField(L10n.tr("备注（可选）"), text: $note, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(2...4)
                 if draft.isEditing {
@@ -1327,8 +1327,8 @@ private struct QuickAggregationEditor: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                     Spacer()
-                    Button("取消") { state.dismissQuickAggregationDraft() }
-                    Button(draft.isEditing ? "保存" : "创建聚合") {
+                    Button(L10n.tr("取消")) { state.dismissQuickAggregationDraft() }
+                    Button(draft.isEditing ? L10n.tr("保存") : L10n.tr("创建聚合")) {
                         Task { await state.saveQuickAggregation(title: title, note: note, memberIDs: memberIDs) }
                     }
                     .buttonStyle(.borderedProminent)
@@ -1411,10 +1411,10 @@ private struct QuickAggregationCollectionPicker: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("设置聚合分组").font(.headline)
+            Text(L10n.tr("设置聚合分组")).font(.headline)
             let groups = state.collections.filter { $0.kind == .normal }
             if groups.isEmpty {
-                ContentUnavailableView("还没有普通分组", systemImage: "folder")
+                ContentUnavailableView(L10n.tr("还没有普通分组"), systemImage: "folder")
                     .frame(height: 120)
             } else {
                 ScrollView {
@@ -1438,7 +1438,7 @@ private struct QuickAggregationCollectionPicker: View {
                 }
                 .frame(maxHeight: 220)
             }
-            HStack { Spacer(); Button("完成", action: onDone).keyboardShortcut(.defaultAction) }
+            HStack { Spacer(); Button(L10n.tr("完成"), action: onDone).keyboardShortcut(.defaultAction) }
         }
         .padding(16)
         .frame(width: 300)
@@ -1495,14 +1495,14 @@ private struct QuickMetadataEditor: View {
 
                 VStack(spacing: 0) {
                     HStack {
-                        Text("编辑信息").font(.headline)
+                        Text(L10n.tr("编辑信息")).font(.headline)
                         Spacer()
                         Button(action: onCancel) {
                             Image(systemName: "xmark.circle.fill")
                                 .foregroundStyle(.tertiary)
                         }
                         .buttonStyle(.plain)
-                        .help("取消编辑")
+                        .help(L10n.tr("取消编辑"))
                     }
                     .padding(.horizontal, 16)
                     .frame(height: 44)
@@ -1525,14 +1525,14 @@ private struct QuickMetadataEditor: View {
                     Divider()
 
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Tab / Shift-Tab 切换 · ↑↓ 选择 · Space 勾选")
+                        Text(L10n.tr("Tab / Shift-Tab 切换 · ↑↓ 选择 · Space 勾选"))
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                             .lineLimit(2)
                         HStack {
                             Spacer()
-                            Button("取消", action: onCancel)
-                            Button("保存") { save() }.keyboardShortcut(.defaultAction)
+                            Button(L10n.tr("取消"), action: onCancel)
+                            Button(L10n.tr("保存")) { save() }.keyboardShortcut(.defaultAction)
                         }
                     }
                     .padding(.horizontal, 16)
@@ -1592,9 +1592,9 @@ private struct QuickMetadataEditor: View {
 
     private var titleEditor: some View {
         VStack(alignment: .leading, spacing: 5) {
-            HStack { Text("标题"); Spacer(); Text("\(title.count)/120").foregroundStyle(.tertiary) }
+            HStack { Text(L10n.tr("标题")); Spacer(); Text("\(title.count)/120").foregroundStyle(.tertiary) }
                 .font(.caption)
-            TextField("可选标题", text: Binding(get: { title }, set: { title = String($0.prefix(120)) }))
+            TextField(L10n.tr("可选标题"), text: Binding(get: { title }, set: { title = String($0.prefix(120)) }))
                 .textFieldStyle(.roundedBorder)
                 .focused($focusedField, equals: .title)
                 .onKeyPress(keys: [.tab]) { press in
@@ -1606,7 +1606,7 @@ private struct QuickMetadataEditor: View {
 
     private var noteEditor: some View {
         VStack(alignment: .leading, spacing: 5) {
-            HStack { Text("备注"); Spacer(); Text("\(note.count)/4000").foregroundStyle(.tertiary) }
+            HStack { Text(L10n.tr("备注")); Spacer(); Text("\(note.count)/4000").foregroundStyle(.tertiary) }
                 .font(.caption)
             TextEditor(text: Binding(get: { note }, set: { note = String($0.prefix(4_000)) }))
                 .frame(height: 90)
@@ -1630,39 +1630,39 @@ private struct QuickMetadataEditor: View {
     private var sourceContextEditor: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack {
-                Text("抓取的来源信息").font(.subheadline.weight(.semibold))
+                Text(L10n.tr("抓取的来源信息")).font(.subheadline.weight(.semibold))
                 Spacer()
                 if captureEvents.count > 1 {
-                    Text("共 \(captureEvents.count) 次复制").font(.caption).foregroundStyle(.secondary)
+                    Text(L10n.tr("共 \(captureEvents.count) 次复制")).font(.caption).foregroundStyle(.secondary)
                 }
             }
             if let event = captureEvents.first, let context = event.context {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(context.summary).font(.caption.weight(.medium)).textSelection(.enabled)
-                    Text(event.capturedAt.formatted(date: .abbreviated, time: .standard))
+                    Text(event.capturedAt.formatted(Date.FormatStyle(date: .abbreviated, time: .standard).locale(L10n.language.locale)))
                         .font(.caption2).foregroundStyle(.secondary)
-                    sourceContextRow("网页链接", value: context.payload["url"])
-                    sourceContextRow("页面标题", value: context.payload["pageTitle"])
-                    sourceContextRow("对话类型", value: context.payload["conversationTypeName"])
-                    sourceContextRow("对话标题", value: context.payload["conversationName"])
-                    sourceContextRow("仓库", value: context.payload["repository"])
-                    sourceContextRow("分支", value: context.payload["branch"])
-                    sourceContextRow("目标分支", value: context.payload["targetBranch"])
-                    sourceContextRow("选中内容", value: context.payload["selectedText"])
-                    sourceContextRow("关联文字", value: context.payload["relatedText"])
-                    sourceContextRow("元素", value: context.payload["elementSelector"])
+                    sourceContextRow(L10n.tr("网页链接"), value: context.payload["url"])
+                    sourceContextRow(L10n.tr("页面标题"), value: context.payload["pageTitle"])
+                    sourceContextRow(L10n.tr("对话类型"), value: context.payload["conversationTypeName"])
+                    sourceContextRow(L10n.tr("对话标题"), value: context.payload["conversationName"])
+                    sourceContextRow(L10n.tr("仓库"), value: context.payload["repository"])
+                    sourceContextRow(L10n.tr("分支"), value: context.payload["branch"])
+                    sourceContextRow(L10n.tr("目标分支"), value: context.payload["targetBranch"])
+                    sourceContextRow(L10n.tr("选中内容"), value: context.payload["selectedText"])
+                    sourceContextRow(L10n.tr("关联文字"), value: context.payload["relatedText"])
+                    sourceContextRow(L10n.tr("元素"), value: context.payload["elementSelector"])
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             } else if captureEvents.isEmpty {
-                Text("这条剪辑没有单独保存的来源上下文。")
+                Text(L10n.tr("这条剪辑没有单独保存的来源上下文。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                Text("本次复制只记录了来源应用，没有获取到更详细的上下文。")
+                Text(L10n.tr("本次复制只记录了来源应用，没有获取到更详细的上下文。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Text("这里是自动抓取的只读数据，不会写入上面的标题和备注。")
+            Text(L10n.tr("这里是自动抓取的只读数据，不会写入上面的标题和备注。"))
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
@@ -1676,14 +1676,14 @@ private struct QuickMetadataEditor: View {
     private var collectionEditor: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("分组")
+                Text(L10n.tr("分组"))
                 Spacer()
                 Text(selectedCollectionCountText).foregroundStyle(.tertiary)
             }
             .font(.caption)
 
             if normalCollections.isEmpty {
-                Label("还没有普通分组", systemImage: "folder")
+                Label(L10n.tr("还没有普通分组"), systemImage: "folder")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
@@ -1768,7 +1768,7 @@ private struct QuickMetadataEditor: View {
 
     private var selectedCollectionCountText: String {
         let count = normalCollections.lazy.filter { selectedCollectionIDs.contains($0.id) }.count
-        return count == 0 ? "未选择" : "已选择 \(count) 个"
+        return count == 0 ? L10n.tr("未选择") : L10n.tr("已选择 \(count) 个")
     }
 
     private func moveFocus(from field: QuickMetadataEditorField, backwards: Bool) {

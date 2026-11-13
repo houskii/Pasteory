@@ -29,7 +29,7 @@ import Testing
         source: ClipSource(appName: "微信", bundleIdentifier: "com.tencent.xinWeChat")
     )))
     #expect(clip.primaryKind == .image)
-    #expect(clip.previewText == "图像")
+    #expect(clip.previewText == "Image")
     #expect(clip.effectiveFileMetadata == nil)
     #expect(clip.identityKey?.hasPrefix("v2:image:") == true)
     #expect(clip.items[0].representations.count == representations.count)

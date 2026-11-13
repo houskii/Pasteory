@@ -57,7 +57,7 @@ private func quickActionRule(_ value: String) -> SmartRuleSet {
     #expect(pasteboard.string(forType: .string) == expected)
     let stored = try #require(try await repository.clip(id: result.clip.id))
     #expect(try await ClipTextReader.read(stored, attachments: attachments) == expected)
-    #expect(stored.note == "\(input)（Base64 编码后）\n来源：测试编辑器")
+    #expect(stored.note == "\(input) (Base64 Encoded)\nSource: 测试编辑器")
     #expect(stored.quickTextTransformations?.first?.originalText == input)
     #expect(stored.quickTextTransformations?.first?.sourceClipID == original.id)
     #expect(stored.quickTextTransformations?.first?.source == original.source)
@@ -93,7 +93,7 @@ private func quickActionRule(_ value: String) -> SmartRuleSet {
     let empty = try await coordinator.perform(.base64Encode, input: "", sourceClip: nil)
     #expect(empty.output == "")
     #expect(pasteboard.string(forType: .string) == "")
-    #expect(empty.clip.note == "（Base64 编码后）\n来源：手动输入")
+    #expect(empty.clip.note == " (Base64 Encoded)\nSource: Manual Input")
     #expect(try await repository.allClips().count == 1)
 }
 
@@ -109,7 +109,7 @@ private func quickActionRule(_ value: String) -> SmartRuleSet {
     let base64 = try QuickTextAction.base64Encode.makeResultClip(input: "hello", sourceClip: source, source: source.source)
     let first = try await repository.saveCaptured(base64)
     #expect(first.id == existing.id)
-    #expect(first.note == "用户原有备注\n\nhello（Base64 编码后）\n来源：测试编辑器")
+    #expect(first.note == "用户原有备注\n\nhello (Base64 Encoded)\nSource: 测试编辑器")
     #expect(first.isFavorite)
 
     let url = try QuickTextAction.urlDecode.makeResultClip(input: "aGVsbG8%3D", sourceClip: nil, source: source.source)
@@ -117,7 +117,7 @@ private func quickActionRule(_ value: String) -> SmartRuleSet {
     #expect(second.id == existing.id)
     #expect(second.quickTextTransformations?.map(\.action) == [.base64Encode, .urlDecode])
     #expect(second.note.hasPrefix(first.note))
-    #expect(second.note.hasSuffix("aGVsbG8%3D（URL 解码后）\n来源：手动输入"))
+    #expect(second.note.hasSuffix("aGVsbG8%3D (URL Decoded)\nSource: Manual Input"))
 
     let copiedAgain = try await repository.saveCaptured(quickActionSource("aGVsbG8="))
     #expect(copiedAgain.quickTextTransformations == second.quickTextTransformations)

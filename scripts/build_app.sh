@@ -110,6 +110,9 @@ BUILD_PHASE="组装应用与 Sparkle 框架"
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 ditto "$BIN_DIR/Pasteory" "$MACOS_DIR/Pasteory"
+[[ -d "$BIN_DIR/Pasteory_PasteoryCore.bundle" ]] || { echo "Missing localization resource bundle" >&2; exit 1; }
+ditto "$BIN_DIR/Pasteory_PasteoryCore.bundle" "$RESOURCES_DIR/Pasteory_PasteoryCore.bundle"
+ditto "$PROJECT_DIR/Config/Localizations" "$RESOURCES_DIR"
 ditto "$PROJECT_DIR/Config/Info.plist" "$CONTENTS_DIR/Info.plist"
 SPARKLE_FRAMEWORK="$PROJECT_DIR/.build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
 [[ -d "$SPARKLE_FRAMEWORK" ]] || { echo "找不到 SwiftPM Sparkle.framework 产物。" >&2; exit 1; }

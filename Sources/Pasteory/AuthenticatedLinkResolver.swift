@@ -51,7 +51,7 @@ enum LinkAuthenticationSite: String, CaseIterable, Identifiable, Sendable {
     var title: String {
         switch self {
         case .bits: "BITS"
-        case .lark: "飞书"
+        case .lark: L10n.tr("飞书")
         case .codebase: "Codebase"
         }
     }
@@ -175,9 +175,9 @@ enum AuthenticatedLinkResolverError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .invalidPage: "登录会话没有返回可解析的页面"
-        case .navigation(let message): "页面加载失败：\(message)"
-        case .timeout: "登录会话加载超时"
+        case .invalidPage: L10n.tr("登录会话没有返回可解析的页面")
+        case .navigation(let message): L10n.tr("页面加载失败：\(message)")
+        case .timeout: L10n.tr("登录会话加载超时")
         }
     }
 }
@@ -375,8 +375,8 @@ struct SiteLoginSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("登录 \(request.target.title)").font(.title2.bold())
-                    Text("这是 Pasteory 独立的 WebKit 会话，不读取 Chrome Cookie；登录数据按当前 Bundle ID 隔离，网页使用 WebCrypto 时 macOS WebKit 可能访问登录钥匙串。")
+                    Text(L10n.tr("登录 \(request.target.title)")).font(.title2.bold())
+                    Text(L10n.tr("这是 Pasteory 独立的 WebKit 会话，不读取 Chrome Cookie；登录数据按当前 Bundle ID 隔离，网页使用 WebCrypto 时 macOS WebKit 可能访问登录钥匙串。"))
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -384,14 +384,14 @@ struct SiteLoginSheet: View {
             }
             HStack(spacing: 8) {
                 Button { backRevision = UUID() } label: { Image(systemName: "chevron.left") }
-                    .help("后退")
+                    .help(L10n.tr("后退"))
                 Button { reloadRevision = UUID() } label: { Image(systemName: "arrow.clockwise") }
-                    .help("重新加载")
+                    .help(L10n.tr("重新加载"))
                 Image(systemName: "lock.shield")
-                TextField("登录地址", text: $address)
+                TextField(L10n.tr("登录地址"), text: $address)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { navigateToAddress() }
-                Button("打开") { navigateToAddress() }
+                Button(L10n.tr("打开")) { navigateToAddress() }
             }
             SiteLoginWebView(
                 cache: cache,
@@ -405,13 +405,13 @@ struct SiteLoginSheet: View {
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(.separator))
             HStack {
                 Text(request.group == nil
-                     ? "完成登录后，会话会保存在当前 Pasteory 包专属的 WebKit 数据域中，正式包与 QA 包互不共享。"
-                     : "完成登录后，Pasteory 会用该会话重新解析当前失败路由。")
+                     ? L10n.tr("完成登录后，会话会保存在当前 Pasteory 包专属的 WebKit 数据域中，正式包与 QA 包互不共享。")
+                     : L10n.tr("完成登录后，Pasteory 会用该会话重新解析当前失败路由。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button("取消") { dismiss() }
-                Button(request.group == nil ? "完成登录" : "完成登录并重新解析") {
+                Button(L10n.tr("取消")) { dismiss() }
+                Button(request.group == nil ? L10n.tr("完成登录") : L10n.tr("完成登录并重新解析")) {
                     LinkAuthenticationSession.markUpdated(request.target)
                     onComplete()
                     dismiss()

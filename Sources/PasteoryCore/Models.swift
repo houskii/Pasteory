@@ -5,13 +5,13 @@ public enum ClipKind: String, Codable, CaseIterable, Hashable, Sendable {
 
     public var displayName: String {
         switch self {
-        case .text: "文字"
-        case .image: "图像"
-        case .link: "链接"
-        case .color: "颜色"
-        case .code: "代码"
-        case .file: "文件"
-        case .mixed: "混合内容"
+        case .text: L10n.tr("文字")
+        case .image: L10n.tr("图像")
+        case .link: L10n.tr("链接")
+        case .color: L10n.tr("颜色")
+        case .code: L10n.tr("代码")
+        case .file: L10n.tr("文件")
+        case .mixed: L10n.tr("混合内容")
         }
     }
 
@@ -33,9 +33,9 @@ public enum CodeSubtype: String, Codable, CaseIterable, Sendable {
 
     public var displayName: String {
         switch self {
-        case .sourceCode: "代码"
-        case .shellCommand: "命令"
-        case .structuredData: "结构化数据"
+        case .sourceCode: L10n.tr("代码")
+        case .shellCommand: L10n.tr("命令")
+        case .structuredData: L10n.tr("结构化数据")
         case .diff: "Diff"
         }
     }
@@ -104,9 +104,9 @@ public enum SourceConfidence: String, Codable, CaseIterable, Sendable {
 
     public var displayName: String {
         switch self {
-        case .high: "高"
-        case .low: "低"
-        case .unknown: "未知"
+        case .high: L10n.tr("高")
+        case .low: L10n.tr("低")
+        case .unknown: L10n.tr("未知")
         }
     }
 }
@@ -118,7 +118,7 @@ public struct ClipSource: Codable, Hashable, Sendable {
     public var confidence: SourceConfidence
 
     public init(
-        appName: String = "未知来源",
+        appName: String = L10n.tr("未知来源"),
         bundleIdentifier: String? = nil,
         processIdentifier: Int32? = nil,
         confidence: SourceConfidence = .unknown
@@ -136,8 +136,8 @@ public enum SourceContextKind: String, Codable, CaseIterable, Sendable {
 
     public var displayName: String {
         switch self {
-        case .webPage: "网页上下文"
-        case .conversation: "会话上下文"
+        case .webPage: L10n.tr("网页上下文")
+        case .conversation: L10n.tr("会话上下文")
         }
     }
 }
@@ -148,8 +148,8 @@ public enum SourceContextSourceCategory: String, Codable, CaseIterable, Hashable
 
     public var displayName: String {
         switch self {
-        case .browser: "浏览器"
-        case .communication: "通信软件"
+        case .browser: L10n.tr("浏览器")
+        case .communication: L10n.tr("通信软件")
         }
     }
 }
@@ -176,9 +176,9 @@ public enum ConversationContextType: String, Codable, CaseIterable, Sendable {
 
     public var displayName: String {
         switch self {
-        case .group: "群聊"
-        case .direct: "私聊"
-        case .unknown: "无法确认"
+        case .group: L10n.tr("群聊")
+        case .direct: L10n.tr("私聊")
+        case .unknown: L10n.tr("无法确认")
         }
     }
 }
@@ -510,7 +510,7 @@ public struct Clip: Codable, Hashable, Identifiable, Sendable {
             if !url.lastPathComponent.isEmpty { return url.lastPathComponent }
             if !url.path.isEmpty { return url.path }
             if urls.count == 1, !previewText.isEmpty { return previewText }
-            return "文件 \(index + 1)"
+            return L10n.tr("文件 \(index + 1)")
         }
         let stablePaths = urls.compactMap(FileReferenceDecoder.stablePath(for:))
         return FileClipMetadata(fileNames: fileNames, filePaths: stablePaths.count == urls.count ? stablePaths : nil)

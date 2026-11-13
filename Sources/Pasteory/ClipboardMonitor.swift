@@ -105,7 +105,7 @@ final class ClipboardMonitor {
         }
         guard !capturedItems.isEmpty else { return }
         let source = ClipSource(
-            appName: sourceApp?.localizedName ?? "未知来源",
+            appName: sourceApp?.localizedName ?? L10n.tr("未知来源"),
             bundleIdentifier: bundle,
             processIdentifier: sourceApp?.processIdentifier,
             confidence: bundle == nil ? .unknown : .high

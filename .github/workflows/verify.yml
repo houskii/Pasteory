@@ -4,7 +4,7 @@ on:
   pull_request:
   push:
     branches: [main]
-    paths-ignore: ['release/**', 'docs/**', 'README.md']
+    paths-ignore: ['release/**', 'docs/**', 'README*.md']
 
 permissions:
   contents: read
@@ -54,7 +54,9 @@ jobs:
         timeout-minutes: 6
         run: make qa-verify
       - name: Check release metadata generation
-        run: python3 -m unittest discover -s scripts/tests -v
+        run: |
+          python3 -m unittest discover -s scripts/tests -v
+          python3 scripts/check_localizations.py
       - name: Verify DMG and signed appcast preparation
         timeout-minutes: 6
         run: |

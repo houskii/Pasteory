@@ -137,7 +137,7 @@ import Testing
     ], source: source)))
 
     #expect(bundled.primaryKind == .file)
-    #expect(bundled.previewText == "2 个文件")
+    #expect(bundled.previewText == "2 files")
     #expect(bundled.fileMetadata?.fileNames == ["first.hap", "second.txt"])
     #expect(bundled.fileMetadata?.filePaths == [firstURL.path, secondURL.path])
     #expect(bundled.identityKey == separate.identityKey)
@@ -146,7 +146,7 @@ import Testing
     var legacy = bundled
     legacy.fileMetadata = nil
     #expect(legacy.effectiveFileMetadata?.fileCount == 2)
-    #expect(legacy.effectiveFileMetadata?.displayName == "2 个文件")
+    #expect(legacy.effectiveFileMetadata?.displayName == "2 files")
 }
 
 @Test func recognizesExplicitSourceCodePasteboardType() throws {

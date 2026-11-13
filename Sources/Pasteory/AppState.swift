@@ -145,7 +145,7 @@ final class AppState: ObservableObject {
     var selectedAggregation: ClipAggregation? { aggregations.first { $0.id == selectedAggregationID } }
     var quickSelectedAggregation: ClipAggregation? { aggregations.first { $0.id == quickSelectedAggregationID } }
     var quickTabs: [QuickTab] {
-        [QuickTab(scope: .all, title: "全部", symbol: "clock")] + collections.map {
+        [QuickTab(scope: .all, title: L10n.tr("全部"), symbol: "clock")] + collections.map {
             QuickTab(scope: .collection($0.id), title: $0.name, symbol: $0.kind == .smart ? "sparkles" : "folder")
         }
     }
@@ -154,7 +154,7 @@ final class AppState: ObservableObject {
         if processExistingClips {
             do {
                 let merged = try await repository.consolidateDuplicateClips()
-                if merged > 0 { presentStatus("已合并 \(merged) 条重复内容") }
+                if merged > 0 { presentStatus(L10n.tr("已合并 \(merged) 条重复内容")) }
             } catch { show(error) }
         }
         await refreshCollections()
@@ -177,13 +177,13 @@ final class AppState: ObservableObject {
         await refreshLibrary()
         await refreshQuick()
         await refreshQuickStats()
-        presentStatus("已复制转换结果并加入资料库")
+        presentStatus(L10n.tr("已复制转换结果并加入资料库"))
         return result
     }
 
     func presentQuickActions(for clip: Clip?, scope: QuickActionMenuScope, in window: NSWindow?) {
         guard let clip, let window else {
-            presentStatus("请先选择要转换的内容", kind: .warning)
+            presentStatus(L10n.tr("请先选择要转换的内容"), kind: .warning)
             return
         }
         guard !quickTextActionRunning else { return }
@@ -193,7 +193,7 @@ final class AppState: ObservableObject {
     }
 
     func runQuickTextAction(_ action: QuickTextAction, for clip: Clip?) {
-        guard let clip else { presentStatus("请先选择要转换的内容", kind: .warning); return }
+        guard let clip else { presentStatus(L10n.tr("请先选择要转换的内容"), kind: .warning); return }
         guard !quickTextActionRunning else { return }
         quickTextActionRunning = true
         Task {
@@ -316,17 +316,17 @@ final class AppState: ObservableObject {
             await self.refreshQuick()
             await self.refreshLinkResolutionData()
             guard let latest else {
-                self.presentStatus("重新解析完成，但无法读取最新结果", kind: .warning)
+                self.presentStatus(L10n.tr("重新解析完成，但无法读取最新结果"), kind: .warning)
                 return
             }
             if latest.requestState == .resolved, let title = latest.resolvedTitle {
                 if title == previousTitle {
-                    self.presentStatus("重新解析完成，标题没有变化")
+                    self.presentStatus(L10n.tr("重新解析完成，标题没有变化"))
                 } else {
-                    self.presentStatus("标题已更新为“\(title)”")
+                    self.presentStatus(L10n.tr("标题已更新为“\(title)”"))
                 }
             } else {
-                self.presentStatus("重新解析失败，已保留上一次成功标题", kind: .warning)
+                self.presentStatus(L10n.tr("重新解析失败，已保留上一次成功标题"), kind: .warning)
             }
         }
     }
@@ -342,7 +342,7 @@ final class AppState: ObservableObject {
             LinkAuthenticationTarget.matching(url: $0, customRules: settings.authenticatedLinkRules)
         }
         guard let target else {
-            presentStatus("当前链接还没有匹配的登录解析规则", kind: .warning)
+            presentStatus(L10n.tr("当前链接还没有匹配的登录解析规则"), kind: .warning)
             return
         }
         linkResolutionBusyRouteKeys.insert(routeKey)
@@ -369,9 +369,9 @@ final class AppState: ObservableObject {
             await refreshQuick()
             await refreshLinkResolutionData()
             if resolvedCount > 0 {
-                presentStatus("已使用登录会话重新解析 \(resolvedCount) 个链接")
+                presentStatus(L10n.tr("已使用登录会话重新解析 \(resolvedCount) 个链接"))
             } else {
-                presentStatus("登录会话未能加载当前链接", kind: .warning)
+                presentStatus(L10n.tr("登录会话未能加载当前链接"), kind: .warning)
             }
         } catch { show(error) }
     }
@@ -386,7 +386,7 @@ final class AppState: ObservableObject {
                     return target.matches(url)
                 }
             guard !groups.isEmpty else {
-                presentStatus("\(target.title) 登录会话已保存，没有待重试链接")
+                presentStatus(L10n.tr("\(target.title) 登录会话已保存，没有待重试链接"))
                 return
             }
             for group in groups {
@@ -422,7 +422,7 @@ final class AppState: ObservableObject {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedPattern = AuthenticatedLinkPattern.normalized(pattern)
         guard !trimmedName.isEmpty else {
-            presentStatus("规则名称不能为空", kind: .error)
+            presentStatus(L10n.tr("规则名称不能为空"), kind: .error)
             return nil
         }
         if let message = AuthenticatedLinkPattern.validationError(normalizedPattern) {
@@ -430,11 +430,11 @@ final class AppState: ObservableObject {
             return nil
         }
         guard let loginURL = URLFallbackEngine.normalizedWebURL(startURL) else {
-            presentStatus("登录入口必须是合法的 HTTP 或 HTTPS 地址", kind: .error)
+            presentStatus(L10n.tr("登录入口必须是合法的 HTTP 或 HTTPS 地址"), kind: .error)
             return nil
         }
         guard !settings.authenticatedLinkRules.contains(where: { $0.pattern == normalizedPattern }) else {
-            presentStatus("相同的登录解析规则已经存在", kind: .warning)
+            presentStatus(L10n.tr("相同的登录解析规则已经存在"), kind: .warning)
             return nil
         }
         let rule = AuthenticatedLinkRule(
@@ -443,7 +443,7 @@ final class AppState: ObservableObject {
             startURL: loginURL.absoluteString
         )
         settings.saveAuthenticatedLinkRule(rule)
-        presentStatus("登录解析规则已添加")
+        presentStatus(L10n.tr("登录解析规则已添加"))
         return .custom(rule)
     }
 
@@ -451,14 +451,14 @@ final class AppState: ObservableObject {
         let target = LinkAuthenticationTarget.custom(rule)
         settings.removeAuthenticatedLinkRule(id: rule.id)
         LinkAuthenticationSession.clear(target)
-        presentStatus("登录解析规则已移除")
+        presentStatus(L10n.tr("登录解析规则已移除"))
     }
 
     func createFallbackRule(for group: LinkFailureGroup, name: String, titleTemplate: String) async -> Bool {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedTitle = titleTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty, !trimmedTitle.isEmpty else {
-            presentStatus("规则名称和标题不能为空", kind: .error)
+            presentStatus(L10n.tr("规则名称和标题不能为空"), kind: .error)
             return false
         }
         let rule = URLFallbackEngine.suggestedRule(for: group, name: trimmedName, titleTemplate: trimmedTitle)
@@ -467,7 +467,7 @@ final class AppState: ObservableObject {
             await refreshLibrary()
             await refreshQuick()
             await refreshLinkResolutionData()
-            presentStatus("兜底规则已保存，并已回填现有链接")
+            presentStatus(L10n.tr("兜底规则已保存，并已回填现有链接"))
             return true
         } catch {
             show(error)
@@ -496,7 +496,7 @@ final class AppState: ObservableObject {
             await refreshLibrary()
             await refreshQuick()
             await refreshLinkResolutionData()
-            presentStatus("兜底规则已移除")
+            presentStatus(L10n.tr("兜底规则已移除"))
         } catch { show(error) }
     }
 
@@ -702,7 +702,7 @@ final class AppState: ObservableObject {
             for original in loaded {
                 var collection = original
                 let base = String(collection.name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(40))
-                let safeBase = base.isEmpty ? "未命名分组" : base
+                let safeBase = base.isEmpty ? L10n.tr("未命名分组") : base
                 var candidate = safeBase
                 var suffix = 2
                 while usedNames.contains(canonicalCollectionName(candidate)) {
@@ -737,7 +737,7 @@ final class AppState: ObservableObject {
     func recordPaste(_ clip: Clip) async -> Bool {
         do {
             guard let updated = try await repository.recordPaste(id: clip.id, at: Date()) else {
-                presentStatus("已粘贴，但没有找到对应的资料库记录", kind: .warning, dismissAfter: 5)
+                presentStatus(L10n.tr("已粘贴，但没有找到对应的资料库记录"), kind: .warning, dismissAfter: 5)
                 return false
             }
             replaceLocal(updated)
@@ -755,7 +755,7 @@ final class AppState: ObservableObject {
             }
             return true
         } catch {
-            presentStatus("已粘贴，但粘贴次数保存失败：\(error.localizedDescription)", kind: .warning, dismissAfter: 5)
+            presentStatus(L10n.tr("已粘贴，但粘贴次数保存失败：\(error.localizedDescription)"), kind: .warning, dismissAfter: 5)
             return false
         }
     }
@@ -843,7 +843,7 @@ final class AppState: ObservableObject {
 
     @discardableResult
     func createManualTextClip() async -> Clip? {
-        let text = "新建文本剪辑"
+        let text = L10n.tr("新建文本剪辑")
         let data = Data(text.utf8)
         let clip = Clip(
             primaryKind: .text,
@@ -945,10 +945,10 @@ final class AppState: ObservableObject {
 
     func collectionNameValidationMessage(_ name: String, excluding id: UUID? = nil) -> String? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { return "请输入分组名称" }
-        if trimmed.count > 40 { return "分组名称最多 40 个字符" }
+        if trimmed.isEmpty { return L10n.tr("请输入分组名称") }
+        if trimmed.count > 40 { return L10n.tr("分组名称最多 40 个字符") }
         let key = canonicalCollectionName(trimmed)
-        if collections.contains(where: { $0.id != id && canonicalCollectionName($0.name) == key }) { return "分组名称已经存在" }
+        if collections.contains(where: { $0.id != id && canonicalCollectionName($0.name) == key }) { return L10n.tr("分组名称已经存在") }
         return nil
     }
 
@@ -960,21 +960,21 @@ final class AppState: ObservableObject {
     func runArchive() async {
         guard !isBusy else { return }
         isBusy = true; defer { isBusy = false }
-        do { let count = try await archive.run(); presentStatus(count > 0 ? "已归档 \(count) 条内容" : "当前没有需要归档的内容"); await refreshLibrary(); await refreshQuick(); await refreshQuickStats() }
+        do { let count = try await archive.run(); presentStatus(count > 0 ? L10n.tr("已归档 \(count) 条内容") : L10n.tr("当前没有需要归档的内容")); await refreshLibrary(); await refreshQuick(); await refreshQuickStats() }
         catch { show(error) }
     }
 
     func exportBackup(to url: URL) async {
         guard !isBusy else { return }
         isBusy = true; defer { isBusy = false }
-        do { try await backup.export(to: url); presentStatus("备份已导出") }
+        do { try await backup.export(to: url); presentStatus(L10n.tr("备份已导出")) }
         catch { show(error) }
     }
 
     func importBackup(from url: URL) async {
         guard !isBusy else { return }
         isBusy = true; defer { isBusy = false }
-        do { let count = try await backup.importBackup(from: url); presentStatus("已导入 \(count) 条内容"); await refreshLibrary(); await refreshQuick(); await refreshQuickStats() }
+        do { let count = try await backup.importBackup(from: url); presentStatus(L10n.tr("已导入 \(count) 条内容")); await refreshLibrary(); await refreshQuick(); await refreshQuickStats() }
         catch { show(error) }
     }
 
@@ -982,7 +982,7 @@ final class AppState: ObservableObject {
 
     func presentStatus(_ message: String, kind: AppStatusKind = .info, dismissAfter seconds: Double = 3) {
         statusDismissTask?.cancel()
-        if !message.hasPrefix("已聚合 ") { undoableAggregation = nil }
+        if !message.hasPrefix(L10n.tr("已聚合 ")) { undoableAggregation = nil }
         statusMessage = message
         statusKind = kind
         guard seconds > 0 else { return }

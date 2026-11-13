@@ -90,11 +90,11 @@ public enum PasteoryRuntimeIdentityError: LocalizedError, Sendable {
     public var errorDescription: String? {
         switch self {
         case .invalidBuildVariant(let value):
-            "未知的 Pasteory 构建类型：\(value)"
+            L10n.tr("未知的 Pasteory 构建类型：\(value)")
         case .bundleIdentifierMismatch(let expected, let actual):
-            "构建身份不一致：Bundle ID 应为 \(expected)，实际为 \(actual)"
+            L10n.tr("构建身份不一致：Bundle ID 应为 \(expected)，实际为 \(actual)")
         case .infoValueMismatch(let key, let expected, let actual):
-            "构建身份不一致：\(key) 应为 \(expected)，实际为 \(actual)"
+            L10n.tr("构建身份不一致：\(key) 应为 \(expected)，实际为 \(actual)")
         }
     }
 }

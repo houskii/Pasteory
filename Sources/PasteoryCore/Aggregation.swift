@@ -12,9 +12,9 @@ public enum AggregationOrigin: Codable, Hashable, Sendable {
 
     public var displayName: String {
         switch self {
-        case .manual: "手动创建"
-        case .search(let query): "来自搜索：\(query)"
-        case .condition(let summary): "自动条件：\(summary)"
+        case .manual: L10n.tr("手动创建")
+        case .search(let query): L10n.tr("来自搜索：\(query)")
+        case .condition(let summary): L10n.tr("自动条件：\(summary)")
         }
     }
 }
@@ -63,7 +63,7 @@ public struct ClipAggregation: Codable, Hashable, Identifiable, Sendable {
 
     public var displayTitle: String {
         let value = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return value.isEmpty ? "未命名聚合" : value
+        return value.isEmpty ? L10n.tr("未命名聚合") : value
     }
 
     public mutating func normalizeMembers() {

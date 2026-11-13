@@ -30,10 +30,10 @@ struct LinkResolutionSettingsView: View {
         var id: String { rawValue }
         var title: String {
             switch self {
-            case .unresolved: "未解析"
-            case .resolved: "已解析"
-            case .rules: "兜底规则"
-            case .connections: "连接"
+            case .unresolved: L10n.tr("未解析")
+            case .resolved: L10n.tr("已解析")
+            case .rules: L10n.tr("兜底规则")
+            case .connections: L10n.tr("连接")
             }
         }
     }
@@ -41,15 +41,15 @@ struct LinkResolutionSettingsView: View {
     var body: some View {
         VStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
-                Label("网页标题", systemImage: "globe")
+                Label(L10n.tr("网页标题"), systemImage: "globe")
                     .font(.headline)
                 SettingsCard {
                     VStack(alignment: .leading, spacing: 10) {
                         SettingsSwitchRow(isOn: $settings.linkResolutionEnabled) {
-                            Text("自动访问网页并解析标题")
+                            Text(L10n.tr("自动访问网页并解析标题"))
                         }
                         Divider()
-                    Text("URL 识别和兜底标题始终在本机完成。打开后，Pasteory 才会访问目标网站获取真实标题。")
+                    Text(L10n.tr("URL 识别和兜底标题始终在本机完成。打开后，Pasteory 才会访问目标网站获取真实标题。"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         Divider()
@@ -59,11 +59,11 @@ struct LinkResolutionSettingsView: View {
             }
 
             HStack(spacing: 12) {
-                Picker("内容", selection: $selectedSection) {
+                Picker(L10n.tr("内容"), selection: $selectedSection) {
                     ForEach(LinkSettingsSection.allCases) { section in Text(section.title).tag(section) }
                 }
                 .pickerStyle(.segmented)
-                Button("添加登录解析…") {
+                Button(L10n.tr("添加登录解析…")) {
                     authenticationRuleEditorRequest = AuthenticationRuleEditorRequest(group: nil)
                 }
             }
@@ -148,7 +148,7 @@ struct LinkResolutionSettingsView: View {
             }
         }
         .confirmationDialog(
-            "移除兜底规则？",
+            L10n.tr("移除兜底规则？"),
             isPresented: Binding(
                 get: { rulePendingRemoval != nil },
                 set: { if !$0 { rulePendingRemoval = nil } }
@@ -156,16 +156,16 @@ struct LinkResolutionSettingsView: View {
             titleVisibility: .visible,
             presenting: rulePendingRemoval
         ) { rule in
-            Button("移除“\(rule.name)”", role: .destructive) {
+            Button(L10n.tr("移除“\(rule.name)”"), role: .destructive) {
                 Task { await state.removeFallbackRule(rule) }
                 rulePendingRemoval = nil
             }
-            Button("取消", role: .cancel) { rulePendingRemoval = nil }
+            Button(L10n.tr("取消"), role: .cancel) { rulePendingRemoval = nil }
         } message: { _ in
-            Text("受影响的链接会恢复为内置规则或通用 URL 兜底标题。")
+            Text(L10n.tr("受影响的链接会恢复为内置规则或通用 URL 兜底标题。"))
         }
         .confirmationDialog(
-            "移除登录解析规则？",
+            L10n.tr("移除登录解析规则？"),
             isPresented: Binding(
                 get: { authenticatedRulePendingRemoval != nil },
                 set: { if !$0 { authenticatedRulePendingRemoval = nil } }
@@ -173,13 +173,13 @@ struct LinkResolutionSettingsView: View {
             titleVisibility: .visible,
             presenting: authenticatedRulePendingRemoval
         ) { rule in
-            Button("移除“\(rule.name)”", role: .destructive) {
+            Button(L10n.tr("移除“\(rule.name)”"), role: .destructive) {
                 state.removeAuthenticatedLinkRule(rule)
                 authenticatedRulePendingRemoval = nil
             }
-            Button("取消", role: .cancel) { authenticatedRulePendingRemoval = nil }
+            Button(L10n.tr("取消"), role: .cancel) { authenticatedRulePendingRemoval = nil }
         } message: { _ in
-            Text("以后命中的链接不会再自动使用登录会话，已保存的剪贴板记录不会删除。")
+            Text(L10n.tr("以后命中的链接不会再自动使用登录会话，已保存的剪贴板记录不会删除。"))
         }
     }
 
@@ -192,10 +192,10 @@ struct LinkResolutionSettingsView: View {
         }.count
         let generic = groups.filter { $0.latestRequestState == .genericTitle }.count
         return HStack(spacing: 18) {
-            metric("待处理路由", value: groups.count, symbol: "exclamationmark.circle")
-            metric("需要登录", value: needsLogin, symbol: "person.crop.circle.badge.exclamationmark")
-            metric("通用标题", value: generic, symbol: "text.badge.xmark")
-            metric("用户规则", value: state.fallbackRules.count, symbol: "wand.and.stars")
+            metric(L10n.tr("待处理路由"), value: groups.count, symbol: "exclamationmark.circle")
+            metric(L10n.tr("需要登录"), value: needsLogin, symbol: "person.crop.circle.badge.exclamationmark")
+            metric(L10n.tr("通用标题"), value: generic, symbol: "text.badge.xmark")
+            metric(L10n.tr("用户规则"), value: state.fallbackRules.count, symbol: "wand.and.stars")
         }
         .padding(.vertical, 4)
     }
@@ -214,9 +214,9 @@ struct LinkResolutionSettingsView: View {
         Group {
             if state.linkFailureGroups.isEmpty {
                 ContentUnavailableView(
-                    "没有待处理链接",
+                    L10n.tr("没有待处理链接"),
                     systemImage: "checkmark.circle",
-                    description: Text(settings.linkResolutionEnabled ? "新链接解析失败后会按 URL 路由聚合到这里。" : "打开自动解析后，请求失败的链接会出现在这里。")
+                    description: Text(settings.linkResolutionEnabled ? L10n.tr("新链接解析失败后会按 URL 路由聚合到这里。") : L10n.tr("打开自动解析后，请求失败的链接会出现在这里。"))
                 )
             } else {
                 List(state.linkFailureGroups) { group in
@@ -248,9 +248,9 @@ struct LinkResolutionSettingsView: View {
         Group {
             if state.resolvedLinkResources.isEmpty {
                 ContentUnavailableView(
-                    "还没有已解析链接",
+                    L10n.tr("还没有已解析链接"),
                     systemImage: "checkmark.circle",
-                    description: Text("解析出可区分标题的链接会按具体 URL 显示在这里。")
+                    description: Text(L10n.tr("解析出可区分标题的链接会按具体 URL 显示在这里。"))
                 )
             } else {
                 List(state.resolvedLinkResources) { summary in
@@ -269,9 +269,9 @@ struct LinkResolutionSettingsView: View {
         Group {
             if state.fallbackRules.isEmpty {
                 ContentUnavailableView(
-                    "还没有用户规则",
+                    L10n.tr("还没有用户规则"),
                     systemImage: "wand.and.stars",
-                    description: Text("从“未解析”列表选择一组 URL，Pasteory 会根据样本生成匹配模板。")
+                    description: Text(L10n.tr("从“未解析”列表选择一组 URL，Pasteory 会根据样本生成匹配模板。"))
                 )
             } else {
                 List(state.fallbackRules) { rule in
@@ -313,7 +313,7 @@ struct LinkResolutionSettingsView: View {
         let authenticationTargets = LinkAuthenticationTarget.all(customRules: settings.authenticatedLinkRules)
         _ = sessionRevision
         return Form {
-            Section("Pasteory 登录会话") {
+            Section(L10n.tr("Pasteory 登录会话")) {
                 ForEach(authenticationTargets) { target in
                     HStack(alignment: .center, spacing: 12) {
                         Image(systemName: "person.crop.circle.badge.key")
@@ -322,17 +322,17 @@ struct LinkResolutionSettingsView: View {
                             Text(target.title).font(.headline)
                             Text(target.domainDescription).font(.caption.monospaced()).foregroundStyle(.secondary)
                             if let updatedAt = LinkAuthenticationSession.lastUpdatedAt(target) {
-                                Text("最近更新：\(updatedAt.formatted(date: .abbreviated, time: .shortened))")
+                                Text(L10n.tr("最近更新：\(updatedAt.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(L10n.language.locale)))"))
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             } else {
-                                Text("尚未建立登录会话")
+                                Text(L10n.tr("尚未建立登录会话"))
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
                         }
                         Spacer()
-                        Button(LinkAuthenticationSession.lastUpdatedAt(target) == nil ? "登录…" : "更新登录…") {
+                        Button(LinkAuthenticationSession.lastUpdatedAt(target) == nil ? L10n.tr("登录…") : L10n.tr("更新登录…")) {
                             authenticationRequest = LinkAuthenticationRequest(target: target, group: nil)
                         }
                         if let rule = target.customRule {
@@ -346,36 +346,36 @@ struct LinkResolutionSettingsView: View {
                 }
                 HStack {
                     Spacer(minLength: 0)
-                    Button("添加登录解析…") {
+                    Button(L10n.tr("添加登录解析…")) {
                         authenticationRuleEditorRequest = AuthenticationRuleEditorRequest(group: nil)
                     }
                 }
-                Text("登录发生在 Pasteory 独立的 WebKit 会话中，不读取 Chrome Cookie。登录数据和 WebCrypto 钥匙串账户按 Bundle ID 隔离，正式包与 QA 包互不共享。")
+                Text(L10n.tr("登录发生在 Pasteory 独立的 WebKit 会话中，不读取 Chrome Cookie。登录数据和 WebCrypto 钥匙串账户按 Bundle ID 隔离，正式包与 QA 包互不共享。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                LabeledContent("浏览器兼容标识", value: chromeCompatibilityLabel)
+                LabeledContent(L10n.tr("浏览器兼容标识"), value: chromeCompatibilityLabel)
             }
             Section("Google Chrome") {
-                LabeledContent("插件文件", value: chromeStatus.extensionAvailable ? "已准备" : "缺失")
-                LabeledContent("原生消息桥", value: chromeStatus.nativeHostRegistered ? "已注册" : "未注册")
+                LabeledContent(L10n.tr("插件文件"), value: chromeStatus.extensionAvailable ? L10n.tr("已准备") : L10n.tr("缺失"))
+                LabeledContent(L10n.tr("原生消息桥"), value: chromeStatus.nativeHostRegistered ? L10n.tr("已注册") : L10n.tr("未注册"))
                 if let lastContactAt = chromeStatus.lastContactAt {
-                    LabeledContent("最近连接", value: lastContactAt.formatted(date: .abbreviated, time: .standard))
+                    LabeledContent(L10n.tr("最近连接"), value: lastContactAt.formatted(Date.FormatStyle(date: .abbreviated, time: .standard).locale(L10n.language.locale)))
                 } else {
-                    LabeledContent("最近连接", value: "尚未连接")
+                    LabeledContent(L10n.tr("最近连接"), value: L10n.tr("尚未连接"))
                 }
                 HStack {
                     Spacer(minLength: 0)
-                    Button("准备 Chrome 插件…", action: onPrepareChrome)
+                    Button(L10n.tr("准备 Chrome 插件…"), action: onPrepareChrome)
                 }
                 .frame(maxWidth: .infinity)
-                Text("浏览器插件负责从已登录的 Chrome 页面获取复制上下文；Pasteory WebKit 登录会话负责解析从其他应用复制来的受保护 URL。")
+                Text(L10n.tr("浏览器插件负责从已登录的 Chrome 页面获取复制上下文；Pasteory WebKit 登录会话负责解析从其他应用复制来的受保护 URL。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Section("访问边界") {
-                Label("普通请求不携带 Cookie；命中登录解析规则且已有会话时才使用 WebKit", systemImage: "lock.shield")
-                Label("登录解析只保存 URL、标题候选和诊断状态，不保存网页正文", systemImage: "doc.badge.ellipsis")
-                Label("localhost、局域网 IP 和高风险操作路径会被拦截", systemImage: "network.badge.shield.half.filled")
+            Section(L10n.tr("访问边界")) {
+                Label(L10n.tr("普通请求不携带 Cookie；命中登录解析规则且已有会话时才使用 WebKit"), systemImage: "lock.shield")
+                Label(L10n.tr("登录解析只保存 URL、标题候选和诊断状态，不保存网页正文"), systemImage: "doc.badge.ellipsis")
+                Label(L10n.tr("localhost、局域网 IP 和高风险操作路径会被拦截"), systemImage: "network.badge.shield.half.filled")
             }
         }
         .formStyle(.grouped)
@@ -388,7 +388,7 @@ struct LinkResolutionSettingsView: View {
 
     private var chromeCompatibilityLabel: String {
         let marker = "Chrome/"
-        guard let range = LinkWebKitConfiguration.compatibilityUserAgent.range(of: marker) else { return "Chrome 兼容" }
+        guard let range = LinkWebKitConfiguration.compatibilityUserAgent.range(of: marker) else { return L10n.tr("Chrome 兼容") }
         let version = LinkWebKitConfiguration.compatibilityUserAgent[range.upperBound...].split(separator: " ").first ?? ""
         return "Chrome \(version)"
     }
@@ -452,36 +452,36 @@ private struct AuthenticationRuleEditorSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("添加登录解析").font(.title2.bold())
-            Text("这里只配置需要登录的网站。普通网页仍会自动匿名解析，不需要逐条添加。")
+            Text(L10n.tr("添加登录解析")).font(.title2.bold())
+            Text(L10n.tr("这里只配置需要登录的网站。普通网页仍会自动匿名解析，不需要逐条添加。"))
                 .font(.callout)
                 .foregroundStyle(.secondary)
             Form {
-                TextField("规则名称", text: $name)
+                TextField(L10n.tr("规则名称"), text: $name)
                 VStack(alignment: .leading, spacing: 5) {
-                    LabeledContent("匹配正则") {
+                    LabeledContent(L10n.tr("匹配正则")) {
                         TextField("^code\\.byted\\.org/.+$", text: $pattern)
                             .font(.system(.callout, design: .monospaced))
                             .frame(minWidth: 440)
                     }
-                    Text("匹配范围是 host + path，可以直接写正则，不需要输入 https://。")
+                    Text(L10n.tr("匹配范围是 host + path，可以直接写正则，不需要输入 https://。"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     if let patternError, !pattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Text(patternError).font(.caption).foregroundStyle(.red)
                     }
                 }
-                TextField("登录入口", text: $startURL)
-                LabeledContent("当前覆盖", value: "\(matchingGroups.count) 组，\(matchingURLCount) 个链接")
+                TextField(L10n.tr("登录入口"), text: $startURL)
+                LabeledContent(L10n.tr("当前覆盖"), value: L10n.tr("\(matchingGroups.count) 组，\(matchingURLCount) 个链接"))
                 if let sample = matchingGroups.first?.sampleURL {
-                    LabeledContent("命中示例", value: sample)
+                    LabeledContent(L10n.tr("命中示例"), value: sample)
                 }
             }
             .formStyle(.grouped)
             HStack {
                 Spacer()
-                Button("取消") { dismiss() }
-                Button("保存并登录") { save() }
+                Button(L10n.tr("取消")) { dismiss() }
+                Button(L10n.tr("保存并登录")) { save() }
                     .disabled(!canSave)
                     .keyboardShortcut(.defaultAction)
             }
@@ -531,11 +531,11 @@ private struct LinkFailureGroupRow: View {
                     .font(.caption.weight(.medium))
                     .foregroundStyle(statusColor)
             }
-            Text("\(group.uniqueURLCount) 个 URL · \(group.clipCount) 条记录 · 复制 \(group.copyCount) 次 · 解析 \(group.attemptCount) 次")
+            Text(L10n.tr("\(group.uniqueURLCount) 个 URL · \(group.clipCount) 条记录 · 复制 \(group.copyCount) 次 · 解析 \(group.attemptCount) 次"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack(spacing: 6) {
-                Text("当前兜底")
+                Text(L10n.tr("当前兜底"))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 Text(group.currentFallbackTitle)
@@ -547,13 +547,13 @@ private struct LinkFailureGroupRow: View {
                     .padding(.vertical, 2)
                     .background(pasteoryAccentColor.opacity(0.1), in: Capsule())
                 Spacer()
-                Button(isRetrying ? "解析中…" : "重新解析", action: onRetry).disabled(isRetrying)
+                Button(isRetrying ? L10n.tr("解析中…") : L10n.tr("重新解析"), action: onRetry).disabled(isRetrying)
                 if let onAuthenticate {
-                    Button("登录并解析", action: onAuthenticate).disabled(isRetrying)
+                    Button(L10n.tr("登录并解析"), action: onAuthenticate).disabled(isRetrying)
                 } else {
-                    Button("添加登录解析", action: onConfigureAuthentication).disabled(isRetrying)
+                    Button(L10n.tr("添加登录解析"), action: onConfigureAuthentication).disabled(isRetrying)
                 }
-                Button("配置兜底", action: onConfigureFallback)
+                Button(L10n.tr("配置兜底"), action: onConfigureFallback)
             }
             Text(group.sampleURL).font(.caption2.monospaced()).foregroundStyle(.tertiary).lineLimit(1)
         }
@@ -595,21 +595,21 @@ private struct ResolvedLinkRow: View {
                 .lineLimit(1)
 
             HStack(spacing: 7) {
-                Text(resource.resolutionSource?.displayName ?? "未知来源")
+                Text(resource.resolutionSource?.displayName ?? L10n.tr("未知来源"))
                     .font(.caption2.weight(.medium))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(pasteoryAccentColor.opacity(0.1), in: Capsule())
-                Text("\(summary.clipCount) 条记录 · 复制 \(summary.copyCount) 次 · 解析 \(resource.attemptCount) 次")
+                Text(L10n.tr("\(summary.clipCount) 条记录 · 复制 \(summary.copyCount) 次 · 解析 \(resource.attemptCount) 次"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 if let lastAttemptAt = resource.lastAttemptAt {
-                    Text("最近 \(lastAttemptAt.formatted(date: .abbreviated, time: .shortened))")
+                    Text(L10n.tr("最近 \(lastAttemptAt.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(L10n.language.locale)))"))
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
                 Spacer(minLength: 8)
-                Button(isRetrying ? "解析中…" : "重新解析", action: onRetry)
+                Button(isRetrying ? L10n.tr("解析中…") : L10n.tr("重新解析"), action: onRetry)
                     .disabled(isRetrying)
             }
         }
@@ -619,7 +619,7 @@ private struct ResolvedLinkRow: View {
     private var statusText: String {
         resource.requestState == .resolved
             ? resource.titleQuality.displayName
-            : "最近重试失败 · \(resource.requestState.displayName)"
+            : L10n.tr("最近重试失败 · \(resource.requestState.displayName)")
     }
 
     private var statusColor: Color {
@@ -645,28 +645,28 @@ private struct FallbackRuleEditorSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("创建兜底规则").font(.title2.bold())
-            Text("Pasteory 已根据失败样本生成匹配模板。保存前请确认范围和标题。")
+            Text(L10n.tr("创建兜底规则")).font(.title2.bold())
+            Text(L10n.tr("Pasteory 已根据失败样本生成匹配模板。保存前请确认范围和标题。"))
                 .font(.callout)
                 .foregroundStyle(.secondary)
             Form {
-                LabeledContent("匹配网站", value: group.routeSignature.host)
-                LabeledContent("路径模板", value: group.routeSignature.pathTemplate)
+                LabeledContent(L10n.tr("匹配网站"), value: group.routeSignature.host)
+                LabeledContent(L10n.tr("路径模板"), value: group.routeSignature.pathTemplate)
                 if !group.routeSignature.requiredQueryKeys.isEmpty {
-                    LabeledContent("要求参数", value: group.routeSignature.requiredQueryKeys.joined(separator: "、"))
+                    LabeledContent(L10n.tr("要求参数"), value: group.routeSignature.requiredQueryKeys.joined(separator: "、"))
                 }
-                TextField("规则名称", text: $name)
-                TextField("兜底标题", text: $titleTemplate)
+                TextField(L10n.tr("规则名称"), text: $name)
+                TextField(L10n.tr("兜底标题"), text: $titleTemplate)
                 if !availableVariables.isEmpty {
-                    LabeledContent("可用变量", value: availableVariables.joined(separator: "、"))
+                    LabeledContent(L10n.tr("可用变量"), value: availableVariables.joined(separator: "、"))
                 }
-                LabeledContent("影响范围", value: "\(group.uniqueURLCount) 个 URL，\(group.clipCount) 条记录")
+                LabeledContent(L10n.tr("影响范围"), value: L10n.tr("\(group.uniqueURLCount) 个 URL，\(group.clipCount) 条记录"))
             }
             .formStyle(.grouped)
             HStack {
                 Spacer()
-                Button("取消") { dismiss() }
-                Button("保存") {
+                Button(L10n.tr("取消")) { dismiss() }
+                Button(L10n.tr("保存")) {
                     isSaving = true
                     Task {
                         if await onSave(name, titleTemplate) { dismiss() }
@@ -698,7 +698,7 @@ private struct FallbackRuleEditorSheet: View {
     }
 
     private static func suggestedName(_ group: LinkFailureGroup) -> String {
-        let path = group.routeSignature.pathTemplate.split(separator: "/").last.map(String.init) ?? "链接"
+        let path = group.routeSignature.pathTemplate.split(separator: "/").last.map(String.init) ?? L10n.tr("链接")
         return "\(group.routeSignature.host) · \(path)"
     }
 

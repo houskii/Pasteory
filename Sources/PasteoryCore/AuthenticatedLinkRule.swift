@@ -48,12 +48,12 @@ public enum AuthenticatedLinkPattern {
 
     public static func validationError(_ rawValue: String) -> String? {
         let value = normalized(rawValue)
-        guard !value.isEmpty else { return "匹配规则不能为空" }
+        guard !value.isEmpty else { return L10n.tr("匹配规则不能为空") }
         do {
             _ = try NSRegularExpression(pattern: value, options: [.caseInsensitive])
             return nil
         } catch {
-            return "正则表达式无效：\(error.localizedDescription)"
+            return L10n.tr("正则表达式无效：\(error.localizedDescription)")
         }
     }
 

@@ -61,11 +61,11 @@ public enum RepositoryError: LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .openDatabase(let message): "无法打开数据库：\(message)"
-        case .sqlite(let message): "数据库错误：\(message)"
-        case .encoding: "无法解析剪贴板记录"
-        case .duplicateCollectionName: "分组名称已经存在"
-        case .aggregationNeedsMultipleItems: "至少需要两项不同内容才能创建聚合"
+        case .openDatabase(let message): L10n.tr("无法打开数据库：\(message)")
+        case .sqlite(let message): L10n.tr("数据库错误：\(message)")
+        case .encoding: L10n.tr("无法解析剪贴板记录")
+        case .duplicateCollectionName: L10n.tr("分组名称已经存在")
+        case .aggregationNeedsMultipleItems: L10n.tr("至少需要两项不同内容才能创建聚合")
         }
     }
 }

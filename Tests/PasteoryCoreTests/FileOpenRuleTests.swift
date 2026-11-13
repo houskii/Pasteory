@@ -8,7 +8,7 @@ import Testing
     #expect(FileIconResolver.fileType(assetName: "swift")?.displayName == "Swift")
     #expect(FileIconResolver.fileType(assetName: "swift")?.fileExtensions.contains("swift") == true)
     #expect(FileIconResolver.fileType(assetName: "harmony-package")?.suffixSummary.contains(".hap") == true)
-    #expect(FileIconResolver.fileType(assetName: "generic")?.displayName == "其他文件")
+    #expect(FileIconResolver.fileType(assetName: "generic")?.displayName == "Other Files")
     #expect(FileIconResolver.allFileTypes.last?.assetName == "generic")
     #expect(FileIconResolver.allFileExtensions.map(\.fileExtension).contains("hap"))
     #expect(FileIconResolver.allFileExtensions.map(\.fileExtension).contains("swiftinterface"))

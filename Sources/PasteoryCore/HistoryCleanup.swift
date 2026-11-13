@@ -27,7 +27,7 @@ public enum HistoryCleanupError: LocalizedError {
     case previewChanged
 
     public var errorDescription: String? {
-        "符合条件的内容已变化，请重新预览后再清理。"
+        L10n.tr("符合条件的内容已变化，请重新预览后再清理。")
     }
 }
 

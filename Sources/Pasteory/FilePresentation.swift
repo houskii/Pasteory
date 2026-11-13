@@ -16,8 +16,8 @@ struct LoadedFilePresentation: Equatable, Sendable {
     var isMissing: Bool { exists == false }
 
     var sizeText: String {
-        if isDirectory { return "文件夹" }
-        guard let byteCount else { return "大小未知" }
+        if isDirectory { return L10n.tr("文件夹") }
+        guard let byteCount else { return L10n.tr("大小未知") }
         return FileSizeFormatter.string(forByteCount: byteCount)
     }
 
@@ -37,21 +37,21 @@ struct LoadedImagePresentation: Equatable, Sendable {
     var byteCount: Int?
 
     var formatText: String {
-        "图片格式: \(format ?? "未知")"
+        L10n.tr("图片格式: \(format ?? L10n.tr("未知"))")
     }
 
     var dimensionsText: String {
         switch (pixelWidth, pixelHeight) {
         case let (width?, height?):
-            return "图片大小: \(width) * \(height)"
+            return L10n.tr("图片大小: \(width) * \(height)")
         default:
-            return "图片大小: 未知"
+            return L10n.tr("图片大小: 未知")
         }
     }
 
     var fileSizeText: String {
-        guard let byteCount else { return "文件大小: 未知" }
-        return "文件大小: \(FileSizeFormatter.string(forByteCount: byteCount))"
+        guard let byteCount else { return L10n.tr("文件大小: 未知") }
+        return L10n.tr("文件大小: \(FileSizeFormatter.string(forByteCount: byteCount))")
     }
 }
 
@@ -73,7 +73,7 @@ enum ClipFilePresentationLoader {
     static func fallback(for clip: Clip) -> LoadedFilePresentation {
         let name = FileIconResolver.normalizedFileName(clip.previewText)
         return LoadedFilePresentation(
-            name: name.isEmpty ? "未命名文件" : name,
+            name: name.isEmpty ? L10n.tr("未命名文件") : name,
             path: nil,
             byteCount: nil,
             uti: nil,
@@ -147,7 +147,7 @@ enum ClipFilePresentationLoader {
         return LoadedFilePresentation(
             name: values?.name
                 ?? fallbackName
-                ?? (url.lastPathComponent.isEmpty ? "未命名文件" : url.lastPathComponent),
+                ?? (url.lastPathComponent.isEmpty ? L10n.tr("未命名文件") : url.lastPathComponent),
             path: url.path.isEmpty ? nil : url.deletingLastPathComponent().path,
             byteCount: values?.fileSize,
             uti: values?.typeIdentifier,
@@ -348,7 +348,7 @@ struct PasteoryFileIconView: View {
                     .padding(6)
             }
         }
-        .accessibilityLabel("\(descriptor.label) 文件")
+        .accessibilityLabel(L10n.tr("\(descriptor.label) 文件"))
     }
 }
 
@@ -372,7 +372,7 @@ struct PasteoryMultiFileIconView: View {
                 .frame(minHeight: 17)
                 .background(accentColor, in: Capsule())
         }
-        .accessibilityLabel("\(fileNames.count) 个文件")
+        .accessibilityLabel(L10n.tr("\(fileNames.count) 个文件"))
     }
 }
 
@@ -401,7 +401,7 @@ struct PasteoryFileMetadataDetailsView: View {
                             .font(.system(size: compact ? 12 : 13, weight: .semibold))
                             .strikethrough(allFilesMissing)
                         if missingFileCount > 0 {
-                            Text(allFilesMissing ? "已删除" : "\(missingFileCount) 个已删除")
+                            Text(allFilesMissing ? L10n.tr("已删除") : L10n.tr("\(missingFileCount) 个已删除"))
                                 .font(.system(size: compact ? 8.5 : 9.5, weight: .semibold))
                                 .padding(.horizontal, 5)
                                 .padding(.vertical, 1)
@@ -458,7 +458,7 @@ struct PasteoryFileMetadataDetailsView: View {
                     .truncationMode(.middle)
                     .help(presentation.name)
                 if presentation.isMissing {
-                    Text("已删除")
+                    Text(L10n.tr("已删除"))
                         .font(.system(size: compact ? 8.5 : 9.5, weight: .semibold))
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
@@ -544,7 +544,7 @@ struct PasteoryFileDetailPreview: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
             if presentation.isMissing {
-                Label("原文件已删除", systemImage: "trash")
+                Label(L10n.tr("原文件已删除"), systemImage: "trash")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
@@ -562,13 +562,13 @@ struct PasteoryFileDetailPreview: View {
                 )
                 .frame(width: 54, height: 54)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("\(presentations.isEmpty ? (clip.effectiveFileMetadata?.fileCount ?? 0) : presentations.count) 个文件")
+                    Text(L10n.tr("\(presentations.isEmpty ? (clip.effectiveFileMetadata?.fileCount ?? 0) : presentations.count) 个文件"))
                         .font(.headline)
                     let missingCount = presentations.filter(\.isMissing).count
                     Text(
                         presentations.isEmpty
-                            ? "正在读取文件信息"
-                            : (missingCount == 0 ? "全部文件可用" : "\(missingCount) 个原文件已删除")
+                            ? L10n.tr("正在读取文件信息")
+                            : (missingCount == 0 ? L10n.tr("全部文件可用") : L10n.tr("\(missingCount) 个原文件已删除"))
                     )
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -588,7 +588,7 @@ struct PasteoryFileDetailPreview: View {
                                     .truncationMode(.middle)
                                 HStack(spacing: 5) {
                                     Text(file.sizeText)
-                                    if file.isMissing { Text("已删除") }
+                                    if file.isMissing { Text(L10n.tr("已删除")) }
                                 }
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)

@@ -71,12 +71,12 @@ public struct FileClipMetadata: Codable, Hashable, Sendable {
     public var fileCount: Int { fileNames.count }
     public var isMultiple: Bool { fileCount > 1 }
     public var displayName: String {
-        guard isMultiple else { return fileNames.first ?? "文件" }
-        return "\(fileCount) 个文件"
+        guard isMultiple else { return fileNames.first ?? L10n.tr("文件") }
+        return L10n.tr("\(fileCount) 个文件")
     }
     public var namesSummary: String {
         let visible = fileNames.prefix(3).joined(separator: "、")
         guard fileCount > 3 else { return visible }
-        return "\(visible) 等"
+        return L10n.tr("\(visible) 等")
     }
 }

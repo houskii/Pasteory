@@ -8,37 +8,37 @@ public enum QuickTextAction: String, Codable, CaseIterable, Identifiable, Sendab
 
     public var title: String {
         switch self {
-        case .base64Encode: "Base64 编码"
-        case .base64Decode: "Base64 解码"
+        case .base64Encode: L10n.tr("Base64 编码")
+        case .base64Decode: L10n.tr("Base64 解码")
         case .md5: "MD5"
         case .rgbaToHex: "RGBA → HEX"
         case .hexToRGBA: "HEX → RGBA"
-        case .urlEncode: "URL 编码"
-        case .urlDecode: "URL 解码"
+        case .urlEncode: L10n.tr("URL 编码")
+        case .urlDecode: L10n.tr("URL 解码")
         }
     }
 
     public var guidance: String {
         switch self {
-        case .base64Encode: "按 UTF-8 编码，保留空格和换行。"
-        case .base64Decode: "支持标准 Base64 和 Base64URL；解码结果必须是 UTF-8 文本。"
-        case .md5: "计算 UTF-8 文本的 32 位小写 MD5。MD5 不适合密码或安全校验。"
-        case .rgbaToHex: "例如 rgba(255, 128, 0, 0.5)；输出 #RRGGBBAA，透明度在末尾。"
-        case .hexToRGBA: "支持 #RGB、#RGBA、#RRGGBB、#RRGGBBAA；透明度在末尾。"
-        case .urlEncode: "编码 URL 参数值，空格转为 %20；不会保留 /、?、& 等分隔符。"
-        case .urlDecode: "解码百分号转义；保留 +，不按表单格式把它当作空格。"
+        case .base64Encode: L10n.tr("按 UTF-8 编码，保留空格和换行。")
+        case .base64Decode: L10n.tr("支持标准 Base64 和 Base64URL；解码结果必须是 UTF-8 文本。")
+        case .md5: L10n.tr("计算 UTF-8 文本的 32 位小写 MD5。MD5 不适合密码或安全校验。")
+        case .rgbaToHex: L10n.tr("例如 rgba(255, 128, 0, 0.5)；输出 #RRGGBBAA，透明度在末尾。")
+        case .hexToRGBA: L10n.tr("支持 #RGB、#RGBA、#RRGGBB、#RRGGBBAA；透明度在末尾。")
+        case .urlEncode: L10n.tr("编码 URL 参数值，空格转为 %20；不会保留 /、?、& 等分隔符。")
+        case .urlDecode: L10n.tr("解码百分号转义；保留 +，不按表单格式把它当作空格。")
         }
     }
 
     public var resultDescription: String {
         switch self {
-        case .base64Encode: "Base64 编码后"
-        case .base64Decode: "Base64 解码后"
-        case .md5: "计算 MD5 后"
-        case .rgbaToHex: "RGBA 转为 HEX 后"
-        case .hexToRGBA: "HEX 转为 RGBA 后"
-        case .urlEncode: "URL 编码后"
-        case .urlDecode: "URL 解码后"
+        case .base64Encode: L10n.tr("Base64 编码后")
+        case .base64Decode: L10n.tr("Base64 解码后")
+        case .md5: L10n.tr("计算 MD5 后")
+        case .rgbaToHex: L10n.tr("RGBA 转为 HEX 后")
+        case .hexToRGBA: L10n.tr("HEX 转为 RGBA 后")
+        case .urlEncode: L10n.tr("URL 编码后")
+        case .urlDecode: L10n.tr("URL 解码后")
         }
     }
 
@@ -158,7 +158,7 @@ public struct QuickTextTransformation: Codable, Hashable, Sendable {
     }
 
     public var note: String {
-        "\(originalText)（\(action.resultDescription)）\n来源：\(source?.appName ?? "手动输入")"
+        L10n.tr("\(originalText)（\(action.resultDescription)）\n来源：\(source?.appName ?? L10n.tr("手动输入"))")
     }
 }
 
@@ -167,11 +167,11 @@ public enum QuickTextActionError: LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .invalidBase64: "不是有效的 Base64 文本，请检查字符和填充符。"
-        case .nonUTF8: "解码结果不是 UTF-8 文本，无法在文本工具中显示。"
-        case .invalidURL: "URL 转义无效，请检查 % 后的十六进制字符和 UTF-8 编码。"
-        case .invalidColor: "颜色格式无效：RGB 分量需在 0–255，透明度需在 0–1。"
-        case .noText: "这条内容没有可用的文本，请手动输入。"
+        case .invalidBase64: L10n.tr("不是有效的 Base64 文本，请检查字符和填充符。")
+        case .nonUTF8: L10n.tr("解码结果不是 UTF-8 文本，无法在文本工具中显示。")
+        case .invalidURL: L10n.tr("URL 转义无效，请检查 % 后的十六进制字符和 UTF-8 编码。")
+        case .invalidColor: L10n.tr("颜色格式无效：RGB 分量需在 0–255，透明度需在 0–1。")
+        case .noText: L10n.tr("这条内容没有可用的文本，请手动输入。")
         }
     }
 }

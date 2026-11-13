@@ -18,7 +18,7 @@ public actor SQLiteClipRepository: ClipRepository {
         var pointer: OpaquePointer?
         let flags = SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX
         guard sqlite3_open_v2(databaseURL.path, &pointer, flags, nil) == SQLITE_OK, let pointer else {
-            throw RepositoryError.openDatabase(pointer.flatMap { String(cString: sqlite3_errmsg($0)) } ?? "未知错误")
+            throw RepositoryError.openDatabase(pointer.flatMap { String(cString: sqlite3_errmsg($0)) } ?? L10n.tr("未知错误"))
         }
         self.database = pointer
         self.encoder = JSONEncoder()
@@ -1252,7 +1252,7 @@ public actor SQLiteClipRepository: ClipRepository {
     private static func execute(_ database: OpaquePointer, _ sql: String) throws {
         var error: UnsafeMutablePointer<CChar>?
         guard sqlite3_exec(database, sql, nil, nil, &error) == SQLITE_OK else {
-            let message = error.map { String(cString: $0) } ?? "未知 SQLite 错误"
+            let message = error.map { String(cString: $0) } ?? L10n.tr("未知 SQLite 错误")
             sqlite3_free(error)
             throw RepositoryError.sqlite(message)
         }

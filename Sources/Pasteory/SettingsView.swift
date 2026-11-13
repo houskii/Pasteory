@@ -53,7 +53,7 @@ struct SettingsView: View {
         }
         .frame(minWidth: 980, maxWidth: .infinity, minHeight: 620, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
-        .pasteoryTheme(settings.themeColor)
+        .pasteoryTheme(settings.themeColor, language: settings.appLanguage)
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             settings.reloadSourceCapturePreferences()
         }
@@ -143,7 +143,7 @@ struct SettingsView: View {
                     .frame(width: 40, height: 40)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Pasteory").font(.system(size: 15, weight: .semibold))
-                    Text("设置").font(.caption).foregroundStyle(.secondary)
+                    Text(L10n.tr("设置")).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
             }
@@ -209,10 +209,10 @@ struct SettingsView: View {
 
     private var destinationGroups: [DestinationGroup] {
         [
-            DestinationGroup(title: "内容", destinations: [.library]),
-            DestinationGroup(title: "基础设置", destinations: [.general, .privacy]),
-            DestinationGroup(title: "交互与内容", destinations: [.shortcuts, .openBehavior, .linkResolution]),
-            DestinationGroup(title: "数据与支持", destinations: [.storage, .advanced, .about])
+            DestinationGroup(title: L10n.tr("内容"), destinations: [.library]),
+            DestinationGroup(title: L10n.tr("基础设置"), destinations: [.general, .privacy]),
+            DestinationGroup(title: L10n.tr("交互与内容"), destinations: [.shortcuts, .openBehavior, .linkResolution]),
+            DestinationGroup(title: L10n.tr("数据与支持"), destinations: [.storage, .advanced, .about])
         ]
     }
 
@@ -241,18 +241,26 @@ struct SettingsView: View {
 
     private var general: some View {
         Form {
-            Section("快捷面板") {
-                Picker("分组 Tab 位置", selection: $settings.quickTabLayout) {
+            Section(L10n.tr("界面语言")) {
+                Picker(L10n.tr("语言"), selection: $settings.appLanguage) {
+                    ForEach(AppLanguage.allCases) { language in
+                        Text(language.nativeName).tag(language)
+                    }
+                }
+                .accessibilityIdentifier("settings.language")
+            }
+            Section(L10n.tr("快捷面板")) {
+                Picker(L10n.tr("分组 Tab 位置"), selection: $settings.quickTabLayout) {
                     ForEach(QuickTabLayout.allCases) { layout in
                         Text(layout.title).tag(layout)
                     }
                 }
-                Text("两种布局均用 ↑↓ 选择内容、←→ 切换分组；搜索输入时保留文字编辑操作。")
+                Text(L10n.tr("两种布局均用 ↑↓ 选择内容、←→ 切换分组；搜索输入时保留文字编辑操作。"))
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Section("外观") {
+            Section(L10n.tr("外观")) {
                 HStack(spacing: 14) {
-                    Text("主题色")
+                    Text(L10n.tr("主题色"))
                     Spacer(minLength: 12)
                     ForEach(PasteoryThemeColor.allCases) { theme in
                         Button {
@@ -270,31 +278,31 @@ struct SettingsView: View {
                         }
                         .buttonStyle(.plain)
                         .help(theme.title)
-                        .accessibilityLabel("主题色：\(theme.title)")
+                        .accessibilityLabel(L10n.tr("主题色：\(theme.title)"))
                         .accessibilityAddTraits(settings.themeColor == theme ? .isSelected : [])
                     }
                 }
                 .frame(maxWidth: .infinity)
             }
-            Section("运行") {
+            Section(L10n.tr("运行")) {
                 SettingsSwitchRow(isOn: Binding(get: { loginEnabled }, set: { enabled in updateLoginItem(enabled) })) {
-                    Text("登录时启动 Pasteory")
+                    Text(L10n.tr("登录时启动 Pasteory"))
                 }
             }
-            Section("状态") {
-                LabeledContent("运行形态", value: "仅菜单栏")
+            Section(L10n.tr("状态")) {
+                LabeledContent(L10n.tr("运行形态"), value: L10n.tr("仅菜单栏"))
                 LabeledContent(
-                    "数据位置",
+                    L10n.tr("数据位置"),
                     value: "~/Library/Application Support/\(PasteoryRuntimeIdentity.current.applicationSupportDirectoryName)"
                 )
             }
-            Section("应用") {
+            Section(L10n.tr("应用")) {
                 settingsActionRow {
-                    Button("重启 Pasteory") {
+                    Button(L10n.tr("重启 Pasteory")) {
                         do { try ApplicationLifecycle.restart() }
                         catch { state.show(error) }
                     }
-                    Button("退出 Pasteory", role: .destructive) {
+                    Button(L10n.tr("退出 Pasteory"), role: .destructive) {
                         NSApp.terminate(nil)
                     }
                 }
@@ -305,23 +313,23 @@ struct SettingsView: View {
 
     private var privacy: some View {
         Form {
-            Section("剪贴板检测") {
-                Picker("检测频率", selection: $settings.clipboardPollingInterval) {
+            Section(L10n.tr("剪贴板检测")) {
+                Picker(L10n.tr("检测频率"), selection: $settings.clipboardPollingInterval) {
                     ForEach(ClipboardPollingInterval.allCases) { interval in
                         Text(interval.title).tag(interval)
                     }
                 }
                 .pickerStyle(.segmented)
-                Text("默认每 1 秒检查一次，可调整为 0.5 秒或 0.1 秒。修改后会在下一轮检测生效；休眠和锁屏时停止检测。")
+                Text(L10n.tr("默认每 1 秒检查一次，可调整为 0.5 秒或 0.1 秒。修改后会在下一轮检测生效；休眠和锁屏时停止检测。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Section("默认保护") {
-                Label("自动忽略“钥匙串访问”和“密码”应用", systemImage: "lock.shield")
-                Label("自动忽略 Concealed、Transient 和 AutoGenerated 内容", systemImage: "eye.slash")
-                Label("单项内容上限为 10 MB", systemImage: "gauge.with.dots.needle.33percent")
+            Section(L10n.tr("默认保护")) {
+                Label(L10n.tr("自动忽略“钥匙串访问”和“密码”应用"), systemImage: "lock.shield")
+                Label(L10n.tr("自动忽略 Concealed、Transient 和 AutoGenerated 内容"), systemImage: "eye.slash")
+                Label(L10n.tr("单项内容上限为 10 MB"), systemImage: "gauge.with.dots.needle.33percent")
             }
-            Section("来源详情采集") {
+            Section(L10n.tr("来源详情采集")) {
                 ForEach(SourceContextSourceCategory.allCases, id: \.self) { category in
                     VStack(alignment: .leading, spacing: 9) {
                         Text(category.displayName)
@@ -330,7 +338,7 @@ struct SettingsView: View {
                             sourceCaptureApplicationRow(application)
                         }
                         if category == .browser, settings.isSourceCaptureEnabled(for: .chrome) {
-                            Text("默认采集所有网站。如需关闭某个网站，请在 Chrome 工具栏中打开 Pasteory 插件进行设置。")
+                            Text(L10n.tr("默认采集所有网站。如需关闭某个网站，请在 Chrome 工具栏中打开 Pasteory 插件进行设置。"))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .padding(.leading, 38)
@@ -342,29 +350,29 @@ struct SettingsView: View {
                     .filter({ $0 != .chrome })
                     .contains(where: settings.isSourceCaptureEnabled(for:)) {
                     Label(
-                        pasteCoordinator.accessibilityTrusted() ? "辅助功能权限已就绪" : "微信和飞书需要辅助功能权限；未授权时只保存普通来源应用",
+                        pasteCoordinator.accessibilityTrusted() ? L10n.tr("辅助功能权限已就绪") : L10n.tr("微信和飞书需要辅助功能权限；未授权时只保存普通来源应用"),
                         systemImage: pasteCoordinator.accessibilityTrusted() ? "checkmark.shield" : "exclamationmark.triangle"
                     )
                     .font(.caption)
                     .foregroundStyle(pasteCoordinator.accessibilityTrusted() ? Color.secondary : Color.orange)
                 }
-                Text("这些开关只影响之后的复制。已保存的来源详情不会随开关关闭而删除。")
+                Text(L10n.tr("这些开关只影响之后的复制。已保存的来源详情不会随开关关闭而删除。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Section("排除应用") {
+            Section(L10n.tr("排除应用")) {
                 ForEach(settings.excludedBundleIdentifiers.sorted(), id: \.self) { bundle in
                     HStack(spacing: 10) {
                         ApplicationIdentityView(application: applicationReference(for: bundle), compact: true)
                         Spacer()
-                        Button("移除") { settings.excludedBundleIdentifiers.remove(bundle) }
+                        Button(L10n.tr("移除")) { settings.excludedBundleIdentifiers.remove(bundle) }
                     }
                 }
                 settingsActionRow {
-                    Button("选择应用…") { showingExcludedApplicationPicker = true }
+                    Button(L10n.tr("选择应用…")) { showingExcludedApplicationPicker = true }
                         .sheet(isPresented: $showingExcludedApplicationPicker) {
                             ApplicationPickerSheet(
-                                title: "选择要排除的应用",
+                                title: L10n.tr("选择要排除的应用"),
                                 selectedBundleIdentifiers: settings.excludedBundleIdentifiers,
                                 additionalApplications: knownApplications
                             ) { application in
@@ -375,7 +383,7 @@ struct SettingsView: View {
                             }
                         }
                 }
-                Text("选择器会读取 /Applications、~/Applications，也可以从其他路径选择 .app。")
+                Text(L10n.tr("选择器会读取 /Applications、~/Applications，也可以从其他路径选择 .app。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -410,7 +418,7 @@ struct SettingsView: View {
             }
             .disabled(isExcluded(application))
             if isExcluded(application) {
-                Text("此应用已在“排除应用”中，不会保存剪贴板内容或来源详情。")
+                Text(L10n.tr("此应用已在“排除应用”中，不会保存剪贴板内容或来源详情。"))
                     .font(.caption2)
                     .foregroundStyle(.orange)
             }
@@ -419,11 +427,11 @@ struct SettingsView: View {
 
     private var shortcuts: some View {
         Form {
-            Section("打开快捷面板") {
+            Section(L10n.tr("打开快捷面板")) {
                 let shortcut = settings.globalShortcut
                 shortcutSettingRow(
-                    title: "全局唤起",
-                    detail: "从任意 App 打开快捷面板",
+                    title: L10n.tr("全局唤起"),
+                    detail: L10n.tr("从任意 App 打开快捷面板"),
                     isConfigured: shortcut != nil,
                     onClear: {
                         settings.clearGlobalShortcut()
@@ -447,41 +455,41 @@ struct SettingsView: View {
                     }
                 }
             }
-            Section("粘贴与复制") {
+            Section(L10n.tr("粘贴与复制")) {
                 ForEach(pasteActions) { action in quickShortcutSettingRow(action) }
             }
-            Section("内容打开") {
+            Section(L10n.tr("内容打开")) {
                 quickShortcutSettingRow(.openSelected)
-                Text("默认使用空格打开当前项目；网页、代码和文件需要先在“打开方式”中完成配置。")
+                Text(L10n.tr("默认使用空格打开当前项目；网页、代码和文件需要先在“打开方式”中完成配置。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Section("搜索") {
+            Section(L10n.tr("搜索")) {
                 quickShortcutSettingRow(.toggleSearch)
-                Text("默认使用 ⌘F 聚焦搜索；再次使用会退出搜索输入。打开面板时默认不聚焦搜索。")
+                Text(L10n.tr("默认使用 ⌘F 聚焦搜索；再次使用会退出搜索输入。打开面板时默认不聚焦搜索。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Section("整理当前项目") {
+            Section(L10n.tr("整理当前项目")) {
                 ForEach(organizeActions) { action in quickShortcutSettingRow(action) }
             }
-            Section("窗口与页面") {
+            Section(L10n.tr("窗口与页面")) {
                 ForEach(windowActions) { action in quickShortcutSettingRow(action) }
             }
-            Section("固定导航快捷键") {
-                LabeledContent("选择内容 / 切换分组", value: "↑↓ / ←→")
-                LabeledContent("快速粘贴前 9 项", value: "⌘1～⌘9")
-                LabeledContent("关闭当前编辑层", value: "Esc")
+            Section(L10n.tr("固定导航快捷键")) {
+                LabeledContent(L10n.tr("选择内容 / 切换分组"), value: "↑↓ / ←→")
+                LabeledContent(L10n.tr("快速粘贴前 9 项"), value: "⌘1～⌘9")
+                LabeledContent(L10n.tr("关闭当前编辑层"), value: "Esc")
             }
             Section {
                 settingsActionRow {
-                    Button("恢复全部默认快捷键") {
+                    Button(L10n.tr("恢复全部默认快捷键")) {
                         settings.resetAllShortcuts()
                         onShortcutChange()
                         shortcutError = nil
                     }
                 }
-                Text("全局唤起恢复为 ⌘⇧V，打开内容恢复为空格，搜索恢复为 ⌘F，其余操作恢复为当前发布默认组合。")
+                Text(L10n.tr("全局唤起恢复为 ⌘⇧V，打开内容恢复为空格，搜索恢复为 ⌘F，其余操作恢复为当前发布默认组合。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -566,8 +574,8 @@ struct SettingsView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(Color.secondary.opacity(isConfigured ? 1 : 0.4))
                 .disabled(!isConfigured)
-                .help("移除快捷键")
-                .accessibilityLabel("移除\(title)快捷键")
+                .help(L10n.tr("移除快捷键"))
+                .accessibilityLabel(L10n.tr("移除\(title)快捷键"))
             }
         }
         .frame(maxWidth: .infinity)
@@ -575,16 +583,16 @@ struct SettingsView: View {
 
     private var storage: some View {
         Form {
-            Section("内容统计") {
+            Section(L10n.tr("内容统计")) {
                 HStack(spacing: 16) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("统计范围")
-                        Text("按本机时区的自然日计算")
+                        Text(L10n.tr("统计范围"))
+                        Text(L10n.tr("按本机时区的自然日计算"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 12)
-                    Picker("统计范围", selection: $storageAnalyticsPeriod) {
+                    Picker(L10n.tr("统计范围"), selection: $storageAnalyticsPeriod) {
                         ForEach(StorageAnalyticsPeriod.allCases) { period in
                             Text(period.displayName).tag(period)
                         }
@@ -597,10 +605,10 @@ struct SettingsView: View {
                 if let snapshot = currentStorageSnapshot {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack(alignment: .firstTextBaseline) {
-                            Text("保存内容")
+                            Text(L10n.tr("保存内容"))
                                 .foregroundStyle(.secondary)
                             Spacer()
-                            Text("\(snapshot.clipCount) 条")
+                            Text(L10n.tr("\(snapshot.clipCount) 条"))
                                 .font(.system(size: 22, weight: .bold, design: .rounded))
                         }
                         HorizontalStackedTrendChart(
@@ -616,12 +624,12 @@ struct SettingsView: View {
                                 AnalyticsLegendRow(
                                     color: color(for: item.kind),
                                     title: item.kind.displayName,
-                                    value: "\(item.count) 条 · \(percentage(item.count, of: snapshot.clipCount))"
+                                    value: L10n.tr("\(item.count) 条 · \(percentage(item.count, of: snapshot.clipCount))")
                                 )
                             }
                         }
                         if snapshot.clipCount == 0 {
-                            Text("这个时间范围内还没有保存内容。")
+                            Text(L10n.tr("这个时间范围内还没有保存内容。"))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -630,19 +638,19 @@ struct SettingsView: View {
                 } else {
                     HStack {
                         ProgressView().controlSize(.small)
-                        Text("正在统计…").foregroundStyle(.secondary)
+                        Text(L10n.tr("正在统计…")).foregroundStyle(.secondary)
                         Spacer()
                     }
                     .frame(minHeight: 72)
                 }
             }
 
-            Section("本地占用") {
+            Section(L10n.tr("本地占用")) {
                 if let snapshot = currentStorageSnapshot {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack(alignment: .firstTextBaseline) {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Pasteory 数据")
+                                Text(L10n.tr("Pasteory 数据"))
                                 if let diskShare = diskShareText(for: snapshot) {
                                     Text(diskShare)
                                         .font(.caption)
@@ -668,30 +676,30 @@ struct SettingsView: View {
                 } else {
                     HStack {
                         ProgressView().controlSize(.small)
-                        Text("正在读取存储空间…").foregroundStyle(.secondary)
+                        Text(L10n.tr("正在读取存储空间…")).foregroundStyle(.secondary)
                         Spacer()
                     }
                     .frame(minHeight: 72)
                 }
 
-                Text("包含 Pasteory 的剪贴板数据和网页缓存。直接复制的图片存为独立副本；文件引用指向的原文件不计入占用。")
+                Text(L10n.tr("包含 Pasteory 的剪贴板数据和网页缓存。直接复制的图片存为独立副本；文件引用指向的原文件不计入占用。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 settingsActionRow {
                     Button {
                         Task { await state.refreshStorageAnalytics(period: storageAnalyticsPeriod) }
                     } label: {
-                        Label("重新统计", systemImage: "arrow.clockwise")
+                        Label(L10n.tr("重新统计"), systemImage: "arrow.clockwise")
                     }
                     .disabled(state.storageAnalyticsLoading)
                 }
             }
             WebCacheSettingsSection(settings: settings, cache: state.webCacheMaintenance)
             HistoryCleanupSection(state: state, period: storageAnalyticsPeriod)
-            Section("自动归档") {
-                Text("超过 30 天或热数据超过 10,000 条时归档。收藏、置顶和普通分组内容不会自动归档。")
+            Section(L10n.tr("自动归档")) {
+                Text(L10n.tr("超过 30 天或热数据超过 10,000 条时归档。收藏、置顶和普通分组内容不会自动归档。"))
                 settingsActionRow {
-                    Button("立即检查归档") {
+                    Button(L10n.tr("立即检查归档")) {
                         Task {
                             await state.runArchive()
                             await state.refreshStorageAnalytics(period: storageAnalyticsPeriod)
@@ -700,12 +708,12 @@ struct SettingsView: View {
                         .disabled(state.isBusy)
                 }
             }
-            Section("本地备份") {
+            Section(L10n.tr("本地备份")) {
                 settingsActionRow {
-                    Button("导出备份…", action: onExport).disabled(state.isBusy)
-                    Button("导入备份…", action: onImport).disabled(state.isBusy)
+                    Button(L10n.tr("导出备份…"), action: onExport).disabled(state.isBusy)
+                    Button(L10n.tr("导入备份…"), action: onImport).disabled(state.isBusy)
                 }
-                Text("备份包含 Pasteory 内保存的内容和元数据，不复制原始文件实体。")
+                Text(L10n.tr("备份包含 Pasteory 内保存的内容和元数据，不复制原始文件实体。"))
             }
             if let message = state.statusMessage { Text(message).foregroundStyle(.secondary) }
         }
@@ -741,7 +749,7 @@ struct SettingsView: View {
             }
             return AnalyticsTrendRow(
                 id: bucket.id,
-                label: bucket.startDate.map(shortDateLabel) ?? "总共",
+                label: bucket.startDate.map(shortDateLabel) ?? L10n.tr("总共"),
                 totalCount: bucket.totalCount,
                 segments: segments
             )
@@ -798,51 +806,51 @@ struct SettingsView: View {
 
     private func diskShareText(for snapshot: StorageAnalyticsSnapshot) -> String? {
         guard let volumeTotal = snapshot.volumeTotalBytes, volumeTotal > 0 else { return nil }
-        return "占本机磁盘 \(percentage(snapshot.totalStorageBytes, of: volumeTotal))"
+        return L10n.tr("占本机磁盘 \(percentage(snapshot.totalStorageBytes, of: volumeTotal))")
     }
 
     private var advanced: some View {
         Form {
-            Section("辅助功能") {
+            Section(L10n.tr("辅助功能")) {
                 let accessibilityTrusted = pasteCoordinator.accessibilityTrusted()
-                LabeledContent("直接粘贴与会话识别", value: accessibilityTrusted ? "已授权" : "未授权")
+                LabeledContent(L10n.tr("直接粘贴与会话识别"), value: accessibilityTrusted ? L10n.tr("已授权") : L10n.tr("未授权"))
                 if !accessibilityTrusted {
                     settingsActionRow {
-                        Button("打开授权提示并退出 Pasteory") {
+                        Button(L10n.tr("打开授权提示并退出 Pasteory")) {
                             pasteCoordinator.requestAccessibilityPermissionAndTerminate()
                         }
                     }
-                    Text("系统弹出授权提示后，Pasteory 会退出。完成授权再重新打开，微信和飞书的会话识别才能稳定生效。")
+                    Text(L10n.tr("系统弹出授权提示后，Pasteory 会退出。完成授权再重新打开，微信和飞书的会话识别才能稳定生效。"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    Label("辅助功能权限已经生效", systemImage: "checkmark.circle.fill")
+                    Label(L10n.tr("辅助功能权限已经生效"), systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                 }
             }
-            Section("Chrome 插件") {
+            Section(L10n.tr("Chrome 插件")) {
                 let chromeStatus = ChromeExtensionIntegration.status()
-                LabeledContent("插件文件", value: chromeStatus.extensionAvailable ? "已准备" : "缺失")
-                LabeledContent("原生消息桥", value: chromeStatus.nativeHostRegistered ? "已注册" : "未注册")
+                LabeledContent(L10n.tr("插件文件"), value: chromeStatus.extensionAvailable ? L10n.tr("已准备") : L10n.tr("缺失"))
+                LabeledContent(L10n.tr("原生消息桥"), value: chromeStatus.nativeHostRegistered ? L10n.tr("已注册") : L10n.tr("未注册"))
                 if let lastContactAt = chromeStatus.lastContactAt {
-                    LabeledContent("最近连接", value: lastContactAt.formatted(date: .abbreviated, time: .standard))
+                    LabeledContent(L10n.tr("最近连接"), value: lastContactAt.formatted(Date.FormatStyle(date: .abbreviated, time: .standard).locale(L10n.language.locale)))
                 } else {
-                    LabeledContent("最近连接", value: "尚未连接")
+                    LabeledContent(L10n.tr("最近连接"), value: L10n.tr("尚未连接"))
                 }
                 settingsActionRow {
-                    Button("前往链接解析设置") { selectedDestination = .linkResolution }
+                    Button(L10n.tr("前往链接解析设置")) { selectedDestination = .linkResolution }
                 }
-                Text("插件安装、浏览器连接和网站解析授权统一在“链接解析”中管理。这里仅保留连接诊断。")
+                Text(L10n.tr("插件安装、浏览器连接和网站解析授权统一在“链接解析”中管理。这里仅保留连接诊断。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Section("搜索索引") {
+            Section(L10n.tr("搜索索引")) {
                 settingsActionRow {
-                    Button("重建搜索索引") {
+                    Button(L10n.tr("重建搜索索引")) {
                         Task {
                             do {
                                 try await state.repository.rebuildSearchIndex()
-                                state.presentStatus("搜索索引已重建")
+                                state.presentStatus(L10n.tr("搜索索引已重建"))
                             } catch { state.show(error) }
                         }
                     }
@@ -855,7 +863,7 @@ struct SettingsView: View {
         do {
             let changeCount = try ChromeExtensionIntegration.prepareInteractiveInstall()
             pasteCoordinator.monitor?.markOwnWrite(changeCount: changeCount)
-            state.presentStatus("已注册原生消息桥、复制插件目录并打开 Chrome 扩展程序页面", dismissAfter: 6)
+            state.presentStatus(L10n.tr("已注册原生消息桥、复制插件目录并打开 Chrome 扩展程序页面"), dismissAfter: 6)
         } catch { state.show(error) }
     }
 
@@ -865,22 +873,24 @@ struct SettingsView: View {
             Text("Pasteory").font(.largeTitle.bold())
             Text(versionLabel)
             Text(PasteoryBrand.tagline).foregroundStyle(.secondary)
-            Text(PasteoryBrand.taglineChinese).foregroundStyle(.secondary)
-            Text("本地保存剪贴板内容，不上传资料；更新检查仅获取版本信息和安装包。")
+            if settings.appLanguage == .simplifiedChinese {
+                Text(PasteoryBrand.taglineChinese).foregroundStyle(.secondary)
+            }
+            Text(L10n.tr("本地保存剪贴板内容，不上传资料；更新检查仅获取版本信息和安装包。"))
                 .font(.caption).foregroundStyle(.secondary)
             Divider().padding(.vertical, 4)
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(updateService.availableUpdate.map { "发现新版本 \($0.version)" } ?? "软件更新")
+                        Text(updateService.availableUpdate.map { L10n.tr("发现新版本 \($0.version)") } ?? L10n.tr("软件更新"))
                             .font(.headline)
                         if let date = updateService.lastCheckedAt {
-                            Text("上次检查：\(date.formatted(date: .abbreviated, time: .shortened))")
+                            Text(L10n.tr("上次检查：\(date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(L10n.language.locale)))"))
                                 .font(.caption).foregroundStyle(.secondary)
-                        } else { Text("尚未检查更新").font(.caption).foregroundStyle(.secondary) }
+                        } else { Text(L10n.tr("尚未检查更新")).font(.caption).foregroundStyle(.secondary) }
                     }
                     Spacer()
-                    Button("检查更新…") { updateService.checkForUpdates() }
+                    Button(L10n.tr("检查更新…")) { updateService.checkForUpdates() }
                         .buttonStyle(.link)
                         .disabled(updateService.isBusy)
                 }
@@ -889,8 +899,8 @@ struct SettingsView: View {
                     set: { updateService.setAutomaticChecksEnabled($0) }
                 )) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("每天自动检查更新")
-                        Text("每 24 小时检查一次，确认后才下载和安装。")
+                        Text(L10n.tr("每天自动检查更新"))
+                        Text(L10n.tr("每 24 小时检查一次，确认后才下载和安装。"))
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -906,9 +916,9 @@ struct SettingsView: View {
     }
 
     private var versionLabel: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "未知"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "未知"
-        return "版本 \(version)（Build \(build)）"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? L10n.tr("未知")
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? L10n.tr("未知")
+        return L10n.tr("版本 \(version)（Build \(build)）")
     }
 
     private func updateLoginItem(_ enabled: Bool) {
@@ -949,7 +959,7 @@ private struct HorizontalStackedTrendChart: View {
                     HStack(spacing: 4) {
                         Spacer()
                         Image(systemName: "chevron.down")
-                        Text("向下滚动查看更早日期")
+                        Text(L10n.tr("向下滚动查看更早日期"))
                     }
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
@@ -993,9 +1003,9 @@ private struct HorizontalStackedTrendChart: View {
                         .frame(width: 30, alignment: .trailing)
                 }
                 .frame(height: rowHeight)
-                .help("\(row.label) · \(row.totalCount) 条")
+                .help(L10n.tr("\(row.label) · \(row.totalCount) 条"))
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(row.label)，\(row.totalCount) 条")
+                .accessibilityLabel(L10n.tr("\(row.label)，\(row.totalCount) 条"))
             }
         }
     }
@@ -1158,7 +1168,7 @@ final class ShortcutRecorderNSView: NSView {
         let path = NSBezierPath(roundedRect: rect, xRadius: 7, yRadius: 7)
         (recording ? NSColor.controlAccentColor.withAlphaComponent(0.15) : NSColor.controlBackgroundColor).setFill(); path.fill()
         (recording ? NSColor.controlAccentColor : NSColor.separatorColor).setStroke(); path.stroke()
-        let text = recording ? "请按新的快捷键…" : (isConfigured ? ShortcutFormatter.display(keyCode: keyCode, modifiers: modifiers) : "未设置")
+        let text = recording ? L10n.tr("请按新的快捷键…") : (isConfigured ? ShortcutFormatter.display(keyCode: keyCode, modifiers: modifiers) : L10n.tr("未设置"))
         let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 13, weight: .medium), .foregroundColor: NSColor.labelColor]
         let size = text.size(withAttributes: attributes)
         text.draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2), withAttributes: attributes)

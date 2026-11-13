@@ -10,10 +10,10 @@ public enum StorageAnalyticsPeriod: String, CaseIterable, Identifiable, Sendable
 
     public var displayName: String {
         switch self {
-        case .oneDay: "1 天"
-        case .sevenDays: "7 天"
-        case .thirtyDays: "30 天"
-        case .all: "总共"
+        case .oneDay: L10n.tr("1 天")
+        case .sevenDays: L10n.tr("7 天")
+        case .thirtyDays: L10n.tr("30 天")
+        case .all: L10n.tr("总共")
         }
     }
 
@@ -57,13 +57,13 @@ public enum PasteoryStorageCategory: String, CaseIterable, Identifiable, Sendabl
 
     public var displayName: String {
         switch self {
-        case .database: "数据库"
-        case .attachments: "图片与附件"
-        case .archives: "归档"
-        case .backups: "备份"
-        case .logs: "日志"
-        case .webKitNetworkCache: "WebKit 网页缓存"
-        case .other: "其他"
+        case .database: L10n.tr("数据库")
+        case .attachments: L10n.tr("图片与附件")
+        case .archives: L10n.tr("归档")
+        case .backups: L10n.tr("备份")
+        case .logs: L10n.tr("日志")
+        case .webKitNetworkCache: L10n.tr("WebKit 网页缓存")
+        case .other: L10n.tr("其他")
         }
     }
 }

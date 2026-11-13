@@ -9,7 +9,7 @@ enum PasteoryApplication {
             try PasteoryRuntimeIdentity.validateCurrentBundleConfiguration()
         } catch {
             let alert = NSAlert(error: error)
-            alert.messageText = "Pasteory 构建身份无效"
+            alert.messageText = L10n.tr("Pasteory 构建身份无效")
             alert.runModal()
             return
         }
@@ -30,7 +30,6 @@ enum PasteoryApplication {
             return
         }
         let application = NSApplication.shared
-        TextEditingCommands.installMainMenu(on: application)
         let delegate = AppDelegate()
         application.delegate = delegate
 #if DEBUG
@@ -78,6 +77,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let backup = BackupService(repository: repository, directories: directories)
             let storageAnalyticsService = StorageAnalyticsService(repository: repository, directories: directories)
             let settings = AppSettings(defaults: settingsDefaults, logsDirectory: directories.logs)
+#if DEBUG
+            if let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--debug-language=") }),
+               let language = AppLanguage(rawValue: String(argument.dropFirst("--debug-language=".count))) {
+                settings.appLanguage = language
+            }
+#endif
+            L10n.activate(settings.appLanguage)
+            TextEditingCommands.installMainMenu(on: NSApp)
             let linkResolutionService = LinkResolutionService(repository: repository)
             ApplicationCatalog.configure(cacheDirectory: directories.applicationCache)
             if PasteoryRuntimeIdentity.current.chromeIntegrationEnabled {
@@ -97,7 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             coordinator.start()
         } catch {
             let alert = NSAlert(error: error)
-            alert.messageText = "Pasteory 无法启动"
+            alert.messageText = L10n.tr("Pasteory 无法启动")
             alert.runModal()
             NSApplication.shared.terminate(nil)
         }

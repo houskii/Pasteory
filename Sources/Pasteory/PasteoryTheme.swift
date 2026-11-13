@@ -1,3 +1,4 @@
+import PasteoryCore
 import SwiftUI
 
 private struct PasteoryAccentColorKey: EnvironmentKey {
@@ -12,9 +13,11 @@ extension EnvironmentValues {
 }
 
 extension View {
-    func pasteoryTheme(_ theme: PasteoryThemeColor) -> some View {
+    func pasteoryTheme(_ theme: PasteoryThemeColor, language: AppLanguage) -> some View {
         environment(\.pasteoryAccentColor, theme.accentColor)
             .tint(theme.accentColor)
+            .environment(\.locale, language.locale)
+            .id(language)
     }
 }
 

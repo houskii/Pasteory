@@ -6,7 +6,7 @@ struct QuickActionsMenu: View {
     let perform: (QuickTextAction) -> Void
 
     var body: some View {
-        Menu("快捷操作") {
+        Menu(L10n.tr("快捷操作")) {
             QuickTextActionMenuItems(perform: perform)
         }
     }
@@ -22,10 +22,10 @@ struct QuickActionsToolbarMenu: View {
             QuickTextActionMenuItems { state.runQuickTextAction($0, for: clip) }
         } label: {
             if compact { Image(systemName: "wand.and.stars") }
-            else { Label("快捷操作", systemImage: "wand.and.stars") }
+            else { Label(L10n.tr("快捷操作"), systemImage: "wand.and.stars") }
         }
         .disabled(clip == nil || state.quickTextActionRunning)
-        .help("快捷操作")
+        .help(L10n.tr("快捷操作"))
     }
 }
 
@@ -64,7 +64,7 @@ final class QuickActionMenuController {
 
     func present(for clip: Clip, scope: QuickActionMenuScope, in window: NSWindow, perform: (QuickTextAction) -> Void) {
         guard !isPresenting, window.isVisible, let contentView = window.contentView else { return }
-        let menu = NSMenu(title: "快捷操作")
+        let menu = NSMenu(title: L10n.tr("快捷操作"))
         menu.autoenablesItems = false
         menu.minimumWidth = 200
         let handler = QuickTextActionMenuHandler()

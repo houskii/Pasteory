@@ -11,9 +11,9 @@ enum ClipboardPollingInterval: Double, CaseIterable, Identifiable {
     var id: Double { rawValue }
     var title: String {
         switch self {
-        case .oneTenthSecond: "0.1 秒"
-        case .halfSecond: "0.5 秒"
-        case .oneSecond: "1 秒"
+        case .oneTenthSecond: L10n.tr("0.1 秒")
+        case .halfSecond: L10n.tr("0.5 秒")
+        case .oneSecond: L10n.tr("1 秒")
         }
     }
 }
@@ -33,14 +33,14 @@ enum SourceCaptureApplication: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .chrome: "Google Chrome"
-        case .wechat: "微信"
-        case .lark: "飞书"
+        case .wechat: L10n.tr("微信")
+        case .lark: L10n.tr("飞书")
         }
     }
     var detail: String {
         switch self {
-        case .chrome: "网页链接、标题、选区和关联元素"
-        case .lark, .wechat: "对话类型｜对话标题"
+        case .chrome: L10n.tr("网页链接、标题、选区和关联元素")
+        case .lark, .wechat: L10n.tr("对话类型｜对话标题")
         }
     }
     var iconResourceName: String {
@@ -84,13 +84,13 @@ enum PasteoryThemeColor: String, CaseIterable, Codable, Identifiable {
 
     var title: String {
         switch self {
-        case .blueViolet: "蓝紫"
-        case .blue: "蓝色"
-        case .purple: "紫色"
-        case .pink: "粉色"
-        case .orange: "橙色"
-        case .green: "绿色"
-        case .graphite: "石墨"
+        case .blueViolet: L10n.tr("蓝紫")
+        case .blue: L10n.tr("蓝色")
+        case .purple: L10n.tr("紫色")
+        case .pink: L10n.tr("粉色")
+        case .orange: L10n.tr("橙色")
+        case .green: L10n.tr("绿色")
+        case .graphite: L10n.tr("石墨")
         }
     }
 }
@@ -119,25 +119,25 @@ enum QuickPanelAction: String, CaseIterable, Codable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .openSelected: "打开所选内容"
-        case .toggleSearch: "搜索"
-        case .directPaste: "直接粘贴"
-        case .copyOnly: "只复制"
-        case .plainTextPaste: "纯文本粘贴"
-        case .plainTextCopy: "纯文本复制"
-        case .quickActions: "快捷操作"
-        case .toggleFavorite: "收藏／取消收藏"
-        case .togglePinned: "置顶／取消置顶"
-        case .editMetadata: "编辑信息"
-        case .setCollection: "设置分组"
-        case .createCollection: "新建分组"
-        case .aggregateContent: "聚合内容"
-        case .expandAggregation: "展开聚合"
-        case .collapseAggregation: "收起聚合"
-        case .moveToTrash: "移到废纸篓"
-        case .openLibrary: "打开设置中的资料库"
-        case .openSettings: "打开设置"
-        case .closePanel: "关闭快捷面板"
+        case .openSelected: L10n.tr("打开所选内容")
+        case .toggleSearch: L10n.tr("搜索")
+        case .directPaste: L10n.tr("直接粘贴")
+        case .copyOnly: L10n.tr("只复制")
+        case .plainTextPaste: L10n.tr("纯文本粘贴")
+        case .plainTextCopy: L10n.tr("纯文本复制")
+        case .quickActions: L10n.tr("快捷操作")
+        case .toggleFavorite: L10n.tr("收藏／取消收藏")
+        case .togglePinned: L10n.tr("置顶／取消置顶")
+        case .editMetadata: L10n.tr("编辑信息")
+        case .setCollection: L10n.tr("设置分组")
+        case .createCollection: L10n.tr("新建分组")
+        case .aggregateContent: L10n.tr("聚合内容")
+        case .expandAggregation: L10n.tr("展开聚合")
+        case .collapseAggregation: L10n.tr("收起聚合")
+        case .moveToTrash: L10n.tr("移到废纸篓")
+        case .openLibrary: L10n.tr("打开设置中的资料库")
+        case .openSettings: L10n.tr("打开设置")
+        case .closePanel: L10n.tr("关闭快捷面板")
         }
     }
 }
@@ -154,9 +154,9 @@ enum FileCommandExecutionStatus: Equatable {
 
     var displayName: String {
         switch self {
-        case .running: "执行中"
-        case .succeeded: "已完成"
-        case .failed(let code): "失败（退出码 \(code)）"
+        case .running: L10n.tr("执行中")
+        case .succeeded: L10n.tr("已完成")
+        case .failed(let code): L10n.tr("失败（退出码 \(code)）")
         }
     }
 }
@@ -177,8 +177,8 @@ enum QuickTabLayout: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .horizontal: "搜索框下方横排"
-        case .sidebar: "左侧竖排"
+        case .horizontal: L10n.tr("搜索框下方横排")
+        case .sidebar: L10n.tr("左侧竖排")
         }
     }
 
@@ -204,6 +204,7 @@ final class AppSettings: ObservableObject {
         static let automaticWebCacheCleanup = "automaticWebCacheCleanup"
         static let lastWebCacheCleanup = "lastWebCacheCleanup"
         static let themeColor = "themeColor"
+        static let appLanguage = "appLanguage"
         static let quickTabLayout = "quickTabLayout"
         static let browserBundleIdentifier = "browserBundleIdentifier"
         static let codeEditorBundleIdentifier = "codeEditorBundleIdentifier"
@@ -228,6 +229,12 @@ final class AppSettings: ObservableObject {
     }
     @Published var quickTabLayout: QuickTabLayout {
         didSet { defaults.set(quickTabLayout.rawValue, forKey: Key.quickTabLayout) }
+    }
+    @Published var appLanguage: AppLanguage {
+        didSet {
+            defaults.set(appLanguage.rawValue, forKey: Key.appLanguage)
+            defaults.set([appLanguage.rawValue], forKey: "AppleLanguages")
+        }
     }
     @Published var themeColor: PasteoryThemeColor {
         didSet { defaults.set(themeColor.rawValue, forKey: Key.themeColor) }
@@ -273,6 +280,7 @@ final class AppSettings: ObservableObject {
     init(defaults: UserDefaults = .standard, logsDirectory: URL? = nil) {
         self.defaults = defaults
         fileCommandLogsDirectory = logsDirectory?.appendingPathComponent("FileCommands", isDirectory: true)
+        appLanguage = AppLanguage(rawValue: defaults.string(forKey: Key.appLanguage) ?? "") ?? .english
         completedOnboarding = defaults.bool(forKey: Key.completedOnboarding)
         if defaults.integer(forKey: Key.monitoringDefaultVersion) < 2 {
             monitoringEnabled = true
@@ -532,7 +540,7 @@ final class AppSettings: ObservableObject {
                     "\(Self.logTimestamp.string(from: Date()))-\(fileType)-\(UUID().uuidString.prefix(8)).log"
                 )
             )
-            let header = "Pasteory 文件命令\n类型：\(fileType)\nShell：\(shell.displayName)\n开始：\(execution.startedAt.formatted(.iso8601))\n\n"
+            let header = L10n.tr("Pasteory 文件命令\n类型：\(fileType)\nShell：\(shell.displayName)\n开始：\(execution.startedAt.formatted(.iso8601))\n\n")
             try Data(header.utf8).write(to: execution.logURL, options: .atomic)
             let handle = try FileHandle(forWritingTo: execution.logURL)
             try handle.seekToEnd()
@@ -562,42 +570,42 @@ final class AppSettings: ObservableObject {
 
     func globalShortcutConflict(keyCode: UInt32, modifiers: UInt32) -> String? {
         guard let action = quickAction(keyCode: keyCode, modifiers: modifiers) else { return nil }
-        return "与“\(action.title)”的快捷键重复"
+        return L10n.tr("与“\(action.title)”的快捷键重复")
     }
 
     private func shortcutValidationMessage(_ shortcut: PasteoryShortcut, for action: QuickPanelAction) -> String? {
         guard Self.menuRenderableKeyCodes.contains(shortcut.keyCode) else {
-            return "该按键无法在 macOS 右键菜单中显示，请换一个按键"
+            return L10n.tr("该按键无法在 macOS 右键菜单中显示，请换一个按键")
         }
         if globalShortcutEnabled,
            shortcut.keyCode == shortcutKeyCode, shortcut.modifiers == shortcutModifiers {
-            return "与“打开快捷面板”的全局快捷键重复"
+            return L10n.tr("与“打开快捷面板”的全局快捷键重复")
         }
-        if shortcut.keyCode == 53 { return "Esc 固定用于关闭快捷面板" }
-        if [123, 124, 115].contains(shortcut.keyCode) { return "左右方向键和 Home 固定用于列表导航" }
+        if shortcut.keyCode == 53 { return L10n.tr("Esc 固定用于关闭快捷面板") }
+        if [123, 124, 115].contains(shortcut.keyCode) { return L10n.tr("左右方向键和 Home 固定用于列表导航") }
         if [125, 126].contains(shortcut.keyCode),
            ![QuickPanelAction.expandAggregation, .collapseAggregation].contains(action) {
-            return "上下方向键只用于聚合展开或收起"
+            return L10n.tr("上下方向键只用于聚合展开或收起")
         }
         let command = UInt32(cmdKey)
         if shortcut.modifiers == command,
            [4, 12, 46, 48, 49, 50].contains(shortcut.keyCode) {
-            return "该组合由 macOS 保留，请换一个快捷键"
+            return L10n.tr("该组合由 macOS 保留，请换一个快捷键")
         }
         if shortcut.modifiers == (command | UInt32(optionKey)), shortcut.keyCode == 53 {
-            return "Command-Option-Esc 由 macOS 保留"
+            return L10n.tr("Command-Option-Esc 由 macOS 保留")
         }
         if shortcut.modifiers & command != 0,
            [18, 19, 20, 21, 23, 22, 26, 28, 25].contains(shortcut.keyCode) {
-            return "Command-1～9 固定用于快速粘贴对应项目"
+            return L10n.tr("Command-1～9 固定用于快速粘贴对应项目")
         }
         if shortcut.modifiers == 0, action != .openSelected, ![36, 76].contains(shortcut.keyCode) {
-            return "除“打开所选内容”和 Return 操作外，请至少加入一个修饰键"
+            return L10n.tr("除“打开所选内容”和 Return 操作外，请至少加入一个修饰键")
         }
         if let duplicate = QuickPanelAction.allCases.first(where: {
             $0 != action && quickShortcut(for: $0) == shortcut
         }) {
-            return "与“\(duplicate.title)”的快捷键重复"
+            return L10n.tr("与“\(duplicate.title)”的快捷键重复")
         }
         return nil
     }

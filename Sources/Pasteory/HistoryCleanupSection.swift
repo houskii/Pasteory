@@ -21,27 +21,27 @@ struct HistoryCleanupSection: View {
     }
 
     var body: some View {
-        Section("清理历史") {
+        Section(L10n.tr("清理历史")) {
             HStack(spacing: 8) {
-                Text("最后使用早于")
-                TextField("天数", text: $days)
+                Text(L10n.tr("最后使用早于"))
+                TextField(L10n.tr("天数"), text: $days)
                     .labelsHidden()
                     .frame(width: 58)
-                    .accessibilityLabel("最后使用早于多少天")
-                Text("天前，单条大小大于")
-                TextField("大小", text: $sizeMB)
+                    .accessibilityLabel(L10n.tr("最后使用早于多少天"))
+                Text(L10n.tr("天前，单条大小大于"))
+                TextField(L10n.tr("大小"), text: $sizeMB)
                     .labelsHidden()
                     .frame(width: 65)
-                    .accessibilityLabel("单条大小大于多少 MB")
+                    .accessibilityLabel(L10n.tr("单条大小大于多少 MB"))
                 Text("MB")
             }
             .disabled(previewing || state.isBusy)
-            Text("两项条件都要满足。按最后复制或粘贴时间计算，跳过收藏、置顶、分组和聚合中的内容。")
+            Text(L10n.tr("两项条件都要满足。按最后复制或粘贴时间计算，跳过收藏、置顶、分组和聚合中的内容。"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack {
                 Spacer()
-                Button(previewing ? "正在预览…" : "预览清理…", action: loadPreview)
+                Button(previewing ? L10n.tr("正在预览…") : L10n.tr("预览清理…"), action: loadPreview)
                     .disabled(previewing || state.isBusy || criteria == nil)
             }
             if let message { Text(message).font(.caption) }
@@ -74,8 +74,8 @@ struct HistoryCleanupSection: View {
             do {
                 let result = try await state.cleanHistory(preview)
                 let released = FileSizeFormatter.string(forByteCount: result.freedBytes)
-                let remaining = result.failedFileCount == 0 ? "" : "；另有 \(result.failedFileCount) 个文件未能移除"
-                message = "已删除 \(result.deletedCount) 条历史，释放约 \(released)\(remaining)"
+                let remaining = result.failedFileCount == 0 ? "" : L10n.tr("；另有 \(result.failedFileCount) 个文件未能移除")
+                message = L10n.tr("已删除 \(result.deletedCount) 条历史，释放约 \(released)\(remaining)")
                 await state.refreshStorageAnalytics(period: period)
             } catch { message = error.localizedDescription }
         }
@@ -83,18 +83,18 @@ struct HistoryCleanupSection: View {
 
     private func previewSheet(_ preview: HistoryCleanupPreview) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("清理历史预览").font(.title2.bold())
+            Text(L10n.tr("清理历史预览")).font(.title2.bold())
             if preview.entries.isEmpty {
-                Text("没有符合条件的历史记录。")
+                Text(L10n.tr("没有符合条件的历史记录。"))
                     .foregroundStyle(.secondary)
             } else {
                 let size = FileSizeFormatter.string(forByteCount: preview.reclaimableBytes)
-                Text("找到 \(preview.entries.count) 条记录，预计释放 \(size) 的附件和归档空间。")
+                Text(L10n.tr("找到 \(preview.entries.count) 条记录，预计释放 \(size) 的附件和归档空间。"))
                 List(preview.entries) { entry in
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(entry.title).lineLimit(1)
-                            Text(entry.lastUsedAt.formatted(date: .abbreviated, time: .shortened))
+                            Text(entry.lastUsedAt.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(L10n.language.locale)))
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
@@ -103,16 +103,16 @@ struct HistoryCleanupSection: View {
                     }
                 }
                 .frame(height: 240)
-                Text("这些历史将永久删除。其他记录仍在使用的附件会保留，文件引用指向的原文件也会保留。")
+                Text(L10n.tr("这些历史将永久删除。其他记录仍在使用的附件会保留，文件引用指向的原文件也会保留。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             HStack {
                 Spacer()
-                Button(preview.entries.isEmpty ? "关闭" : "取消") { showingPreview = false }
+                Button(preview.entries.isEmpty ? L10n.tr("关闭") : L10n.tr("取消")) { showingPreview = false }
                     .keyboardShortcut(.cancelAction)
                 if !preview.entries.isEmpty {
-                    Button("永久删除 \(preview.entries.count) 条记录", role: .destructive) { deleteHistory(preview) }
+                    Button(L10n.tr("永久删除 \(preview.entries.count) 条记录"), role: .destructive) { deleteHistory(preview) }
                         .disabled(state.isBusy)
                 }
             }

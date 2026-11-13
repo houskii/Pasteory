@@ -17,7 +17,7 @@ capture() {
   data_root=$(mktemp -d "${TMPDIR:-/tmp}/pasteory-update-ui.XXXXXX")
   local screenshot="$OUTPUT_DIR/$name.png"
   "$APP_EXECUTABLE" --debug-data-root "$data_root" --debug-ui-qa \
-    --debug-disable-monitor --debug-disable-hotkey --debug-seed \
+    --debug-disable-monitor --debug-disable-hotkey --debug-readme-seed \
     --debug-snapshot-path "$screenshot" "$@" > "$OUTPUT_DIR/$name.log" 2>&1 &
   local app_pid=$!
   local succeeded=false
@@ -35,12 +35,19 @@ capture() {
   fi
 }
 
+capture quick-panel-en --debug-language=en --debug-show-quick-window
+capture quick-panel-zh --debug-language=zh-Hans --debug-show-quick-window
+capture library-en --debug-language=en --debug-open-library --debug-settings-wide
+capture library-zh --debug-language=zh-Hans --debug-open-library --debug-settings-wide
+capture settings-language-en --debug-language=en --debug-open-settings
+capture settings-language-zh --debug-language=zh-Hans --debug-open-settings
 capture update-amber --debug-show-quick-window --debug-update-available --debug-theme=blue
 capture update-cyan-narrow --debug-show-quick-window --debug-update-available --debug-theme=orange --debug-panel-narrow
 capture update-cyan-dark --debug-show-quick-window --debug-update-available --debug-theme=orange --debug-dark
 capture settings-library-wide --debug-open-library --debug-settings-wide
 capture settings-library-narrow --debug-open-library --debug-settings-narrow
 capture settings-about --debug-open-settings --debug-settings-about
+capture update-confirmation-zh --debug-language=zh-Hans --debug-update-available --debug-open-update
 capture update-confirmation --debug-update-available --debug-open-update
 
 # A runner's small virtual display must not silently turn both cases into the same layout.

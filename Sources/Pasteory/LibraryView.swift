@@ -44,7 +44,7 @@ struct LibraryView: View {
             }
         }
         .frame(minWidth: embedded ? 663 : 900, maxWidth: .infinity, minHeight: 600, maxHeight: .infinity)
-        .pasteoryTheme(state.settings.themeColor)
+        .pasteoryTheme(state.settings.themeColor, language: state.settings.appLanguage)
         .sheet(isPresented: $showingCompactInspector, onDismiss: {
             if let draft = pendingAggregationDraft {
                 pendingAggregationDraft = nil
@@ -52,12 +52,12 @@ struct LibraryView: View {
             }
         }) {
             VStack(spacing: 0) {
-                HStack { Spacer(); Button("完成") { showingCompactInspector = false } }
+                HStack { Spacer(); Button(L10n.tr("完成")) { showingCompactInspector = false } }
                     .padding(12)
                 inspector
             }
             .frame(width: 380, height: 620)
-            .pasteoryTheme(state.settings.themeColor)
+            .pasteoryTheme(state.settings.themeColor, language: state.settings.appLanguage)
         }
         .overlay(alignment: .bottom) {
             if let message = state.statusMessage {
@@ -95,7 +95,7 @@ struct LibraryView: View {
                     .frame(width: 40, height: 40)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Pasteory").font(.system(size: 15, weight: .semibold))
-                    Text("资料库").font(.caption).foregroundStyle(.secondary)
+                    Text(L10n.tr("资料库")).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
             }
@@ -106,27 +106,27 @@ struct LibraryView: View {
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 4) {
-                    LibrarySectionLabel(title: "资料库")
-                    sidebarRow("全部内容", symbol: "square.stack", filter: .all)
-                    sidebarRow("收藏", symbol: "star", filter: .favorite)
-                    sidebarRow("最近使用", symbol: "clock", filter: .recent)
-                    sidebarRow("归档", symbol: "archivebox", filter: .archived)
-                    sidebarRow("废纸篓", symbol: "trash", filter: .trash)
+                    LibrarySectionLabel(title: L10n.tr("资料库"))
+                    sidebarRow(L10n.tr("全部内容"), symbol: "square.stack", filter: .all)
+                    sidebarRow(L10n.tr("收藏"), symbol: "star", filter: .favorite)
+                    sidebarRow(L10n.tr("最近使用"), symbol: "clock", filter: .recent)
+                    sidebarRow(L10n.tr("归档"), symbol: "archivebox", filter: .archived)
+                    sidebarRow(L10n.tr("废纸篓"), symbol: "trash", filter: .trash)
 
-                    LibrarySectionLabel(title: "内容类型").padding(.top, 12)
+                    LibrarySectionLabel(title: L10n.tr("内容类型")).padding(.top, 12)
                     ForEach(ClipKind.allCases, id: \.self) { kind in sidebarRow(kind.displayName, symbol: kind.symbolName, filter: .kind(kind)) }
 
-                    LibrarySectionLabel(title: "普通分组").padding(.top, 12)
+                    LibrarySectionLabel(title: L10n.tr("普通分组")).padding(.top, 12)
                     ForEach(state.collections.filter { $0.kind == .normal }) { collection in
                         collectionRow(collection)
                     }
-                    addCollectionButton("新建分组", symbol: "folder.badge.plus") { showNewNormalCollection = true }
+                    addCollectionButton(L10n.tr("新建分组"), symbol: "folder.badge.plus") { showNewNormalCollection = true }
 
-                    LibrarySectionLabel(title: "智能分组").padding(.top, 12)
+                    LibrarySectionLabel(title: L10n.tr("智能分组")).padding(.top, 12)
                     ForEach(state.collections.filter { $0.kind == .smart }) { collection in
                         collectionRow(collection)
                     }
-                    addCollectionButton("新建智能分组", symbol: "sparkles") {
+                    addCollectionButton(L10n.tr("新建智能分组"), symbol: "sparkles") {
                         editingSmartCollection = ClipCollection(name: "", kind: .smart, sortOrder: state.collections.count, ruleSet: SmartRuleSet())
                     }
                 }
@@ -138,14 +138,14 @@ struct LibraryView: View {
             HStack {
                 if !embedded {
                 Button(action: onOpenSettings) {
-                    Label("设置", systemImage: "gearshape")
+                    Label(L10n.tr("设置"), systemImage: "gearshape")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
                 }
                 Spacer()
-                Text("\(state.clips.count) 条")
+                Text(L10n.tr("\(state.clips.count) 条"))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.tertiary)
             }
@@ -198,7 +198,7 @@ struct LibraryView: View {
                 Image(systemName: "line.3.horizontal")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(selected ? Color.white.opacity(0.75) : Color.secondary.opacity(0.55))
-                    .help("拖动调整顺序")
+                    .help(L10n.tr("拖动调整顺序"))
             }
             .font(.system(size: 13, weight: selected ? .semibold : .regular))
             .foregroundStyle(selected ? Color.white : Color.primary)
@@ -220,12 +220,12 @@ struct LibraryView: View {
         }
         .contextMenu {
             if collection.kind == .smart {
-                Button("编辑名称和规则…") { editingSmartCollection = collection }
+                Button(L10n.tr("编辑名称和规则…")) { editingSmartCollection = collection }
             } else {
-                Button("重命名…") { editingNormalCollection = collection }
+                Button(L10n.tr("重命名…")) { editingNormalCollection = collection }
             }
             Divider()
-            Button("删除分组", role: .destructive) { confirmDeleteCollection(collection) }
+            Button(L10n.tr("删除分组"), role: .destructive) { confirmDeleteCollection(collection) }
         }
     }
 
@@ -247,9 +247,9 @@ struct LibraryView: View {
 
     private var aggregationShortcutHelp: String {
         guard let shortcut = state.settings.quickShortcut(for: .aggregateContent) else {
-            return "聚合当前搜索结果"
+            return L10n.tr("聚合当前搜索结果")
         }
-        return "聚合当前搜索结果（\(ShortcutFormatter.display(keyCode: shortcut.keyCode, modifiers: shortcut.modifiers))）"
+        return L10n.tr("聚合当前搜索结果（\(ShortcutFormatter.display(keyCode: shortcut.keyCode, modifiers: shortcut.modifiers))）")
     }
 
     private var content: some View {
@@ -267,8 +267,8 @@ struct LibraryView: View {
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
-                        .help("查看详情")
-                        .accessibilityLabel("查看详情")
+                        .help(L10n.tr("查看详情"))
+                        .accessibilityLabel(L10n.tr("查看详情"))
                         .disabled(state.selectedClip == nil && state.selectedAggregation == nil)
                     }
                     QuickActionsToolbarMenu(state: state, clip: state.selectedClip)
@@ -279,7 +279,7 @@ struct LibraryView: View {
                         Button {
                             Task { state.libraryAggregationDraft = await state.makeLibraryAggregationDraft() }
                         } label: {
-                            Label("聚合结果", systemImage: "square.stack.3d.up")
+                            Label(L10n.tr("聚合结果"), systemImage: "square.stack.3d.up")
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
@@ -287,7 +287,7 @@ struct LibraryView: View {
                         .help(aggregationShortcutHelp)
                         .quickActionShortcut(state.settings.quickShortcut(for: .aggregateContent))
                     }
-                    Text("\(state.libraryTopLevelResultCount) 个结果")
+                    Text(L10n.tr("\(state.libraryTopLevelResultCount) 个结果"))
                         .font(.caption.weight(.medium).monospacedDigit())
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 10)
@@ -297,7 +297,7 @@ struct LibraryView: View {
 
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("搜索内容、备注、分组或来源", text: $state.libraryQuery)
+                    TextField(L10n.tr("搜索内容、备注、分组或来源"), text: $state.libraryQuery)
                         .textFieldStyle(.plain)
                         .onChange(of: state.libraryQuery) { _, _ in Task { await state.refreshLibrary(debounce: true) } }
                     if !state.libraryQuery.isEmpty {
@@ -385,27 +385,27 @@ struct LibraryView: View {
 
     private var libraryTitle: String {
         switch state.libraryFilter {
-        case .all: "全部内容"
-        case .favorite: "收藏"
-        case .recent: "最近使用"
-        case .archived: "归档"
-        case .trash: "废纸篓"
+        case .all: L10n.tr("全部内容")
+        case .favorite: L10n.tr("收藏")
+        case .recent: L10n.tr("最近使用")
+        case .archived: L10n.tr("归档")
+        case .trash: L10n.tr("废纸篓")
         case .kind(let kind): kind.displayName
-        case .collection(let id): state.collections.first(where: { $0.id == id })?.name ?? "分组"
+        case .collection(let id): state.collections.first(where: { $0.id == id })?.name ?? L10n.tr("分组")
         }
     }
 
     private var librarySubtitle: String {
-        if !state.libraryQuery.isEmpty { return "正在当前范围内搜索“\(String(state.libraryQuery.prefix(36)))”" }
+        if !state.libraryQuery.isEmpty { return L10n.tr("正在当前范围内搜索“\(String(state.libraryQuery.prefix(36)))”") }
         return switch state.libraryFilter {
-        case .all: "保存过的文字、图片、链接、代码与文件"
-        case .favorite: "你标记为收藏的内容"
-        case .recent: "最近复制或使用过的内容"
-        case .archived: "已从常用列表归档的内容"
-        case .trash: "删除的内容会在这里保留 30 天"
-        case .kind(let kind): "资料库中的\(kind.displayName)内容"
+        case .all: L10n.tr("保存过的文字、图片、链接、代码与文件")
+        case .favorite: L10n.tr("你标记为收藏的内容")
+        case .recent: L10n.tr("最近复制或使用过的内容")
+        case .archived: L10n.tr("已从常用列表归档的内容")
+        case .trash: L10n.tr("删除的内容会在这里保留 30 天")
+        case .kind(let kind): L10n.tr("资料库中的\(kind.displayName)内容")
         case .collection(let id):
-            state.collections.first(where: { $0.id == id })?.kind == .smart ? "按规则自动收集的内容" : "整理到这个分组的内容"
+            state.collections.first(where: { $0.id == id })?.kind == .smart ? L10n.tr("按规则自动收集的内容") : L10n.tr("整理到这个分组的内容")
         }
     }
 
@@ -433,7 +433,7 @@ struct LibraryView: View {
             VStack(spacing: 0) {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("内容详情").font(.system(size: 17, weight: .semibold))
+                        Text(L10n.tr("内容详情")).font(.system(size: 17, weight: .semibold))
                         Text(clip.codeMetadata?.displayName ?? clip.primaryKind.displayName)
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -452,26 +452,26 @@ struct LibraryView: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
-                        inspectorSection("预览") {
+                        inspectorSection(L10n.tr("预览")) {
                             RepresentationPreview(clip: clip, attachments: state.attachments)
                                 .frame(minHeight: 150, maxHeight: 240)
                                 .padding(10)
                                 .background(LibraryTheme.inputBackground, in: RoundedRectangle(cornerRadius: 10))
                         }
 
-                        inspectorSection("抓取来源") {
+                        inspectorSection(L10n.tr("抓取来源")) {
                             captureSourceDetails(clip)
                         }
 
                         if clip.primaryKind == .link {
-                            inspectorSection("链接解析") {
+                            inspectorSection(L10n.tr("链接解析")) {
                                 linkResolutionDetails
                             }
                         }
 
-                        inspectorSection("编辑") {
-                            inspectorFieldLabel("标题")
-                            TextField("添加一个便于查找的标题", text: Binding(
+                        inspectorSection(L10n.tr("编辑")) {
+                            inspectorFieldLabel(L10n.tr("标题"))
+                            TextField(L10n.tr("添加一个便于查找的标题"), text: Binding(
                                 get: { state.selectedClip?.title ?? "" },
                                 set: { value in state.mutateSelected { $0.title = String(value.prefix(120)) } }
                             ))
@@ -481,7 +481,7 @@ struct LibraryView: View {
                             .background(LibraryTheme.inputBackground, in: RoundedRectangle(cornerRadius: 8))
 
                             if clip.source.bundleIdentifier == PasteoryRuntimeIdentity.current.bundleIdentifier {
-                                inspectorFieldLabel("正文").padding(.top, 4)
+                                inspectorFieldLabel(L10n.tr("正文")).padding(.top, 4)
                                 TextEditor(text: Binding(
                                     get: { state.selectedClip?.previewText ?? "" },
                                     set: { state.updateManualText($0) }
@@ -493,7 +493,7 @@ struct LibraryView: View {
                                 .background(LibraryTheme.inputBackground, in: RoundedRectangle(cornerRadius: 8))
                             }
 
-                            inspectorFieldLabel("备注").padding(.top, 4)
+                            inspectorFieldLabel(L10n.tr("备注")).padding(.top, 4)
                             TextEditor(text: Binding(
                                 get: { state.selectedClip?.note ?? "" },
                                 set: { value in state.mutateSelected { $0.note = String(value.prefix(4_000)) } }
@@ -504,12 +504,12 @@ struct LibraryView: View {
                             .frame(minHeight: 76)
                             .background(LibraryTheme.inputBackground, in: RoundedRectangle(cornerRadius: 8))
 
-                            inspectorFieldLabel("优先级").padding(.top, 4)
-                            Picker("优先级", selection: Binding(
+                            inspectorFieldLabel(L10n.tr("优先级")).padding(.top, 4)
+                            Picker(L10n.tr("优先级"), selection: Binding(
                                 get: { state.selectedClip?.priority ?? 0 },
                                 set: { value in state.mutateSelected { $0.priority = value } }
                             )) {
-                                Text("无").tag(0)
+                                Text(L10n.tr("无")).tag(0)
                                 Text("P1").tag(1)
                                 Text("P2").tag(2)
                                 Text("P3").tag(3)
@@ -519,12 +519,12 @@ struct LibraryView: View {
 
                             HStack(spacing: 8) {
                                 inspectorToggle(
-                                    title: "收藏",
+                                    title: L10n.tr("收藏"),
                                     symbol: clip.isFavorite ? "star.fill" : "star",
                                     active: clip.isFavorite
                                 ) { state.mutateSelected { $0.isFavorite.toggle() } }
                                 inspectorToggle(
-                                    title: "置顶",
+                                    title: L10n.tr("置顶"),
                                     symbol: clip.isPinned ? "pin.fill" : "pin",
                                     active: clip.isPinned
                                 ) { state.mutateSelected { $0.isPinned.toggle() } }
@@ -533,7 +533,7 @@ struct LibraryView: View {
                         }
 
                         if !state.collections.filter({ $0.kind == .normal }).isEmpty {
-                            inspectorSection("分组") {
+                            inspectorSection(L10n.tr("分组")) {
                                 ForEach(state.collections.filter { $0.kind == .normal }) { collection in
                                     let selected = state.selectedClip?.collectionIDs.contains(collection.id) ?? false
                                     Button {
@@ -556,18 +556,18 @@ struct LibraryView: View {
                             }
                         }
 
-                        inspectorSection("信息") { metadata(clip) }
+                        inspectorSection(L10n.tr("信息")) { metadata(clip) }
 
                         HStack(spacing: 8) {
-                            Button("粘贴") { onPaste(clip, false, true) }
+                            Button(L10n.tr("粘贴")) { onPaste(clip, false, true) }
                                 .buttonStyle(.borderedProminent)
                                 .keyboardShortcut(.return, modifiers: [])
-                            Button("复制") { onPaste(clip, false, false) }.buttonStyle(.bordered)
+                            Button(L10n.tr("复制")) { onPaste(clip, false, false) }.buttonStyle(.bordered)
                             Spacer()
                             if clip.deletedAt != nil {
-                                Button("恢复") { state.restore(clip) }.buttonStyle(.bordered)
+                                Button(L10n.tr("恢复")) { state.restore(clip) }.buttonStyle(.bordered)
                             } else {
-                                Button("删除", role: .destructive) { state.moveToTrash(clip) }.buttonStyle(.bordered)
+                                Button(L10n.tr("删除"), role: .destructive) { state.moveToTrash(clip) }.buttonStyle(.bordered)
                             }
                         }
                         .controlSize(.small)
@@ -622,61 +622,61 @@ struct LibraryView: View {
 
     private func metadata(_ clip: Clip) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            metadataRow("类型", value: clip.primaryKind.displayName)
+            metadataRow(L10n.tr("类型"), value: clip.primaryKind.displayName)
             if let code = clip.codeMetadata {
-                metadataRow("代码类型", value: code.subtype.displayName)
-                if let language = code.language { metadataRow("语言", value: language.displayName) }
-                if let lineCount = code.totalLineCount { metadataRow("代码行数", value: "\(lineCount) 行") }
-                metadataRow("识别置信度", value: "\(Int((code.confidence * 100).rounded()))%")
+                metadataRow(L10n.tr("代码类型"), value: code.subtype.displayName)
+                if let language = code.language { metadataRow(L10n.tr("语言"), value: language.displayName) }
+                if let lineCount = code.totalLineCount { metadataRow(L10n.tr("代码行数"), value: L10n.tr("\(lineCount) 行")) }
+                metadataRow(L10n.tr("识别置信度"), value: "\(Int((code.confidence * 100).rounded()))%")
                 if code.wasTruncatedForClassification {
-                    metadataRow("分析范围", value: "前 \(code.analyzedCharacterCount) 个字符")
+                    metadataRow(L10n.tr("分析范围"), value: L10n.tr("前 \(code.analyzedCharacterCount) 个字符"))
                 }
             }
-            metadataRow("来源", value: clip.source.appName)
-            metadataRow("来源可信度", value: clip.source.confidence.displayName)
-            metadataRow("创建时间", value: clip.createdAt.formatted(date: .abbreviated, time: .standard))
-            metadataRow("复制次数", value: "\(clip.copyCount) 次")
-            metadataRow("粘贴次数", value: "\(clip.recordedPasteCount) 次")
-            metadataRow("大小", value: ByteCountFormatter.string(fromByteCount: Int64(clip.byteSize), countStyle: .file))
-            metadataRow("格式", value: Array(Set(clip.items.flatMap { $0.representations.map(\.uti) })).sorted().joined(separator: "、"))
+            metadataRow(L10n.tr("来源"), value: clip.source.appName)
+            metadataRow(L10n.tr("来源可信度"), value: clip.source.confidence.displayName)
+            metadataRow(L10n.tr("创建时间"), value: clip.createdAt.formatted(Date.FormatStyle(date: .abbreviated, time: .standard).locale(L10n.language.locale)))
+            metadataRow(L10n.tr("复制次数"), value: L10n.tr("\(clip.copyCount) 次"))
+            metadataRow(L10n.tr("粘贴次数"), value: L10n.tr("\(clip.recordedPasteCount) 次"))
+            metadataRow(L10n.tr("大小"), value: ByteCountFormatter.string(fromByteCount: Int64(clip.byteSize), countStyle: .file))
+            metadataRow(L10n.tr("格式"), value: Array(Set(clip.items.flatMap { $0.representations.map(\.uti) })).sorted().joined(separator: "、"))
         }
     }
 
     @ViewBuilder
     private func captureSourceDetails(_ clip: Clip) -> some View {
         if inspectorCaptureEvents.isEmpty {
-            metadataRow("应用", value: clip.source.appName)
-            metadataRow("可信度", value: clip.source.confidence.displayName)
-            Text("这条内容只保存了来源应用，没有单独的复制上下文。")
+            metadataRow(L10n.tr("应用"), value: clip.source.appName)
+            metadataRow(L10n.tr("可信度"), value: clip.source.confidence.displayName)
+            Text(L10n.tr("这条内容只保存了来源应用，没有单独的复制上下文。"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         } else {
             ForEach(Array(inspectorCaptureEvents.prefix(5).enumerated()), id: \.element.id) { index, event in
                 if index > 0 { Divider() }
                 VStack(alignment: .leading, spacing: 6) {
-                    metadataRow("应用", value: event.source.appName)
-                    metadataRow("采集时间", value: event.capturedAt.formatted(date: .abbreviated, time: .standard))
+                    metadataRow(L10n.tr("应用"), value: event.source.appName)
+                    metadataRow(L10n.tr("采集时间"), value: event.capturedAt.formatted(Date.FormatStyle(date: .abbreviated, time: .standard).locale(L10n.language.locale)))
                     if let context = event.context {
-                        metadataRow("摘要", value: context.summary)
-                        sourceContextRow("网页链接", value: context.payload["url"])
-                        sourceContextRow("页面标题", value: context.payload["pageTitle"])
-                        sourceContextRow("对话类型", value: context.payload["conversationTypeName"])
-                        sourceContextRow("对话标题", value: context.payload["conversationName"])
-                        sourceContextRow("仓库", value: context.payload["repository"])
-                        sourceContextRow("分支", value: context.payload["branch"])
-                        sourceContextRow("目标分支", value: context.payload["targetBranch"])
-                        sourceContextRow("选中内容", value: context.payload["selectedText"])
-                        sourceContextRow("关联文字", value: context.payload["relatedText"])
-                        sourceContextRow("元素", value: context.payload["elementSelector"])
+                        metadataRow(L10n.tr("摘要"), value: context.summary)
+                        sourceContextRow(L10n.tr("网页链接"), value: context.payload["url"])
+                        sourceContextRow(L10n.tr("页面标题"), value: context.payload["pageTitle"])
+                        sourceContextRow(L10n.tr("对话类型"), value: context.payload["conversationTypeName"])
+                        sourceContextRow(L10n.tr("对话标题"), value: context.payload["conversationName"])
+                        sourceContextRow(L10n.tr("仓库"), value: context.payload["repository"])
+                        sourceContextRow(L10n.tr("分支"), value: context.payload["branch"])
+                        sourceContextRow(L10n.tr("目标分支"), value: context.payload["targetBranch"])
+                        sourceContextRow(L10n.tr("选中内容"), value: context.payload["selectedText"])
+                        sourceContextRow(L10n.tr("关联文字"), value: context.payload["relatedText"])
+                        sourceContextRow(L10n.tr("元素"), value: context.payload["elementSelector"])
                     } else {
-                        Text("本次复制没有获取到更详细的上下文。")
+                        Text(L10n.tr("本次复制没有获取到更详细的上下文。"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
             }
             if inspectorCaptureEvents.count > 5 {
-                Text("另有 \(inspectorCaptureEvents.count - 5) 次复制记录")
+                Text(L10n.tr("另有 \(inspectorCaptureEvents.count - 5) 次复制记录"))
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -686,22 +686,22 @@ struct LibraryView: View {
     @ViewBuilder
     private var linkResolutionDetails: some View {
         if let resource = inspectorLinkResource {
-            metadataRow("状态", value: resource.requestState.displayName)
+            metadataRow(L10n.tr("状态"), value: resource.requestState.displayName)
             if let title = resource.resolvedTitle {
-                metadataRow("解析标题", value: title)
+                metadataRow(L10n.tr("解析标题"), value: title)
             } else if let candidate = resource.candidateTitle {
-                metadataRow("候选标题", value: candidate)
+                metadataRow(L10n.tr("候选标题"), value: candidate)
             }
-            metadataRow("兜底标题", value: resource.fallbackTitle)
-            metadataRow("标题质量", value: resource.titleQuality.displayName)
-            metadataRow("解析来源", value: resource.resolutionSource?.displayName ?? "尚未解析")
-            metadataRow("链接", value: URLFallbackEngine.redactedDisplayURL(resource.normalizedURL))
-            metadataRow("尝试次数", value: "\(resource.attemptCount) 次，失败 \(resource.failedAttemptCount) 次")
+            metadataRow(L10n.tr("兜底标题"), value: resource.fallbackTitle)
+            metadataRow(L10n.tr("标题质量"), value: resource.titleQuality.displayName)
+            metadataRow(L10n.tr("解析来源"), value: resource.resolutionSource?.displayName ?? L10n.tr("尚未解析"))
+            metadataRow(L10n.tr("链接"), value: URLFallbackEngine.redactedDisplayURL(resource.normalizedURL))
+            metadataRow(L10n.tr("尝试次数"), value: L10n.tr("\(resource.attemptCount) 次，失败 \(resource.failedAttemptCount) 次"))
             if let lastAttemptAt = resource.lastAttemptAt {
-                metadataRow("最近解析", value: lastAttemptAt.formatted(date: .abbreviated, time: .standard))
+                metadataRow(L10n.tr("最近解析"), value: lastAttemptAt.formatted(Date.FormatStyle(date: .abbreviated, time: .standard).locale(L10n.language.locale)))
             }
         } else {
-            Text("这条链接尚未建立解析记录。")
+            Text(L10n.tr("这条链接尚未建立解析记录。"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -724,36 +724,36 @@ struct LibraryView: View {
 
     @ViewBuilder
     private func contextMenu(for clip: Clip, parentAggregationID: UUID?) -> some View {
-        Button("粘贴") { onPaste(clip, false, true) }; Button("复制") { onPaste(clip, false, false) }
+        Button(L10n.tr("粘贴")) { onPaste(clip, false, true) }; Button(L10n.tr("复制")) { onPaste(clip, false, false) }
         QuickActionsMenu { action in
             state.runQuickTextAction(action, for: clip)
         }
-        Button("纯文本粘贴") { onPaste(clip, true, true) }; Divider()
-        Button(clip.isFavorite ? "取消收藏" : "收藏") { state.toggleFavorite(clip) }
+        Button(L10n.tr("纯文本粘贴")) { onPaste(clip, true, true) }; Divider()
+        Button(clip.isFavorite ? L10n.tr("取消收藏") : L10n.tr("收藏")) { state.toggleFavorite(clip) }
         if let parentAggregationID,
            let aggregation = state.aggregations.first(where: { $0.id == parentAggregationID }) {
-            Button("移出当前聚合") {
+            Button(L10n.tr("移出当前聚合")) {
                 Task { await state.removeClip(clip.id, from: aggregation) }
             }
             Divider()
         }
         if clip.deletedAt != nil {
-            Button("恢复") { state.restore(clip) }
-            Button("彻底删除", role: .destructive) { confirmPermanentDelete(clip) }
-        } else { Button("移到废纸篓", role: .destructive) { state.moveToTrash(clip) } }
+            Button(L10n.tr("恢复")) { state.restore(clip) }
+            Button(L10n.tr("彻底删除"), role: .destructive) { confirmPermanentDelete(clip) }
+        } else { Button(L10n.tr("移到废纸篓"), role: .destructive) { state.moveToTrash(clip) } }
     }
 
     private func confirmPermanentDelete(_ clip: Clip) {
-        let alert = NSAlert(); alert.messageText = "彻底删除这条内容？"; alert.informativeText = "此操作无法撤销。"; alert.addButton(withTitle: "删除"); alert.addButton(withTitle: "取消")
+        let alert = NSAlert(); alert.messageText = L10n.tr("彻底删除这条内容？"); alert.informativeText = L10n.tr("此操作无法撤销。"); alert.addButton(withTitle: L10n.tr("删除")); alert.addButton(withTitle: L10n.tr("取消"))
         if alert.runModal() == .alertFirstButtonReturn { Task { await state.permanentlyDelete(clip) } }
     }
 
     private func confirmDeleteCollection(_ collection: ClipCollection) {
         let alert = NSAlert()
-        alert.messageText = "删除“\(collection.name)”？"
-        alert.informativeText = collection.kind == .smart ? "智能规则会一并删除，剪贴板内容不会被删除。" : "内容只会移出这个分组，不会从资料库删除。"
-        alert.addButton(withTitle: "删除")
-        alert.addButton(withTitle: "取消")
+        alert.messageText = L10n.tr("删除“\(collection.name)”？")
+        alert.informativeText = collection.kind == .smart ? L10n.tr("智能规则会一并删除，剪贴板内容不会被删除。") : L10n.tr("内容只会移出这个分组，不会从资料库删除。")
+        alert.addButton(withTitle: L10n.tr("删除"))
+        alert.addButton(withTitle: L10n.tr("取消"))
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         Task { await state.deleteCollection(collection) }
     }
@@ -785,7 +785,7 @@ private struct LibraryAggregationCard: View {
                 if !aggregation.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Text(aggregation.note).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
-                Text(aggregation.origin.displayName + (aggregation.membershipMode == .automatic ? " · 自动更新" : ""))
+                Text(aggregation.origin.displayName + (aggregation.membershipMode == .automatic ? L10n.tr(" · 自动更新") : ""))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -820,26 +820,26 @@ private struct LibraryAggregationCard: View {
         }
         .simultaneousGesture(TapGesture(count: 2).onEnded { state.toggleLibraryAggregation(aggregation.id, selectChild: true) })
         .contextMenu {
-            Button(state.libraryExpandedAggregationIDs.contains(aggregation.id) ? "收起内容" : "展开内容") {
+            Button(state.libraryExpandedAggregationIDs.contains(aggregation.id) ? L10n.tr("收起内容") : L10n.tr("展开内容")) {
                 state.toggleLibraryAggregation(aggregation.id)
             }
             .quickActionShortcut(state.settings.quickShortcut(
                 for: state.libraryExpandedAggregationIDs.contains(aggregation.id) ? .collapseAggregation : .expandAggregation
             ))
-            Button("编辑聚合…", action: onEdit)
+            Button(L10n.tr("编辑聚合…"), action: onEdit)
                 .quickActionShortcut(state.settings.quickShortcut(for: .editMetadata))
             Divider()
-            Button(aggregation.isFavorite ? "取消收藏聚合" : "收藏聚合") {
+            Button(aggregation.isFavorite ? L10n.tr("取消收藏聚合") : L10n.tr("收藏聚合")) {
                 Task { await state.toggleAggregationFavorite(aggregation) }
             }
             .quickActionShortcut(state.settings.quickShortcut(for: .toggleFavorite))
-            Button(aggregation.isPinned ? "取消置顶聚合" : "置顶聚合") {
+            Button(aggregation.isPinned ? L10n.tr("取消置顶聚合") : L10n.tr("置顶聚合")) {
                 Task { await state.toggleAggregationPinned(aggregation) }
             }
             .quickActionShortcut(state.settings.quickShortcut(for: .togglePinned))
-            Menu("设置聚合分组") {
+            Menu(L10n.tr("设置聚合分组")) {
                 let groups = state.collections.filter { $0.kind == .normal }
-                if groups.isEmpty { Text("还没有普通分组") }
+                if groups.isEmpty { Text(L10n.tr("还没有普通分组")) }
                 else {
                     ForEach(groups) { collection in
                         Button {
@@ -852,15 +852,15 @@ private struct LibraryAggregationCard: View {
             }
             .quickActionShortcut(state.settings.quickShortcut(for: .setCollection))
             Divider()
-            Menu("整理全部成员") {
+            Menu(L10n.tr("整理全部成员")) {
                 let members = state.aggregationMembers[aggregation.id] ?? []
-                Button(members.allSatisfy(\.isFavorite) ? "取消收藏全部成员" : "收藏全部成员") {
+                Button(members.allSatisfy(\.isFavorite) ? L10n.tr("取消收藏全部成员") : L10n.tr("收藏全部成员")) {
                     Task { await state.toggleFavoriteForAllMembers(of: aggregation) }
                 }
-                Button(members.allSatisfy(\.isPinned) ? "取消置顶全部成员" : "置顶全部成员") {
+                Button(members.allSatisfy(\.isPinned) ? L10n.tr("取消置顶全部成员") : L10n.tr("置顶全部成员")) {
                     Task { await state.togglePinnedForAllMembers(of: aggregation) }
                 }
-                Menu("设置全部成员的分组") {
+                Menu(L10n.tr("设置全部成员的分组")) {
                     ForEach(state.collections.filter { $0.kind == .normal }) { collection in
                         let allIncluded = members.allSatisfy { $0.collectionIDs.contains(collection.id) }
                         Button {
@@ -872,7 +872,7 @@ private struct LibraryAggregationCard: View {
                 }
             }
             Divider()
-            Button("删除聚合但保留内容", role: .destructive) {
+            Button(L10n.tr("删除聚合但保留内容"), role: .destructive) {
                 Task { await state.removeAggregation(aggregation) }
             }
             .quickActionShortcut(state.settings.quickShortcut(for: .moveToTrash))
@@ -881,12 +881,12 @@ private struct LibraryAggregationCard: View {
 
     private var memberCountLabel: String {
         let query = state.libraryQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return "\(aggregation.memberClipIDs.count) 项内容" }
+        guard !query.isEmpty else { return L10n.tr("\(aggregation.memberClipIDs.count) 项内容") }
         let visible = Set(state.clips.map(\.id)).intersection(aggregation.memberClipIDs).count
         guard visible > 0, visible < aggregation.memberClipIDs.count else {
-            return "\(aggregation.memberClipIDs.count) 项内容"
+            return L10n.tr("\(aggregation.memberClipIDs.count) 项内容")
         }
-        return "匹配 \(visible) / \(aggregation.memberClipIDs.count)"
+        return L10n.tr("匹配 \(visible) / \(aggregation.memberClipIDs.count)")
     }
 }
 
@@ -899,8 +899,8 @@ private struct LibraryAggregationInspector: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("聚合详情").font(.system(size: 17, weight: .semibold))
-                    Text("\(aggregation.memberClipIDs.count) 项内容").font(.caption).foregroundStyle(.secondary)
+                    Text(L10n.tr("聚合详情")).font(.system(size: 17, weight: .semibold))
+                    Text(L10n.tr("\(aggregation.memberClipIDs.count) 项内容")).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Image(systemName: "square.stack.3d.up.fill")
@@ -915,15 +915,15 @@ private struct LibraryAggregationInspector: View {
                         if !aggregation.note.isEmpty { Text(aggregation.note).foregroundStyle(.secondary) }
                     }
                     VStack(alignment: .leading, spacing: 7) {
-                        Text("生成方式").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        Text(L10n.tr("生成方式")).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                         Text(aggregation.origin.displayName)
-                        Text(aggregation.membershipMode == .automatic ? "成员会按条件自动更新" : "成员保持创建时的内容")
+                        Text(aggregation.membershipMode == .automatic ? L10n.tr("成员会按条件自动更新") : L10n.tr("成员保持创建时的内容"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                     Divider()
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("包含内容").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        Text(L10n.tr("包含内容")).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                         ForEach(state.aggregationMembers[aggregation.id] ?? []) { clip in
                             HStack(spacing: 7) {
                                 Image(systemName: clip.primaryKind.symbolName).foregroundStyle(state.settings.themeColor.accentColor)
@@ -932,24 +932,24 @@ private struct LibraryAggregationInspector: View {
                             .font(.caption)
                         }
                     }
-                    Button("编辑聚合信息和成员…", action: onEdit)
+                    Button(L10n.tr("编辑聚合信息和成员…"), action: onEdit)
                         .buttonStyle(.borderedProminent)
                         .tint(state.settings.themeColor.accentColor)
                         .frame(maxWidth: .infinity, alignment: .trailing)
                     HStack(spacing: 8) {
-                        Button(aggregation.isFavorite ? "取消收藏聚合" : "收藏聚合") {
+                        Button(aggregation.isFavorite ? L10n.tr("取消收藏聚合") : L10n.tr("收藏聚合")) {
                             Task { await state.toggleAggregationFavorite(aggregation) }
                         }
-                        Button(aggregation.isPinned ? "取消置顶聚合" : "置顶聚合") {
+                        Button(aggregation.isPinned ? L10n.tr("取消置顶聚合") : L10n.tr("置顶聚合")) {
                             Task { await state.toggleAggregationPinned(aggregation) }
                         }
                         Spacer()
-                        Menu("整理全部成员") {
+                        Menu(L10n.tr("整理全部成员")) {
                             let members = state.aggregationMembers[aggregation.id] ?? []
-                            Button(members.allSatisfy(\.isFavorite) ? "取消收藏全部成员" : "收藏全部成员") {
+                            Button(members.allSatisfy(\.isFavorite) ? L10n.tr("取消收藏全部成员") : L10n.tr("收藏全部成员")) {
                                 Task { await state.toggleFavoriteForAllMembers(of: aggregation) }
                             }
-                            Button(members.allSatisfy(\.isPinned) ? "取消置顶全部成员" : "置顶全部成员") {
+                            Button(members.allSatisfy(\.isPinned) ? L10n.tr("取消置顶全部成员") : L10n.tr("置顶全部成员")) {
                                 Task { await state.togglePinnedForAllMembers(of: aggregation) }
                             }
                         }
@@ -981,12 +981,12 @@ private struct LibraryAggregationEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(original.isEditing ? "编辑聚合" : "聚合搜索结果").font(.title3.bold())
-            Text("包含 \(memberIDs.count) 项不同内容 · \(original.origin.displayName)")
+            Text(original.isEditing ? L10n.tr("编辑聚合") : L10n.tr("聚合搜索结果")).font(.title3.bold())
+            Text(L10n.tr("包含 \(memberIDs.count) 项不同内容 · \(original.origin.displayName)"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            TextField("聚合标题", text: $title).textFieldStyle(.roundedBorder)
-            TextField("备注（可选）", text: $note, axis: .vertical).textFieldStyle(.roundedBorder).lineLimit(2...4)
+            TextField(L10n.tr("聚合标题"), text: $title).textFieldStyle(.roundedBorder)
+            TextField(L10n.tr("备注（可选）"), text: $note, axis: .vertical).textFieldStyle(.roundedBorder).lineLimit(2...4)
             ScrollView {
                 LazyVStack(spacing: 6) {
                     ForEach(memberClips) { clip in
@@ -1001,7 +1001,7 @@ private struct LibraryAggregationEditor: View {
                             } label: { Image(systemName: "minus.circle") }
                                 .buttonStyle(.plain)
                                 .disabled(memberIDs.count <= 2)
-                                .help("移出聚合，保留原内容")
+                                .help(L10n.tr("移出聚合，保留原内容"))
                         }
                         .padding(.horizontal, 10)
                         .frame(height: 34)
@@ -1012,8 +1012,8 @@ private struct LibraryAggregationEditor: View {
             .frame(minHeight: 100, maxHeight: 220)
             HStack {
                 Spacer()
-                Button("取消", action: onDone)
-                Button(original.isEditing ? "保存" : "创建聚合") {
+                Button(L10n.tr("取消"), action: onDone)
+                Button(original.isEditing ? L10n.tr("保存") : L10n.tr("创建聚合")) {
                     var draft = original
                     draft.memberClipIDs = memberIDs
                     Task {
@@ -1084,9 +1084,9 @@ private struct LibraryEmptyState: View {
                 .foregroundStyle(pasteoryAccentColor)
                 .frame(width: 58, height: 58)
                 .background(pasteoryAccentColor.opacity(0.11), in: RoundedRectangle(cornerRadius: 18))
-            Text(query.isEmpty ? "这里还没有内容" : "没有找到匹配内容")
+            Text(query.isEmpty ? L10n.tr("这里还没有内容") : L10n.tr("没有找到匹配内容"))
                 .font(.system(size: 16, weight: .semibold))
-            Text(query.isEmpty ? "复制新的内容后，它会自动出现在资料库。" : "可以换个关键词，或选择其他资料范围。")
+            Text(query.isEmpty ? L10n.tr("复制新的内容后，它会自动出现在资料库。") : L10n.tr("可以换个关键词，或选择其他资料范围。"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -1100,8 +1100,8 @@ private struct LibraryEmptyInspector: View {
             Image(systemName: "sidebar.right")
                 .font(.system(size: 26, weight: .light))
                 .foregroundStyle(.secondary)
-            Text("选择一条内容").font(.system(size: 15, weight: .semibold))
-            Text("预览、备注和分组会显示在这里。")
+            Text(L10n.tr("选择一条内容")).font(.system(size: 15, weight: .semibold))
+            Text(L10n.tr("预览、备注和分组会显示在这里。"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -1145,16 +1145,16 @@ struct CollectionNameEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(existing == nil ? "新建分组" : "重命名分组").font(.title2.bold())
+            Text(existing == nil ? L10n.tr("新建分组") : L10n.tr("重命名分组")).font(.title2.bold())
             VStack(alignment: .leading, spacing: 5) {
-                TextField("分组名称", text: Binding(get: { name }, set: { name = String($0.prefix(40)) }))
+                TextField(L10n.tr("分组名称"), text: Binding(get: { name }, set: { name = String($0.prefix(40)) }))
                 Text("\(name.count)/40").font(.caption2).foregroundStyle(.tertiary).frame(maxWidth: .infinity, alignment: .trailing)
             }
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
             HStack {
                 Spacer()
-                Button("取消") { dismiss() }
-                Button(existing == nil ? "创建" : "保存") { save() }.keyboardShortcut(.defaultAction)
+                Button(L10n.tr("取消")) { dismiss() }
+                Button(existing == nil ? L10n.tr("创建") : L10n.tr("保存")) { save() }.keyboardShortcut(.defaultAction)
             }
         }
         .padding(24)
@@ -1204,9 +1204,9 @@ struct SmartCollectionEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(existing.name.isEmpty ? "新建智能分组" : "编辑智能分组").font(.title2.bold())
+            Text(existing.name.isEmpty ? L10n.tr("新建智能分组") : L10n.tr("编辑智能分组")).font(.title2.bold())
             VStack(alignment: .leading, spacing: 5) {
-                TextField("分组名称", text: Binding(get: { name }, set: { name = String($0.prefix(40)) }))
+                TextField(L10n.tr("分组名称"), text: Binding(get: { name }, set: { name = String($0.prefix(40)) }))
                 Text("\(name.count)/40").font(.caption2).foregroundStyle(.tertiary).frame(maxWidth: .infinity, alignment: .trailing)
             }
             GroupBox {
@@ -1222,25 +1222,25 @@ struct SmartCollectionEditor: View {
                     .padding(.vertical, 4)
                 }
             } label: {
-                Label("匹配条件", systemImage: "slider.horizontal.3")
+                Label(L10n.tr("匹配条件"), systemImage: "slider.horizontal.3")
             }
             .frame(minHeight: 220, maxHeight: 320)
             GroupBox {
                 if isLoadingCandidates {
-                    ProgressView("正在读取资料库…")
+                    ProgressView(L10n.tr("正在读取资料库…"))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if let previewError {
                     ContentUnavailableView(
-                        "暂时无法预览",
+                        L10n.tr("暂时无法预览"),
                         systemImage: "exclamationmark.triangle",
                         description: Text(previewError)
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if previewItems.isEmpty {
                     ContentUnavailableView(
-                        "没有匹配内容",
+                        L10n.tr("没有匹配内容"),
                         systemImage: "doc.text.magnifyingglass",
-                        description: Text("调整上方条件后，结果会自动更新")
+                        description: Text(L10n.tr("调整上方条件后，结果会自动更新"))
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
@@ -1255,16 +1255,16 @@ struct SmartCollectionEditor: View {
                 }
             } label: {
                 HStack {
-                    Label("匹配预览", systemImage: "eye")
+                    Label(L10n.tr("匹配预览"), systemImage: "eye")
                     Spacer()
-                    Text("\(previewCount) 条")
+                    Text(L10n.tr("\(previewCount) 条"))
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
             }
             .frame(minHeight: 250, maxHeight: .infinity)
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
-            HStack { Spacer(); Button("取消") { dismiss() }; Button(existing.name.isEmpty ? "创建" : "保存") { save() }.keyboardShortcut(.defaultAction) }
+            HStack { Spacer(); Button(L10n.tr("取消")) { dismiss() }; Button(existing.name.isEmpty ? L10n.tr("创建") : L10n.tr("保存")) { save() }.keyboardShortcut(.defaultAction) }
         }
         .padding(24)
         .frame(minWidth: 820, minHeight: 720)
@@ -1390,7 +1390,7 @@ private struct SmartRulePreviewRow: View {
                     .foregroundStyle(.primary)
                     .textSelection(.enabled)
             }
-            Text(hasContent ? content : "（没有可预览的文本）")
+            Text(hasContent ? content : L10n.tr("（没有可预览的文本）"))
                 .font(.caption)
                 .foregroundStyle(hasContent ? .secondary : .tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1429,12 +1429,12 @@ private struct SmartRuleGroupEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                Label(isRoot ? "主规则组" : "子规则组", systemImage: isRoot ? "point.3.connected.trianglepath.dotted" : "arrow.turn.down.right")
+                Label(isRoot ? L10n.tr("主规则组") : L10n.tr("子规则组"), systemImage: isRoot ? "point.3.connected.trianglepath.dotted" : "arrow.turn.down.right")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
-                Picker("组内关系", selection: $group.mode) {
-                    Text("满足全部").tag(RuleMatchMode.all)
-                    Text("满足任一").tag(RuleMatchMode.any)
+                Picker(L10n.tr("组内关系"), selection: $group.mode) {
+                    Text(L10n.tr("满足全部")).tag(RuleMatchMode.all)
+                    Text(L10n.tr("满足任一")).tag(RuleMatchMode.any)
                 }
                 .labelsHidden()
                 .pickerStyle(.segmented)
@@ -1443,11 +1443,11 @@ private struct SmartRuleGroupEditor: View {
                     Button(action: onRemove) { Image(systemName: "trash") }
                         .buttonStyle(.plain)
                         .foregroundStyle(.secondary)
-                        .help("删除这个规则组")
+                        .help(L10n.tr("删除这个规则组"))
                 }
             }
 
-            Text(group.mode == .all ? "下面每一项都要满足" : "下面任意一项满足即可")
+            Text(group.mode == .all ? L10n.tr("下面每一项都要满足") : L10n.tr("下面任意一项满足即可"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -1475,7 +1475,7 @@ private struct SmartRuleGroupEditor: View {
                 Button {
                     group.conditions.append(SmartCondition(field: .body, operation: .contains, value: ""))
                 } label: {
-                    Label("添加条件", systemImage: "plus")
+                    Label(L10n.tr("添加条件"), systemImage: "plus")
                 }
                 .disabled(!canAddCondition)
 
@@ -1485,10 +1485,10 @@ private struct SmartRuleGroupEditor: View {
                         conditions: [SmartCondition(field: .body, operation: .contains, value: "")]
                     ))
                 } label: {
-                    Label("添加子组", systemImage: "rectangle.stack.badge.plus")
+                    Label(L10n.tr("添加子组"), systemImage: "rectangle.stack.badge.plus")
                 }
                 .disabled(!canAddCondition || depth >= SmartRuleEngine.maximumNestingDepth)
-                .help(depth >= SmartRuleEngine.maximumNestingDepth ? "最多可以嵌套 5 层" : "添加一个可独立设置且／或关系的规则组")
+                .help(depth >= SmartRuleEngine.maximumNestingDepth ? L10n.tr("最多可以嵌套 5 层") : L10n.tr("添加一个可独立设置且／或关系的规则组"))
             }
             .controlSize(.small)
         }
@@ -1516,7 +1516,7 @@ private struct SmartConditionRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Picker("字段", selection: $condition.field) {
+            Picker(L10n.tr("字段"), selection: $condition.field) {
                 ForEach(SmartRuleField.allCases, id: \.self) { Text($0.displayName).tag($0) }
             }
             .labelsHidden()
@@ -1526,7 +1526,7 @@ private struct SmartConditionRow: View {
                 condition.value = field == .sourceApp ? (sourceOptions.first?.bundleIdentifier ?? "") : field.defaultValue
             }
 
-            Picker("条件", selection: $condition.operation) {
+            Picker(L10n.tr("条件"), selection: $condition.operation) {
                 ForEach(condition.field.supportedOperators, id: \.self) { operation in
                     Text(operation.displayName(for: condition.field)).tag(operation)
                 }
@@ -1538,7 +1538,7 @@ private struct SmartConditionRow: View {
 
             Button(action: onRemove) { Image(systemName: "minus.circle") }
                 .buttonStyle(.plain)
-                .help("删除条件")
+                .help(L10n.tr("删除条件"))
         }
         .padding(.vertical, 2)
     }
@@ -1547,38 +1547,38 @@ private struct SmartConditionRow: View {
     private var valueEditor: some View {
         switch condition.field {
         case .title, .body, .note:
-            TextField(condition.operation == .matchesRegex ? "输入正则表达式" : "输入匹配文字", text: limitedValue(maxLength: 512))
+            TextField(condition.operation == .matchesRegex ? L10n.tr("输入正则表达式") : L10n.tr("输入匹配文字"), text: limitedValue(maxLength: 512))
                 .textFieldStyle(.roundedBorder)
         case .sourceApp:
             ApplicationSelectionControl(bundleIdentifier: $condition.value, additionalApplications: sourceOptions)
         case .sourceConfidence:
-            Picker("来源可信度", selection: $condition.value) {
-                Text("高").tag(SourceConfidence.high.rawValue)
-                Text("低").tag(SourceConfidence.low.rawValue)
-                Text("未知").tag(SourceConfidence.unknown.rawValue)
+            Picker(L10n.tr("来源可信度"), selection: $condition.value) {
+                Text(L10n.tr("高")).tag(SourceConfidence.high.rawValue)
+                Text(L10n.tr("低")).tag(SourceConfidence.low.rawValue)
+                Text(L10n.tr("未知")).tag(SourceConfidence.unknown.rawValue)
             }
             .labelsHidden()
         case .kind:
-            Picker("内容类型", selection: $condition.value) {
+            Picker(L10n.tr("内容类型"), selection: $condition.value) {
                 ForEach(ClipKind.allCases, id: \.self) { Text($0.displayName).tag($0.rawValue) }
             }
             .labelsHidden()
         case .favorite:
-            Picker("收藏状态", selection: $condition.value) {
-                Text("已收藏").tag("true")
-                Text("未收藏").tag("false")
+            Picker(L10n.tr("收藏状态"), selection: $condition.value) {
+                Text(L10n.tr("已收藏")).tag("true")
+                Text(L10n.tr("未收藏")).tag("false")
             }
             .labelsHidden()
         case .quickTextAction:
-            Picker("快捷工具转换", selection: $condition.value) {
-                Text("任意快捷工具").tag("any")
+            Picker(L10n.tr("快捷工具转换"), selection: $condition.value) {
+                Text(L10n.tr("任意快捷工具")).tag("any")
                 ForEach(QuickTextAction.allCases) { action in Text(action.title).tag(action.rawValue) }
-                Text("未使用快捷工具").tag("none")
+                Text(L10n.tr("未使用快捷工具")).tag("none")
             }
             .labelsHidden()
         case .priority:
-            Picker("优先级", selection: $condition.value) {
-                Text("无").tag("0")
+            Picker(L10n.tr("优先级"), selection: $condition.value) {
+                Text(L10n.tr("无")).tag("0")
                 Text("P1").tag("1")
                 Text("P2").tag("2")
                 Text("P3").tag("3")
@@ -1586,18 +1586,18 @@ private struct SmartConditionRow: View {
             .labelsHidden()
         case .createdAt:
             HStack(spacing: 6) {
-                TextField("天数", text: limitedValue(maxLength: 6)).textFieldStyle(.roundedBorder).frame(width: 90)
-                Text("天").foregroundStyle(.secondary)
+                TextField(L10n.tr("天数"), text: limitedValue(maxLength: 6)).textFieldStyle(.roundedBorder).frame(width: 90)
+                Text(L10n.tr("天")).foregroundStyle(.secondary)
             }
         case .byteSize:
             HStack(spacing: 6) {
-                TextField("字节数", text: limitedValue(maxLength: 14)).textFieldStyle(.roundedBorder).frame(width: 120)
-                Text("字节").foregroundStyle(.secondary)
+                TextField(L10n.tr("字节数"), text: limitedValue(maxLength: 14)).textFieldStyle(.roundedBorder).frame(width: 120)
+                Text(L10n.tr("字节")).foregroundStyle(.secondary)
             }
         case .copyCount:
             HStack(spacing: 6) {
-                TextField("次数", text: limitedValue(maxLength: 9)).textFieldStyle(.roundedBorder).frame(width: 100)
-                Text("次").foregroundStyle(.secondary)
+                TextField(L10n.tr("次数"), text: limitedValue(maxLength: 9)).textFieldStyle(.roundedBorder).frame(width: 100)
+                Text(L10n.tr("次")).foregroundStyle(.secondary)
             }
         }
     }
@@ -1610,18 +1610,18 @@ private struct SmartConditionRow: View {
 private extension SmartRuleField {
     var displayName: String {
         switch self {
-        case .sourceApp: "来源"
-        case .sourceConfidence: "来源可信度"
-        case .createdAt: "时间"
-        case .kind: "类型"
-        case .title: "标题"
-        case .body: "正文"
-        case .note: "备注"
-        case .byteSize: "大小"
-        case .priority: "优先级"
-        case .favorite: "收藏"
-        case .copyCount: "复制次数"
-        case .quickTextAction: "快捷工具转换"
+        case .sourceApp: L10n.tr("来源")
+        case .sourceConfidence: L10n.tr("来源可信度")
+        case .createdAt: L10n.tr("时间")
+        case .kind: L10n.tr("类型")
+        case .title: L10n.tr("标题")
+        case .body: L10n.tr("正文")
+        case .note: L10n.tr("备注")
+        case .byteSize: L10n.tr("大小")
+        case .priority: L10n.tr("优先级")
+        case .favorite: L10n.tr("收藏")
+        case .copyCount: L10n.tr("复制次数")
+        case .quickTextAction: L10n.tr("快捷工具转换")
         }
     }
 }
@@ -1629,13 +1629,13 @@ private extension SmartRuleField {
 private extension SmartRuleOperator {
     func displayName(for field: SmartRuleField) -> String {
         switch self {
-        case .contains: "包含"
-        case .equals: [.sourceApp, .sourceConfidence, .kind, .priority, .favorite, .quickTextAction].contains(field) ? "是" : "等于"
-        case .matchesRegex: "匹配正则"
-        case .before: "距今超过"
-        case .after: "距今以内"
-        case .greaterThan: "大于"
-        case .lessThan: "小于"
+        case .contains: L10n.tr("包含")
+        case .equals: [.sourceApp, .sourceConfidence, .kind, .priority, .favorite, .quickTextAction].contains(field) ? L10n.tr("是") : L10n.tr("等于")
+        case .matchesRegex: L10n.tr("匹配正则")
+        case .before: L10n.tr("距今超过")
+        case .after: L10n.tr("距今以内")
+        case .greaterThan: L10n.tr("大于")
+        case .lessThan: L10n.tr("小于")
         }
     }
 }

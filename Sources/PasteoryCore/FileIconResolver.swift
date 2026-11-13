@@ -12,7 +12,11 @@ public struct FileIconDescriptor: Equatable, Sendable {
 
 public struct FileTypeDescriptor: Identifiable, Equatable, Sendable {
     public var assetName: String
-    public var displayName: String
+    private var displayNameKey: String
+    public var displayName: String {
+        get { L10n.text(displayNameKey) }
+        set { displayNameKey = newValue }
+    }
     public var label: String
     public var fileExtensions: [String]
     public var exactFileNames: [String]
@@ -34,10 +38,10 @@ public struct FileTypeDescriptor: Identifiable, Equatable, Sendable {
 
     public var coverageSummary: String {
         if fileExtensions.count > 1 {
-            return "\(displayName) · 共 \(fileExtensions.count) 种后缀"
+            return L10n.tr("\(displayName) · 共 \(fileExtensions.count) 种后缀")
         }
         if fileExtensions.isEmpty, exactFileNames.count > 1 {
-            return "\(displayName) · 共 \(exactFileNames.count) 种文件名"
+            return L10n.tr("\(displayName) · 共 \(exactFileNames.count) 种文件名")
         }
         return displayName
     }
@@ -55,7 +59,7 @@ public struct FileTypeDescriptor: Identifiable, Equatable, Sendable {
         exactFileNames: [String] = []
     ) {
         self.assetName = assetName
-        self.displayName = displayName
+        self.displayNameKey = displayName
         self.label = label
         self.fileExtensions = fileExtensions
         self.exactFileNames = exactFileNames
@@ -65,7 +69,11 @@ public struct FileTypeDescriptor: Identifiable, Equatable, Sendable {
 public struct FileExtensionDescriptor: Identifiable, Equatable, Sendable {
     public var fileExtension: String
     public var assetName: String
-    public var displayName: String
+    private var displayNameKey: String
+    public var displayName: String {
+        get { L10n.text(displayNameKey) }
+        set { displayNameKey = newValue }
+    }
     public var label: String
 
     public var id: String { fileExtension }
@@ -74,7 +82,7 @@ public struct FileExtensionDescriptor: Identifiable, Equatable, Sendable {
     public init(fileExtension: String, assetName: String, displayName: String, label: String) {
         self.fileExtension = fileExtension
         self.assetName = assetName
-        self.displayName = displayName
+        self.displayNameKey = displayName
         self.label = label
     }
 }

@@ -399,9 +399,9 @@ enum ChromeExtensionError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .extensionResourcesMissing:
-            "找不到 Chrome 插件目录，请先重新构建 Pasteory。"
+            L10n.tr("找不到 Chrome 插件目录，请先重新构建 Pasteory。")
         case .unavailableInQA:
-            "Pasteory QA 已隔离 Chrome 原生消息桥，请使用正式包验证 Chrome 插件。"
+            L10n.tr("Pasteory QA 已隔离 Chrome 原生消息桥，请使用正式包验证 Chrome 插件。")
         }
     }
 }
