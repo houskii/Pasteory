@@ -92,7 +92,7 @@ codesign_with_local_keychain() {
 
     security list-keychains -d user -s "${signing_keychains[@]}"
     security unlock-keychain -p "$LOCAL_SIGNING_PASSWORD" "$LOCAL_SIGNING_KEYCHAIN"
-    codesign --force --deep --sign "$SIGN_IDENTITY" --keychain "$LOCAL_SIGNING_KEYCHAIN" "$APP_DIR"
+    "$SCRIPT_DIR/sign_app_bundle.sh" "$APP_DIR" "$SIGN_IDENTITY" "$LOCAL_SIGNING_KEYCHAIN"
   )
 }
 
@@ -103,6 +103,16 @@ rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 ditto "$BIN_DIR/Pasteory" "$MACOS_DIR/Pasteory"
 ditto "$PROJECT_DIR/Config/Info.plist" "$CONTENTS_DIR/Info.plist"
+SPARKLE_FRAMEWORK="$PROJECT_DIR/.build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
+[[ -d "$SPARKLE_FRAMEWORK" ]] || { echo "找不到 SwiftPM Sparkle.framework 产物。" >&2; exit 1; }
+mkdir -p "$CONTENTS_DIR/Frameworks"
+ditto "$SPARKLE_FRAMEWORK" "$CONTENTS_DIR/Frameworks/Sparkle.framework"
+UPDATE_PUBLIC_KEY=$("$SCRIPT_DIR/ensure_update_signing_key.sh")
+[[ ${#UPDATE_PUBLIC_KEY} == 44 ]] || { echo "更新公钥格式无效。" >&2; exit 1; }
+/usr/libexec/PlistBuddy -c "Set :SUPublicEDKey $UPDATE_PUBLIC_KEY" "$CONTENTS_DIR/Info.plist"
+if [[ "$BUILD_VARIANT" == qa ]]; then
+  /usr/libexec/PlistBuddy -c 'Set :SUEnableAutomaticChecks false' "$CONTENTS_DIR/Info.plist"
+fi
 ditto "$PROJECT_DIR/ChromeExtension" "$RESOURCES_DIR/ChromeExtension"
 /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $APP_DISPLAY_NAME" "$CONTENTS_DIR/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleName $APP_DISPLAY_NAME" "$CONTENTS_DIR/Info.plist"
@@ -163,7 +173,7 @@ plutil -lint "$CONTENTS_DIR/Info.plist" >/dev/null
 if [[ "$USE_LOCAL_SIGNING_KEYCHAIN" == true ]]; then
   codesign_with_local_keychain
 else
-  codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_DIR"
+  "$SCRIPT_DIR/sign_app_bundle.sh" "$APP_DIR" "$SIGN_IDENTITY"
 fi
 "$SCRIPT_DIR/verify_signing.sh" "$APP_DIR" "$APP_BUNDLE_IDENTIFIER" >/dev/null
 echo "$APP_DIR"

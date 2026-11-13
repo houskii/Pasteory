@@ -4,14 +4,16 @@ import PasteoryCore
 import SwiftUI
 
 @MainActor
-final class AppCoordinator: NSObject, NSMenuDelegate {
+final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
     private let state: AppState
     private let settings: AppSettings
     private let pasteCoordinator: PasteCoordinator
     private let monitor: ClipboardMonitor
     private let hotKeyManager = GlobalHotKeyManager()
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-    private var libraryWindow: NSWindow?
+    private let settingsNavigation = SettingsNavigation()
+    private let updateService: UpdateService
+    private var updateWindow: NSWindow?
     private var settingsWindow: NSWindow?
     private var onboardingWindow: NSWindow?
 #if DEBUG
@@ -23,21 +25,26 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
     private var lastExternalApplication: NSRunningApplication?
     private lazy var quickPanel = QuickPanelController(
         state: state,
+        updateService: updateService,
         pasteCoordinator: pasteCoordinator,
         targetProvider: { [weak self] in self?.lastExternalApplication },
         onOpenLibrary: { [weak self] in self?.openLibrary() },
         onOpenSettings: { [weak self] in self?.openSettings() },
+        onOpenUpdate: { [weak self] in self?.updateService.checkForUpdates() },
         onCreateTextClip: { [weak self] in self?.createManualTextClip() }
     )
 
-    init(state: AppState, settings: AppSettings, attachments: AttachmentStore) {
+    init(state: AppState, settings: AppSettings, attachments: AttachmentStore, defaults: UserDefaults = .standard) {
         self.state = state; self.settings = settings
+        self.updateService = UpdateService(defaults: defaults)
         self.pasteCoordinator = PasteCoordinator(attachments: attachments)
         let sourceContextCapture = SourceContextCaptureCoordinator(settings: settings)
         self.monitor = ClipboardMonitor(settings: settings, sourceContextCapture: sourceContextCapture) { [weak state] capture in
             await state?.accept(capture)
         }
         super.init()
+        updateService.onPresent = { [weak self] in self?.presentUpdateDialog() }
+        updateService.onDismiss = { [weak self] in self?.updateWindow?.orderOut(nil) }
         pasteCoordinator.monitor = monitor
         hotKeyManager.onPress = { [weak self] in self?.quickPanel.toggle() }
         workspaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
@@ -53,31 +60,35 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
         windowCloseKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
             if TextEditingCommands.handle(event, in: NSApp.keyWindow) { return nil }
-            if self.libraryWindow?.isKeyWindow == true,
-               self.libraryWindow?.attachedSheet == nil {
+            if self.settingsWindow?.isKeyWindow == true,
+               self.settingsWindow?.attachedSheet == nil,
+               !((self.settingsWindow?.firstResponder as? ShortcutRecorderNSView)?.isRecordingShortcut ?? false) {
                 let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
                 let action = self.settings.quickAction(
-                    keyCode: UInt32(event.keyCode),
-                    modifiers: self.carbonModifiers(from: modifiers)
+                    keyCode: UInt32(event.keyCode), modifiers: self.carbonModifiers(from: modifiers)
                 )
-                switch action {
-                case .aggregateContent:
-                    Task { self.state.libraryAggregationDraft = await self.state.makeLibraryAggregationDraft() }
-                    return nil
-                case .expandAggregation where !(self.libraryWindow?.firstResponder is NSTextView):
-                    self.state.expandSelectedLibraryAggregation()
-                    return nil
-                case .collapseAggregation where !(self.libraryWindow?.firstResponder is NSTextView):
-                    self.state.collapseSelectedLibraryAggregation()
-                    return nil
-                default: break
+                if action == .openLibrary { self.openLibrary(); return nil }
+                if action == .openSettings { self.openSettings(); return nil }
+                if self.settingsNavigation.destination == .library {
+                    switch action {
+                    case .aggregateContent:
+                        Task { self.state.libraryAggregationDraft = await self.state.makeLibraryAggregationDraft() }
+                        return nil
+                    case .expandAggregation where !(self.settingsWindow?.firstResponder is NSTextView):
+                        self.state.expandSelectedLibraryAggregation()
+                        return nil
+                    case .collapseAggregation where !(self.settingsWindow?.firstResponder is NSTextView):
+                        self.state.collapseSelectedLibraryAggregation()
+                        return nil
+                    default: break
+                    }
                 }
             }
             guard event.keyCode == 13,
                   event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command else { return event }
             let window: NSWindow?
             if self.settingsWindow?.isKeyWindow == true { window = self.settingsWindow }
-            else if self.libraryWindow?.isKeyWindow == true { window = self.libraryWindow }
+            else if self.updateWindow?.isKeyWindow == true { window = self.updateWindow }
             else { window = nil }
             guard let window, window.attachedSheet == nil else { return event }
             if let recorder = window.firstResponder as? ShortcutRecorderNSView, recorder.isRecordingShortcut {
@@ -93,8 +104,13 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
         if ProcessInfo.processInfo.arguments.contains("--debug-theme-pink") {
             settings.themeColor = .pink
         }
+        if let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--debug-theme=") }),
+           let theme = PasteoryThemeColor(rawValue: String(argument.dropFirst("--debug-theme=".count))) {
+            settings.themeColor = theme
+        }
 #endif
         configureStatusItem()
+        updateService.start()
 #if DEBUG
         if !ProcessInfo.processInfo.arguments.contains("--debug-disable-hotkey") {
             registerHotKey()
@@ -171,9 +187,11 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
     private func openDebugQuickWindow() {
         let view = QuickPanelView(
             state: state,
+            updateService: updateService,
             onCopy: { _, _, _ in },
             onOpenLibrary: {},
             onOpenSettings: {},
+            onOpenUpdate: { [weak self] in self?.updateService.checkForUpdates() },
             onCreateTextClip: {}
         )
         let window = NSWindow(
@@ -480,21 +498,10 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
     }
 
     func openLibrary() {
-        if libraryWindow == nil {
-            let view = LibraryView(state: state, onPaste: { [weak self] clip, plain, paste in self?.performFromLibrary(clip, plainText: plain, paste: paste) }, onOpenSettings: { [weak self] in self?.openSettings() })
-            let hostingController = NSHostingController(rootView: view)
-            hostingController.sizingOptions = []
-            let window = NSWindow(contentViewController: hostingController)
-            window.title = "Pasteory 资料库"; window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
-            window.setContentSize(NSSize(width: 1120, height: 720)); window.minSize = NSSize(width: 900, height: 600)
-            window.center(); window.isReleasedWhenClosed = false; window.titlebarAppearsTransparent = true
-            window.setFrameAutosaveName("PasteoryLibraryWindow")
-            libraryWindow = window
-        }
-        activateAndShow(libraryWindow)
+        openSettings(destination: .library)
 #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        if let window = libraryWindow,
+        if let window = settingsWindow,
            let index = arguments.firstIndex(of: "--debug-snapshot-path"), arguments.indices.contains(index + 1) {
             Task {
                 try? await Task.sleep(for: .milliseconds(300))
@@ -564,24 +571,41 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
 #endif
     }
 
-    private func openSettings() {
+    private func openSettings(destination: SettingsDestination = .general) {
+        guard settingsWindow?.attachedSheet == nil else {
+            activateAndShow(settingsWindow)
+            return
+        }
+        settingsNavigation.destination = destination
         if settingsWindow == nil {
             let view = SettingsView(
-                state: state, settings: settings, pasteCoordinator: pasteCoordinator,
+                state: state, settings: settings, navigation: settingsNavigation, updateService: updateService,
+                onPaste: { [weak self] clip, plain, paste in
+                    self?.performFromLibrary(clip, plainText: plain, paste: paste)
+                },
+                pasteCoordinator: pasteCoordinator,
                 onShortcutChange: { [weak self] in self?.registerHotKey() },
                 onExport: { [weak self] in self?.exportBackup() },
                 onImport: { [weak self] in self?.importBackup() }
             )
-            let window = NSWindow(contentViewController: NSHostingController(rootView: view))
-            window.title = "Pasteory 设置"; window.styleMask = [.titled, .closable]
-            let debugShowsFileRules = ProcessInfo.processInfo.arguments.contains("--debug-settings-file-rules")
-            window.setContentSize(NSSize(width: 940, height: debugShowsFileRules ? 900 : 660)); window.center(); window.isReleasedWhenClosed = false
+            let hostingController = NSHostingController(rootView: view)
+            hostingController.sizingOptions = []
+            let window = NSWindow(contentViewController: hostingController)
+            window.title = "Pasteory 设置"
+            window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            let visibleSize = (NSScreen.main?.visibleFrame.size ?? NSSize(width: 1440, height: 900))
+            let availableSize = NSSize(width: max(980, visibleSize.width - 40), height: max(620, visibleSize.height - 60))
+            window.contentMinSize = NSSize(width: min(1120, availableSize.width), height: min(720, availableSize.height))
+            window.setContentSize(NSSize(width: min(1360, availableSize.width), height: min(820, availableSize.height)))
+            window.isReleasedWhenClosed = false
+            if !window.setFrameUsingName("PasteorySettingsWindow") { window.center() }
+            window.setFrameAutosaveName("PasteorySettingsWindow")
             settingsWindow = window
         }
         activateAndShow(settingsWindow)
 #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        if let window = settingsWindow,
+        if destination != .library, let window = settingsWindow,
            let index = arguments.firstIndex(of: "--debug-snapshot-path"), arguments.indices.contains(index + 1) {
             Task {
                 try? await Task.sleep(for: .milliseconds(800))
@@ -589,6 +613,26 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
             }
         }
 #endif
+    }
+
+    private func presentUpdateDialog() {
+        if updateWindow == nil {
+            let controller = NSHostingController(rootView: UpdateDialogView(service: updateService))
+            controller.sizingOptions = []
+            let window = NSWindow(contentViewController: controller)
+            window.title = "Pasteory 更新"
+            window.styleMask = [.titled, .closable]
+            window.setContentSize(NSSize(width: 560, height: 540))
+            window.isReleasedWhenClosed = false
+            window.delegate = self
+            window.center()
+            updateWindow = window
+        }
+        activateAndShow(updateWindow)
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        sender !== updateWindow || updateService.closeDialog()
     }
 
     private func createManualTextClip() {

@@ -5,9 +5,11 @@ import SwiftUI
 
 struct QuickPanelView: View {
     @ObservedObject var state: AppState
+    @ObservedObject var updateService: UpdateService
     let onCopy: (Clip, Bool, Bool) -> Void
     let onOpenLibrary: () -> Void
     let onOpenSettings: () -> Void
+    let onOpenUpdate: () -> Void
     let onCreateTextClip: () -> Void
     @FocusState private var searchFocused: Bool
     @State private var showingCollectionOverview = false
@@ -183,8 +185,11 @@ struct QuickPanelView: View {
                 searchFocused = true
             }
 
-            Button(action: onOpenSettings) { Image(systemName: "gearshape") }
+            HStack(spacing: 6) {
+                UpdateBadge(service: updateService, theme: state.settings.themeColor, onOpen: onOpenUpdate)
+                Button(action: onOpenSettings) { Image(systemName: "gearshape") }
                 .buttonStyle(.plain).help("打开设置")
+            }
         }
         .padding(12)
     }
