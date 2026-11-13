@@ -160,10 +160,6 @@ public actor BackupService {
                 }
                 try await repository.saveCollection(collection); existing.append(collection)
             }
-            let aiFolder = source.appendingPathComponent("ai-content")
-            if fileManager.fileExists(atPath: aiFolder.appendingPathComponent("manifest.json").path) {
-                try await repository.importAIContent(from: aiFolder)
-            }
         } else {
             // Older formats stored memberships without exporting collection rows.
             // Recover their identities before inserting clips with foreign keys.
@@ -200,6 +196,12 @@ public actor BackupService {
             for aggregation in aggregations { _ = try await repository.saveAggregation(aggregation) }
         }
         if manifest.formatVersion >= 5 {
+            // Publish the owner manifest after the logical clips exist. Background
+            // garbage collection must never see newly imported payloads as orphans.
+            let aiFolder = source.appendingPathComponent("ai-content")
+            if fileManager.fileExists(atPath: aiFolder.appendingPathComponent("manifest.json").path) {
+                try await repository.importAIContent(from: aiFolder)
+            }
             let imported = try decoder.decode(AIOrganizationState.self, from: Data(contentsOf: source.appendingPathComponent("ai-state.json")))
             let restoredClips = try await repository.allClips()
             let restoredCollections = try await repository.collections()
