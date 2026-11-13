@@ -1034,6 +1034,7 @@ public actor SQLiteClipRepository: ClipRepository {
 
     private func mergeDuplicateGroup(_ members: [Clip]) throws {
         guard var canonical = members.first else { return }
+        let originalAI = try aiState()
         for member in members { try ensureCaptureEventExists(for: member) }
 
         let latest = members.max { $0.lastUsedAt < $1.lastUsedAt } ?? canonical
@@ -1054,6 +1055,11 @@ public actor SQLiteClipRepository: ClipRepository {
         canonical.isFavorite = members.contains(where: \.isFavorite)
         canonical.isPinned = members.contains(where: \.isPinned)
         canonical.isArchived = members.allSatisfy(\.isArchived)
+        canonical.aiAnalysisExcluded = members.contains { $0.aiAnalysisExcluded == true } ? true : canonical.aiAnalysisExcluded
+        let activitySamples = Set(members.flatMap { $0.activity.samples }).sorted { $0.at < $1.at }
+        canonical.intelligenceActivity = ContentActivity(lastUsedAt: members.map { $0.activity.lastUsedAt }.max() ?? canonical.lastUsedAt,
+                                                        samples: Array(activitySamples.suffix(4096)))
+        canonical.lifecycleEvaluation = nil
         canonical.priority = members.map(\.priority).max() ?? canonical.priority
         canonical.collectionIDs = members.reduce(into: Set<UUID>()) { $0.formUnion($1.collectionIDs) }
         canonical.secondaryKinds = members.reduce(into: Set<ClipKind>()) { $0.formUnion($1.secondaryKinds) }
@@ -1105,6 +1111,27 @@ public actor SQLiteClipRepository: ClipRepository {
             try stepDone(delete)
             sqlite3_finalize(delete)
         }
+        var state = try aiState()
+        let identities = Set(members.map(\.id)), removed = identities.subtracting([canonical.id])
+        for (id, var group) in state.groups {
+            guard let previous = originalAI.groups[id], !previous.memberIDs.isDisjoint(with: identities) || !previous.excludedClipIDs.isDisjoint(with: identities) else { continue }
+            let manual = members.contains { $0.collectionIDs.contains(id) && !previous.aiMemberIDs.contains($0.id) }
+            group.memberIDs.subtract(identities); group.aiMemberIDs.subtract(identities)
+            if canonical.collectionIDs.contains(id) {
+                group.memberIDs.insert(canonical.id)
+                if !manual { group.aiMemberIDs.insert(canonical.id) }
+            }
+            if !previous.excludedClipIDs.isDisjoint(with: identities) {
+                group.excludedClipIDs.subtract(identities); group.excludedClipIDs.insert(canonical.id)
+            }
+            group.revision += 1; group.overviewMemberFingerprint = ""; state.groups[id] = group
+        }
+        state.summaries = state.summaries.filter { Set($0.value.sourceRevisions.keys).isDisjoint(with: removed) }
+        let invalid = state.changes.filter { !Set($0.clipRevisions.keys).isDisjoint(with: identities) }.map(\.id)
+        state.changes.removeAll { !Set($0.clipRevisions.keys).isDisjoint(with: identities) }
+        for id in invalid { try Self.execute(database, "DELETE FROM intelligence_undo WHERE id=?;", bindings: [id.uuidString]) }
+        if let checkpoint = state.checkpoint, !Set(checkpoint.clipIDs).isDisjoint(with: identities) { state.checkpoint = nil }
+        try writeAIState(state)
     }
 
     private func firstNonempty(_ values: [String]) -> String {
@@ -1707,6 +1734,7 @@ extension SQLiteClipRepository {
             collection.name = name; try saveCollection(collection)
             profile.name = name; profile.definition = definition; profile.definitionIsManual = true
             profile.definitionVersion += 1; profile.revision += 1; profile.retained = retained
+            profile.overviewMemberFingerprint = ""
             state.groups[id] = profile; try writeAIState(state); try rebuildSearchIndex()
         }
     }

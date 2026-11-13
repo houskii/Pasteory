@@ -15,8 +15,8 @@ public enum LifecyclePreset: String, Codable, CaseIterable, Identifiable, Sendab
     }
 }
 
-/// Human activity only. Organization, summaries, background scans and copies made by
-/// Pasteory itself must not call record(). Times are facts; scores are disposable caches.
+/// Human activity only. Organization, summaries, background scans and automatic
+/// pasteboard replays must not call record(). Times are facts; scores are caches.
 public struct ContentActivity: Codable, Hashable, Sendable {
     public enum Event: String, Codable, Sendable { case copy, paste, open, edit }
     public struct Sample: Codable, Hashable, Sendable {

@@ -48,6 +48,9 @@ struct AIReviewView: View {
                 .toggleStyle(.checkbox).labelsHidden()
             VStack(alignment: .leading, spacing: 7) {
                 HStack { Text(commandTitle(command)).font(.callout.weight(.semibold)); Spacer(); Text(command.kind.rawValue).font(.caption2.monospaced()).foregroundStyle(.secondary) }
+                if ![.createGroup, .createAggregation].contains(command.kind) {
+                    Text(targetName(command, in: pending)).font(.caption.weight(.medium))
+                }
                 if !command.reason.isEmpty { Text(command.reason).font(.caption).foregroundStyle(.secondary) }
                 if !command.definition.isEmpty { Text(command.definition).font(.caption) }
                 if !command.overview.isEmpty { Text(command.overview).font(.caption).textSelection(.enabled) }
@@ -65,6 +68,10 @@ struct AIReviewView: View {
                 }
             }
         }.padding(14).background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+    }
+    private func targetName(_ command: AICommand, in draft: AIChangeSet) -> String {
+        if let creation = draft.commands.first(where: { $0.targetID == command.targetID && [.createGroup, .createAggregation].contains($0.kind) }) { return creation.name }
+        return controller.state.groups[command.targetID]?.name ?? command.targetID.uuidString
     }
     private func commandTitle(_ command: AICommand) -> String {
         switch command.kind {

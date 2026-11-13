@@ -77,12 +77,7 @@ public actor BackupService {
         checksums["ai-state.json"] = digest(aiBytes)
         let aiFolder = destination.appendingPathComponent("ai-content", isDirectory: true)
         try await repository.exportAIContent(to: aiFolder)
-        if let files = fileManager.enumerator(at: aiFolder, includingPropertiesForKeys: [.isRegularFileKey]) {
-            for case let file as URL in files where (try file.resourceValues(forKeys: [.isRegularFileKey])).isRegularFile == true {
-                let relative = String(file.path.dropFirst(destination.path.count + 1))
-                checksums[relative] = digest(try Data(contentsOf: file))
-            }
-        }
+        checksums.merge(try archiveChecksums(in: aiFolder, relativeTo: destination)) { _, new in new }
         let dataFolder = destination.appendingPathComponent("data", isDirectory: true)
         for clip in clips {
             for item in clip.items {
@@ -228,6 +223,16 @@ public actor BackupService {
     }
 
     private func digest(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
+
+    private func archiveChecksums(in folder: URL, relativeTo root: URL) throws -> [String: String] {
+        var result = [String: String]()
+        if let files = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isRegularFileKey]) {
+            for case let file as URL in files where (try file.resourceValues(forKeys: [.isRegularFileKey])).isRegularFile == true {
+                result[String(file.path.dropFirst(root.path.count + 1))] = digest(try Data(contentsOf: file))
+            }
+        }
+        return result
+    }
 
     private func safePath(_ relative: String, under root: URL) -> URL? {
         let components = relative.components(separatedBy: "/")

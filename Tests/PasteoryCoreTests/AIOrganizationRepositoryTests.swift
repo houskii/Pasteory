@@ -128,6 +128,23 @@ private func aiGrouping(_ clips: [Clip], group: UUID = UUID()) -> AIChangeSet {
     #expect(try await repo.aiState().summaries[bundle] == nil)
 }
 
+@Test func duplicateConsolidationPreservesAIExclusionAndManualMembershipProvenance() async throws {
+    let dirs = try aiDirectories(); defer { try? FileManager.default.removeItem(at: dirs.root) }
+    let repo = try SQLiteClipRepository(databaseURL: dirs.databaseFile)
+    let first = aiClip("Same shared source", at: Date().addingTimeInterval(-100))
+    var second = aiClip("Same shared source"); second.aiAnalysisExcluded = true
+    try await repo.saveBatch([first, second])
+    let draft = aiGrouping([first]), id = draft.commands[0].targetID
+    try await repo.applyAIChangeSet(draft)
+    second.collectionIDs = [id]; try await repo.updateExisting(second)
+    #expect(try await repo.consolidateDuplicateClips() == 1)
+    let merged = try #require(await repo.clip(id: first.id))
+    #expect(merged.aiAnalysisExcluded == true)
+    #expect(merged.activity.lastUsedAt >= second.lastUsedAt)
+    let profile = try #require(await repo.aiState().groups[id])
+    #expect(profile.memberIDs == [first.id] && profile.aiMemberIDs.isEmpty)
+}
+
 @Test func partialCompressionSurvivesBackupAndReclaimsRawOnlyWhenAllOwnersPacked() async throws {
     let dirs = try aiDirectories(), restored = try aiDirectories()
     defer { for root in [dirs.root, restored.root] { try? FileManager.default.removeItem(at: root) } }

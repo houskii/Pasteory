@@ -44,7 +44,7 @@ public actor AttachmentStore {
         case .attachment(let relativePath, let checksum, let size):
             let raw = storageRoot.appendingPathComponent("Attachments/" + relativePath)
             let data: Data
-            if FileManager.default.fileExists(atPath: raw.path) { data = try Data(contentsOf: raw) }
+            if let bytes = try? Data(contentsOf: raw) { data = bytes }
             else {
                 // An already-open UI may still hold the old representation after
                 // its raw cache was reclaimed. Read the same immutable bytes.
