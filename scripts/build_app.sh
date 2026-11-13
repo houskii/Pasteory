@@ -87,7 +87,10 @@ codesign_with_local_keychain() {
       restore_keychains+=("$default_keychain")
     fi
 
-    signing_keychains=("${restore_keychains[@]}" "$LOCAL_SIGNING_KEYCHAIN")
+    signing_keychains=("${restore_keychains[@]}")
+    if (( ${signing_keychains[(Ie)$LOCAL_SIGNING_KEYCHAIN]} == 0 )); then
+      signing_keychains+=("$LOCAL_SIGNING_KEYCHAIN")
+    fi
     restore_user_keychain_search_list() {
       security list-keychains -d user -s "${restore_keychains[@]}" >/dev/null
     }

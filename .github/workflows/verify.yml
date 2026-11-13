@@ -30,6 +30,14 @@ jobs:
         run: make qa-verify
       - name: Check release metadata generation
         run: python3 -m unittest discover -s scripts/tests -v
+      - name: Verify DMG and signed appcast preparation
+        timeout-minutes: 6
+        run: |
+          make verify
+          version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Config/Info.plist)
+          printf '%s\n' 'CI signature validation only; this build is not published.' > "$RUNNER_TEMP/update-notes.md"
+          python3 scripts/prepare_update.py --tag "v$version" \
+            --notes "$RUNNER_TEMP/update-notes.md" --dmg "dist/Pasteory-$version-arm64.dmg"
       - name: Capture isolated native UI
         timeout-minutes: 5
         run: ./scripts/capture_update_ui.sh
