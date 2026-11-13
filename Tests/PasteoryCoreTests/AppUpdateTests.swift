@@ -38,6 +38,7 @@ import Testing
     let defaults = try #require(UserDefaults(suiteName: name))
     defer { defaults.removePersistentDomain(forName: name) }
     let service = UpdateService(defaults: defaults)
+    #expect(service.responds(to: NSSelectorFromString("updater:didFinishUpdateCycleForUpdateCheck:error:")))
     var cancelled = 0
     service.showUserInitiatedUpdateCheck { cancelled += 1 }
     #expect(service.isShowingDialog)

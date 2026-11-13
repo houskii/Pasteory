@@ -32,6 +32,7 @@ final class UpdateService: NSObject, ObservableObject, SPUUserDriver, SPUUpdater
     private var expectedBytes: UInt64 = 0
     private var receivedBytes: UInt64 = 0
     private var installationApproved = false
+    private var pendingManualCheck = false
     private var observers = [NSObjectProtocol]()
     private let cacheKey = "PasteoryAvailableUpdate"
     private let checkDateKey = "PasteoryLastSuccessfulUpdateCheck"
@@ -138,8 +139,15 @@ final class UpdateService: NSObject, ObservableObject, SPUUserDriver, SPUUpdater
             presentDialog()
             return
         }
-        guard updater.canCheckForUpdates else { return }
         lastError = nil
+        guard updater.canCheckForUpdates else {
+            // A scheduled check may still be reading the feed when the badge is clicked.
+            pendingManualCheck = true
+            cancellation = { [weak self] in self?.pendingManualCheck = false }
+            stage = .checking
+            presentDialog()
+            return
+        }
         updater.checkForUpdates()
     }
 
@@ -156,6 +164,7 @@ final class UpdateService: NSObject, ObservableObject, SPUUserDriver, SPUUpdater
     @discardableResult
     func closeDialog() -> Bool {
         guard canCloseDialog else { return false }
+        pendingManualCheck = false
         let reply = choiceReply
         let cancel = cancellation
         let acknowledge = acknowledgement
@@ -199,6 +208,16 @@ final class UpdateService: NSObject, ObservableObject, SPUUserDriver, SPUUpdater
 
     func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
         lastError = error.localizedDescription
+    }
+
+    func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: Error?) {
+        guard pendingManualCheck else { return }
+        Task { @MainActor [weak self] in
+            guard let self, self.pendingManualCheck else { return }
+            self.pendingManualCheck = false
+            self.cancellation = nil
+            updater.checkForUpdates()
+        }
     }
 
     private func descriptor(for item: SUAppcastItem) -> AppUpdate {
@@ -319,6 +338,10 @@ final class UpdateService: NSObject, ObservableObject, SPUUserDriver, SPUUpdater
     }
 
     func dismissUpdateInstallation() {
+        if pendingManualCheck {
+            stage = .checking
+            return
+        }
         choiceReply = nil; cancellation = nil; acknowledgement = nil
         installationApproved = false
         isShowingDialog = false
