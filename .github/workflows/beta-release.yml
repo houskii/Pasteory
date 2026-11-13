@@ -3,12 +3,15 @@ name: Publish Pasteory Beta
 on:
   push:
     tags: ['v*']
+    branches: [main]
+    paths: ['.github/workflows/beta-release.yml']
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: beta-release-${{ github.ref }}
+  group: beta-release
 
 jobs:
   publish:
@@ -24,8 +27,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tag="$GITHUB_REF_NAME"
-          version=$(python3 -c 'import plistlib; print(plistlib.load(open("Config/Info.plist","rb"))["CFBundleShortVersionString"])')
+          version_from_plist() {
+            python3 -c 'import plistlib; print(plistlib.load(open("Config/Info.plist","rb"))["CFBundleShortVersionString"])'
+          }
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            tag="$GITHUB_REF_NAME"
+          else
+            # First-time setup or manual recovery: only publish an existing tag.
+            tag="v$(version_from_plist)"
+            if ! git show-ref --verify --quiet "refs/tags/$tag"; then
+              echo "No release tag $tag yet."
+              exit 0
+            fi
+            git checkout --detach "refs/tags/$tag"
+          fi
+          version=$(version_from_plist)
           [[ "$tag" == "v$version" && "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           git merge-base --is-ancestor HEAD origin/main
           dmg="Pasteory-$version-arm64.dmg"
