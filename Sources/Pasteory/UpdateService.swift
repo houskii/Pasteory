@@ -194,7 +194,9 @@ final class UpdateService: NSObject, ObservableObject, SPUUserDriver, SPUUpdater
     private func descriptor(for item: SUAppcastItem) -> AppUpdate {
         AppUpdate(
             version: item.displayVersionString, build: item.versionString, publishedAt: item.date,
-            notes: Self.plainTextNotes(item.itemDescription ?? "暂无更新说明。"),
+            notes: item.itemDescriptionFormat == "plain-text"
+                ? (item.itemDescription ?? "暂无更新说明。")
+                : Self.plainTextNotes(item.itemDescription ?? "暂无更新说明。"),
             downloadURL: item.fileURL,
             releaseURL: AppUpdatePolicy.isGitHubReleasePage(item.infoURL) ? item.infoURL : nil
         )
@@ -202,7 +204,7 @@ final class UpdateService: NSObject, ObservableObject, SPUUserDriver, SPUUpdater
 
     // MARK: Custom user driver
 
-    func showUpdatePermissionRequest(_ request: SPUUpdatePermissionRequest, reply: @escaping (SUUpdatePermissionResponse) -> Void) {
+    func show(_ request: SPUUpdatePermissionRequest, reply: @escaping (SUUpdatePermissionResponse) -> Void) {
         reply(SUUpdatePermissionResponse(automaticUpdateChecks: automaticChecksEnabled, sendSystemProfile: false))
     }
 
@@ -288,7 +290,7 @@ final class UpdateService: NSObject, ObservableObject, SPUUserDriver, SPUUpdater
         self.progress = min(1, max(0, progress))
     }
 
-    func showReadyToInstallAndRelaunch(_ reply: @escaping (SPUUserUpdateChoice) -> Void) {
+    func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) {
         // The user already approved installation and restart in the confirmation dialog.
         if installationApproved { reply(.install) }
         else {
