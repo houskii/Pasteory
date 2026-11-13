@@ -3,7 +3,7 @@ name: macOS verification
 on:
   pull_request:
   push:
-    branches: [main, 'codex/**']
+    branches: [main]
     paths-ignore: ['release/**', 'docs/**', 'README.md']
 
 permissions:
