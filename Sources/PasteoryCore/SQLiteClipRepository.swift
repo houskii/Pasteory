@@ -1285,6 +1285,19 @@ public actor SQLiteClipRepository: ClipRepository {
     private func sqliteError() -> RepositoryError { .sqlite(String(cString: sqlite3_errmsg(database))) }
 
     private func transaction(_ work: () throws -> Void) throws {
+        if sqlite3_get_autocommit(database) == 0 {
+            // Atomic AI commits reuse domain methods that already have their own
+            // transactions. A savepoint preserves each method's rollback boundary.
+            let name = "nested_" + UUID().uuidString.replacingOccurrences(of: "-", with: "")
+            try Self.execute(database, "SAVEPOINT " + name + ";")
+            do { try work(); try Self.execute(database, "RELEASE SAVEPOINT " + name + ";") }
+            catch {
+                try? Self.execute(database, "ROLLBACK TO SAVEPOINT " + name + ";")
+                try? Self.execute(database, "RELEASE SAVEPOINT " + name + ";")
+                throw error
+            }
+            return
+        }
         try Self.execute(database, "BEGIN IMMEDIATE;")
         do { try work(); try Self.execute(database, "COMMIT;") }
         catch { try? Self.execute(database, "ROLLBACK;"); throw error }

@@ -145,6 +145,24 @@ private func aiGrouping(_ clips: [Clip], group: UUID = UUID()) -> AIChangeSet {
     #expect(profile.memberIDs == [first.id] && profile.aiMemberIDs.isEmpty)
 }
 
+@Test func aiGroupAggregationAndSummaryUndoAsOneTransaction() async throws {
+    let dirs = try aiDirectories(); defer { try? FileManager.default.removeItem(at: dirs.root) }
+    let repo = try SQLiteClipRepository(databaseURL: dirs.databaseFile)
+    let first = aiClip("Monday launch"), second = aiClip("Alice owns this project")
+    try await repo.saveBatch([first, second])
+    var draft = aiGrouping([first, second]); let bundle = UUID()
+    draft.commands += [AICommand(kind: .createAggregation, targetID: bundle, clipIDs: [first.id, second.id], name: "Launch"),
+                       AICommand(kind: .setSummary, targetID: bundle, claims: [AIClaim(kind: .fact, text: "Monday", evidence: [AIEvidence(clipID: first.id, quote: "Monday launch")])])]
+    try await repo.applyAIChangeSet(draft)
+    var edited = try #require(await repo.clip(id: first.id)); edited.note = "A later human note"
+    try await repo.updateExisting(edited)
+    try await repo.undoAIChangeSet(draft.id)
+    #expect(try await repo.aggregation(id: bundle) == nil)
+    #expect(try await repo.aiState().summaries.isEmpty)
+    #expect(try await repo.clip(id: first.id)?.note == edited.note)
+    #expect(try await repo.clip(id: first.id)?.collectionIDs.isEmpty == true)
+}
+
 @Test func partialCompressionSurvivesBackupAndReclaimsRawOnlyWhenAllOwnersPacked() async throws {
     let dirs = try aiDirectories(), restored = try aiDirectories()
     defer { for root in [dirs.root, restored.root] { try? FileManager.default.removeItem(at: root) } }
