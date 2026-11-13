@@ -135,7 +135,7 @@ final class AIOrganizationController: ObservableObject {
             let repository = repository
             try await analyzer.testConnection(configuration: configuration, credential: credential, ledger: state.usage,
                                              onUsage: { record in try await repository.updateAIState { $0.usage.append(record) } })
-            try await reload(); status = L10n.tr("模型连接和工具协议测试通过")
+            try await reload(); status = L10n.tr("模型连接测试通过")
         } catch { self.error = error.localizedDescription; try? await reload() }
     }
 

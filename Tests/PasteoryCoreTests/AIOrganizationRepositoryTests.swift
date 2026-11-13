@@ -46,7 +46,8 @@ private func aiGrouping(_ clips: [Clip], group: UUID = UUID()) -> AIChangeSet {
     try await repo.save(clip)
     var draft = aiGrouping([clip])
     draft.commands[1].clipIDs = [UUID()]
-    await #expect(throws: (any Error).self) { try await repo.applyAIChangeSet(draft) }
+    do { try await repo.applyAIChangeSet(draft); Issue.record("Invalid command unexpectedly committed") }
+    catch AIError.invalid(let message) { #expect(message.contains("Unread")) }
     #expect(try await repo.collections().isEmpty)
     #expect(try await repo.clip(id: clip.id)?.collectionIDs.isEmpty == true)
     #expect(try await repo.aiState().changes.isEmpty)
@@ -57,8 +58,9 @@ private func aiGrouping(_ clips: [Clip], group: UUID = UUID()) -> AIChangeSet {
     let repo = try SQLiteClipRepository(databaseURL: dirs.databaseFile)
     let ordinary = aiClip(String(repeating: "Project material. ", count: 300) + "Later evidence")
     let secret = aiClip(String(repeating: "innocent text ", count: 300) + "sk-abcdefghijklmnopqrstuvwxyz123456")
-    try await repo.saveBatch([ordinary, secret])
-    let context = try await repo.aiContext(ids: [ordinary.id, secret.id], includeNotes: false, includeSource: false)
+    var titled = aiClip("Ordinary body"); titled.title = "sk-abcdefghijklmnopqrstuvwxyz123456"
+    try await repo.saveBatch([ordinary, secret, titled])
+    let context = try await repo.aiContext(ids: [ordinary.id, secret.id, titled.id], includeNotes: false, includeSource: false)
     #expect(context.map(\.id) == [ordinary.id])
     #expect(context[0].body.contains("Later evidence"))
     #expect(context[0].source.isEmpty && context[0].note.isEmpty)

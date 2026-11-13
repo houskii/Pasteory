@@ -58,18 +58,6 @@ public protocol ClipRepository: Sendable {
 }
 
 public extension ClipRepository {
-    func aiState() async throws -> AIOrganizationState { AIOrganizationState() }
-    func aiContext(ids: [UUID], includeNotes: Bool, includeSource: Bool) async throws -> [AIClipDocument] {
-        try await clips(ids: ids).filter(\.mayParticipateInAI).map { $0.aiDocument(includeNotes: includeNotes, includeSource: includeSource) }
-    }
-    func updateAIState(_ mutation: @Sendable (inout AIOrganizationState) throws -> Void) async throws { throw AIError.unavailable }
-    func applyAIChangeSet(_ changeSet: AIChangeSet) async throws { throw AIError.unavailable }
-    func undoAIChangeSet(_ id: UUID) async throws { throw AIError.unavailable }
-    func recordHumanActivity(id: UUID, event: ContentActivity.Event, at: Date) async throws { }
-    func updateAIGroupDefinition(id: UUID, name: String, definition: String, retained: Bool, expectedVersion: Int) async throws { throw AIError.unavailable }
-    func compressAIGroup(id: UUID?, policy: LifecyclePolicy, now: Date) async throws -> Int { throw AIError.unavailable }
-    func exportAIContent(to: URL) async throws { }
-    func importAIContent(from: URL) async throws { }
     func saveCaptured(_ clip: Clip) async throws -> Clip {
         try await saveCaptured(clip, context: nil)
     }

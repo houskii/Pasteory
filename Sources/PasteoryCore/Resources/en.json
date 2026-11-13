@@ -966,7 +966,6 @@
   "模型 ID": "Model ID",
   "模型、智能分组、生命周期与无损压缩": "Models, AI grouping, lifecycle and lossless compression",
   "模型连接": "Model connection",
-  "模型连接和工具协议测试通过": "Model connection and tool protocol verified",
   "正在使用合成资料测试连接": "Testing with synthetic content",
   "正在准备分析范围": "Preparing analysis scope",
   "正在分批整理：{0} / {1}": "Organizing in batches: {0} / {1}",
@@ -1017,5 +1016,6 @@
   "激进": "Aggressive",
   "标准": "Standard",
   "保守": "Conservative",
-  "自定义": "Custom"
+  "自定义": "Custom",
+  "模型连接测试通过": "Model connection verified"
 }

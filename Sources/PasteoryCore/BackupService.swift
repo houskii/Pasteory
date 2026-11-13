@@ -228,9 +228,12 @@ public actor BackupService {
 
     private func archiveChecksums(in folder: URL, relativeTo root: URL) throws -> [String: String] {
         var result = [String: String]()
+        let prefix = root.resolvingSymlinksInPath().path + "/"
         if let files = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isRegularFileKey]) {
             for case let file as URL in files where (try file.resourceValues(forKeys: [.isRegularFileKey])).isRegularFile == true {
-                result[String(file.path.dropFirst(root.path.count + 1))] = digest(try Data(contentsOf: file))
+                let path = file.resolvingSymlinksInPath().path
+                guard path.hasPrefix(prefix) else { throw StorageError.invalidArchive }
+                result[String(path.dropFirst(prefix.count))] = digest(try Data(contentsOf: file))
             }
         }
         return result
