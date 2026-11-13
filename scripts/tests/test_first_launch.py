@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import pty
+import plistlib
 import select
 import shutil
 import subprocess
@@ -70,7 +71,9 @@ if name=='plist':
  key=arguments[1].split(':')[-1]
  print(state[{'CFBundleIdentifier':'identifier','CFBundleShortVersionString':'version','CFBundleVersion':'build'}[key]])
 elif name=='codesign':
- if '--verify' in arguments: sys.exit(0 if state['valid'] else 1)
+ if '--verify' in arguments:
+  requirement=arguments[arguments.index('--test-requirement')+1]
+  sys.exit(0 if state['valid'] and requirement.startswith('=') else 1)
  print('Executable=fixture\\nCDHash='+state['hash'],file=sys.stderr)
 else:
  with pathlib.Path(LOG_PATH).open('a') as log: log.write(json.dumps([name,arguments])+'\\n')
@@ -147,12 +150,31 @@ else:
 class NativeFirstLaunchTests(unittest.TestCase):
     def test_signed_copy_quarantine_is_removed_without_touching_an_external_file(self):
         source = module.ROOT / "dist/Pasteory.app"
-        if not source.is_dir():
+        if not source.is_dir() and os.environ.get("GITHUB_ACTIONS") != "true":
             self.skipTest("A signed app is produced by the native packaging job")
         with tempfile.TemporaryDirectory(prefix="Pasteory first launch ") as temporary:
             root = Path(temporary)
             app = root / "Pasteory.app"
-            shutil.copytree(source, app, symlinks=True)
+            if source.is_dir():
+                shutil.copytree(source, app, symlinks=True)
+            else:
+                # The early CI check uses a small certificate-signed fixture; the later packaging
+                # check repeats this test with the real app, including Sparkle and its symlinks.
+                binary = app / "Contents/MacOS/Fixture"
+                binary.parent.mkdir(parents=True)
+                shutil.copy2("/usr/bin/true", binary)
+                (app / "Contents/Info.plist").write_bytes(plistlib.dumps({
+                    "CFBundleIdentifier": "app.pasteory.Pasteory", "PasteoryBuildVariant": "production",
+                    "CFBundleShortVersionString": "0.1.31", "CFBundleVersion": "36",
+                    "CFBundleExecutable": "Fixture", "CFBundlePackageType": "APPL",
+                }))
+                resources = app / "Contents/Resources"
+                resources.mkdir()
+                (resources / "fixture.txt").write_text("Fixture")
+                (resources / "linked.txt").symlink_to("fixture.txt")
+                identity = subprocess.check_output([str(module.ROOT / "scripts/ensure_local_signing_identity.sh")], text=True).strip()
+                subprocess.run(["/usr/bin/xattr", "-cr", str(app)], check=True)
+                subprocess.run(["/usr/bin/codesign", "--force", "--sign", identity, str(app)], check=True)
             outside = root / "unrelated.txt"
             outside.write_text("unrelated")
             token = "0081;66000000;Pasteory First Launch Test;"

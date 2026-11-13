@@ -28,7 +28,7 @@ verify_app() {
   [[ "$("$PLIST_BUDDY" -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" == "$EXPECTED_VERSION" \
      && "$("$PLIST_BUDDY" -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")" == "$EXPECTED_BUILD" ]] \
     || fail 'The installed version differs from this DMG. 已安装版本与此安装包不一致，请先替换应用。'
-  "$CODESIGN" --verify --deep --strict --test-requirement "$EXPECTED_REQUIREMENT" "$app" \
+  "$CODESIGN" --verify --deep --strict --test-requirement "=$EXPECTED_REQUIREMENT" "$app" \
     || fail 'App signature verification failed. 应用签名校验失败，未做任何豁免。'
   local details
   details=$("$CODESIGN" -d --verbose=4 "$app" 2>&1) \

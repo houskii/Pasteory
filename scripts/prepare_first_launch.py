@@ -27,7 +27,7 @@ def bundle_metadata(app):
     details = subprocess.run([COMMANDS["CODESIGN"], "-d", "--verbose=4", str(app)], check=True, capture_output=True, text=True)
     requirements = subprocess.run([COMMANDS["CODESIGN"], "-d", "-r-", str(app)], check=True, capture_output=True, text=True)
     cdhash = re.search(r"^CDHash=([0-9a-fA-F]{40,64})$", details.stderr, re.MULTILINE)
-    requirement = re.search(r"^designated => (.+)$", requirements.stdout + requirements.stderr, re.MULTILINE)
+    requirement = re.search(r"^designated => (.+)$", requirements.stdout + "\n" + requirements.stderr, re.MULTILINE)
     if not cdhash or not requirement:
         raise ValueError("Cannot read the app's code hash and designated requirement")
     return {"EXPECTED_VERSION": info["CFBundleShortVersionString"], "EXPECTED_BUILD": info["CFBundleVersion"],
