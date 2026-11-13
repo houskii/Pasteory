@@ -17,7 +17,9 @@ else
     exit 1
   }
   # Never replace an existing key. The private key stays in the publisher's login Keychain.
-  if ! "$SPARKLE_TOOLS/generate_keys" --account "$KEY_ACCOUNT" -p 2>/dev/null; then
+  if UPDATE_KEY=$("$SPARKLE_TOOLS/generate_keys" --account "$KEY_ACCOUNT" -p 2>/dev/null); then
+    print -r -- "$UPDATE_KEY"
+  else
     "$SPARKLE_TOOLS/generate_keys" --account "$KEY_ACCOUNT" >&2
     "$SPARKLE_TOOLS/generate_keys" --account "$KEY_ACCOUNT" -p
   fi
