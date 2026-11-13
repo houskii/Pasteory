@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><!-- sparkle-sign-warning:
+IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
+--><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+  <channel>
+    <title>Pasteory Beta</title>
+    <link>https://github.com/houskii/Pasteory/releases</link>
+    <language>en</language>
+    <item>
+      <title>Pasteory 0.1.31</title>
+      <link>https://github.com/houskii/Pasteory/releases/tag/v0.1.31</link>
+      <pubDate>Fri, 13 Nov 2026 12:58:59 +0000</pubDate>
+      <description sparkle:descriptionFormat="plain-text"># Pasteory 0.1.31 Beta
+
+- English is now the default on first launch. Switch instantly between English and Simplified Chinese in Settings → General → Interface Language; your choice is remembered.
+- The Quick Panel, Library, Settings, menus, dialogs, update prompts, and Chrome extension popup support both languages. Clipboard content, titles, notes, and custom groups keep their original text.
+- The English README now focuses on everyday use, links to a Chinese version, and includes new Quick Panel and Library screenshots in both languages.
+- The Library lives in a larger, resizable Settings window. ⌘L opens the Library; ⌘, opens General.
+- Daily update checks and an independently colored Update ↓ button let you review release notes before confirming a GitHub download, verification, installation, and restart.
+
+This Beta is built in Release configuration and uses a local development code signature generated on macOS. It is not signed with an Apple Developer ID certificate and is not notarized.
+
+If direct paste stops working after upgrading an older locally signed build, re-enable Pasteory in System Settings → Privacy &amp; Security → Accessibility.
+
+Requires macOS 14 or later and Apple Silicon. Versions 0.1.29 and earlier need one manual installation to gain the updater.
+
+---
+
+- 首次启动默认英文，可在“设置 → 通用 → 界面语言”即时切换简体中文 / English，并记住选择。
+- 快捷面板、资料库、设置、菜单、弹窗、更新提示和 Chrome 插件弹窗均支持两种语言。剪贴板内容、标题、备注和自定义分组保留原文。
+- README 默认英文并提供中文入口，补充两种语言的快捷面板和资料库截图，专注日常使用。
+- 资料库位于更大的可缩放设置窗口，⌘L 定位资料库，⌘, 打开通用设置。
+- 每日检查更新，发现新版时显示独立配色的“更新 ↓”，查看说明并确认后才从 GitHub 下载、校验、安装和重启。
+
+此 Beta 使用 Release 编译配置及 macOS 本地生成的开发代码签名；未使用 Apple Developer ID 证书，也未经过 Apple 公证。
+
+从旧的本地签名版本升级后，如果直接粘贴失效，请在“系统设置 → 隐私与安全性 → 辅助功能”中重新允许 Pasteory。
+
+需要 macOS 14 或更高版本及 Apple Silicon。0.1.29 及更早版本需先手动安装一次，才具备应用内更新能力。</description>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/houskii/Pasteory/releases/download/v0.1.31/Pasteory-0.1.31-arm64.dmg" length="7791571" type="application/octet-stream" sparkle:version="36" sparkle:shortVersionString="0.1.31" sparkle:edSignature="5kRFBW7qY7fisEtG8vm6AXL4qF7nMh4184k6qZeS6onwJrZKsj6WQPDi25cA9fWFz3CIRYERU7U24T8F0iXVCw==" sparkle:os="macos"></enclosure>
+    </item>
+  </channel>
+</rss><!-- sparkle-signatures:
+edSignature: 2F0x8MGcgbllrO7PSHzpmIUs8Gi5iyQzU3FvS+8Wv2tdnl8E9Pbl9Anqd6Aob63iYpQBrf3wvlNwr0wtF+nZAg==
+length: 3671
+-->
