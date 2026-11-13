@@ -297,11 +297,31 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
     }
 
     private func saveDebugSnapshot(of window: NSWindow, to path: String) {
+        if let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--debug-switch-language=") }),
+           let language = AppLanguage(rawValue: String(argument.dropFirst("--debug-switch-language=".count))),
+           settings.appLanguage != language {
+            settings.appLanguage = language
+            Task {
+                try? await Task.sleep(for: .milliseconds(400))
+                saveDebugSnapshot(of: window, to: path)
+            }
+            return
+        }
         guard let view = window.contentView else { return }
         view.layoutSubtreeIfNeeded()
         guard let representation = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
         view.cacheDisplay(in: view.bounds, to: representation)
         guard let data = representation.representation(using: .png, properties: [:]) else { return }
+        let metadata: [String: Any] = [
+            "language": settings.appLanguage.rawValue,
+            "textLabel": ClipKind.text.displayName,
+            "editMenuTitle": NSApp.mainMenu?.items.dropFirst().first?.submenu?.title ?? "",
+            "windowTitle": window.title,
+            "sampleTitles": state.quickClips.map(\.title)
+        ]
+        if let metadataData = try? JSONSerialization.data(withJSONObject: metadata, options: [.prettyPrinted, .sortedKeys]) {
+            try? metadataData.write(to: URL(fileURLWithPath: path + ".json"), options: .atomic)
+        }
         try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
     }
 

@@ -41,6 +41,10 @@ capture library-en --debug-language=en --debug-open-library --debug-settings-wid
 capture library-zh --debug-language=zh-Hans --debug-open-library --debug-settings-wide
 capture settings-language-en --debug-language=en --debug-open-settings
 capture settings-language-zh --debug-language=zh-Hans --debug-open-settings
+capture switched-to-zh --debug-language=en --debug-switch-language=zh-Hans --debug-show-quick-window
+capture switched-to-en --debug-language=zh-Hans --debug-switch-language=en --debug-show-quick-window
+capture settings-shortcuts-en --debug-language=en --debug-open-settings --debug-settings-shortcuts
+capture settings-links-en --debug-language=en --debug-open-settings --debug-settings-links
 capture update-amber --debug-show-quick-window --debug-update-available --debug-theme=blue
 capture update-cyan-narrow --debug-show-quick-window --debug-update-available --debug-theme=orange --debug-panel-narrow
 capture update-cyan-dark --debug-show-quick-window --debug-update-available --debug-theme=orange --debug-dark
@@ -55,3 +59,21 @@ wide_width=$(sips -g pixelWidth "$OUTPUT_DIR/settings-library-wide.png" | awk '/
 narrow_width=$(sips -g pixelWidth "$OUTPUT_DIR/settings-library-narrow.png" | awk '/pixelWidth/{print $2}')
 [[ "$wide_width" == 1360 || "$wide_width" == 2720 ]]
 [[ "$narrow_width" == 1120 || "$narrow_width" == 2240 ]]
+
+# Verify an already visible UI switches language, including AppKit menus, without changing demo content.
+python3 - "$OUTPUT_DIR" <<'PYTHON'
+import json
+from pathlib import Path
+import sys
+root = Path(sys.argv[1])
+for name, language, text, menu, title in [
+    ("switched-to-zh", "zh-Hans", "文字", "编辑", "Ideas worth keeping"),
+    ("switched-to-en", "en", "Text", "Edit", "值得留下的灵感"),
+]:
+    metadata = json.loads((root / (name + ".png.json")).read_text())
+    assert metadata["language"] == language, metadata
+    assert metadata["textLabel"] == text, metadata
+    assert metadata["editMenuTitle"] == menu, metadata
+    assert title in metadata["sampleTitles"], metadata
+print("Live language switching and original demo titles verified in both directions.")
+PYTHON

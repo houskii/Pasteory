@@ -284,8 +284,9 @@ final class AppSettings: ObservableObject {
     init(defaults: UserDefaults = .standard, logsDirectory: URL? = nil) {
         self.defaults = defaults
         fileCommandLogsDirectory = logsDirectory?.appendingPathComponent("FileCommands", isDirectory: true)
-        appLanguage = Self.preferredLanguage(in: defaults)
-        defaults.set([appLanguage.rawValue], forKey: "AppleLanguages")
+        let initialLanguage = Self.preferredLanguage(in: defaults)
+        appLanguage = initialLanguage
+        defaults.set([initialLanguage.rawValue], forKey: "AppleLanguages")
         completedOnboarding = defaults.bool(forKey: Key.completedOnboarding)
         if defaults.integer(forKey: Key.monitoringDefaultVersion) < 2 {
             monitoringEnabled = true
