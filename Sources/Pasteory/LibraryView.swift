@@ -1,5 +1,6 @@
 import AppKit
 import PasteoryCore
+import PasteoryAI
 import SwiftUI
 
 struct LibraryView: View {
@@ -74,6 +75,9 @@ struct LibraryView: View {
         .sheet(isPresented: $showNewNormalCollection) { CollectionNameEditor(state: state, existing: nil) }
         .sheet(item: $editingNormalCollection) { CollectionNameEditor(state: state, existing: $0) }
         .sheet(item: $editingSmartCollection) { SmartCollectionEditor(state: state, existing: $0) }
+        .sheet(isPresented: Binding(get: { state.intelligence.showingReview }, set: { state.intelligence.showingReview = $0 })) {
+            AIReviewView(controller: state.intelligence)
+        }
         .sheet(item: $state.libraryAggregationDraft) { draft in
             LibraryAggregationEditor(state: state, draft: draft) { state.libraryAggregationDraft = nil }
         }
@@ -117,17 +121,24 @@ struct LibraryView: View {
                     ForEach(ClipKind.allCases, id: \.self) { kind in sidebarRow(kind.displayName, symbol: kind.symbolName, filter: .kind(kind)) }
 
                     LibrarySectionLabel(title: L10n.tr("普通分组")).padding(.top, 12)
-                    ForEach(state.collections.filter { $0.kind == .normal }) { collection in
+                    ForEach(state.collections.filter { $0.kind == .normal && state.intelligence.state.groups[$0.id] == nil }) { collection in
                         collectionRow(collection)
                     }
                     addCollectionButton(L10n.tr("新建分组"), symbol: "folder.badge.plus") { showNewNormalCollection = true }
 
-                    LibrarySectionLabel(title: L10n.tr("智能分组")).padding(.top, 12)
+                    LibrarySectionLabel(title: L10n.tr("规则分组")).padding(.top, 12)
                     ForEach(state.collections.filter { $0.kind == .smart }) { collection in
                         collectionRow(collection)
                     }
                     addCollectionButton(L10n.tr("新建智能分组"), symbol: "sparkles") {
                         editingSmartCollection = ClipCollection(name: "", kind: .smart, sortOrder: state.collections.count, ruleSet: SmartRuleSet())
+                    }
+                    LibrarySectionLabel(title: L10n.tr("AI 分组")).padding(.top, 12)
+                    ForEach(aiCollections(archived: false)) { collection in collectionRow(collection) }
+                    if !aiCollections(archived: true).isEmpty {
+                        DisclosureGroup(L10n.tr("归档的 AI 分组")) {
+                            ForEach(aiCollections(archived: true)) { collection in collectionRow(collection) }
+                        }.font(.caption).padding(.horizontal, 8)
                     }
                 }
                 .padding(.horizontal, 10)
@@ -188,13 +199,16 @@ struct LibraryView: View {
             Task { await state.refreshLibrary() }
         } label: {
             HStack(spacing: 9) {
-                Image(systemName: collection.kind == .smart ? "sparkles" : "folder")
+                Image(systemName: state.intelligence.state.groups[collection.id] != nil ? "sparkle" : collection.kind == .smart ? "sparkles" : "folder")
                     .font(.system(size: 13, weight: .medium))
                     .frame(width: 18)
                 Text(String(collection.name.prefix(40)))
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 4)
+                if let group = state.intelligence.state.groups[collection.id] {
+                    Text(L10n.text(state.intelligence.groupActivity(group).stage.title)).font(.system(size: 9)).foregroundStyle(.secondary)
+                }
                 Image(systemName: "line.3.horizontal")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(selected ? Color.white.opacity(0.75) : Color.secondary.opacity(0.55))
@@ -219,13 +233,31 @@ struct LibraryView: View {
             return true
         }
         .contextMenu {
-            if collection.kind == .smart {
+            if state.intelligence.state.groups[collection.id] != nil {
+                Button(L10n.tr("编辑主题与描述…")) { editingNormalCollection = collection }
+                Button(L10n.tr("按当前定义重新检查成员")) { state.intelligence.analyze(groupID: collection.id) }
+                    .disabled(state.intelligence.running)
+                Button(L10n.tr("压缩本组旧资料")) { Task { await state.intelligence.compress(groupID: collection.id) } }
+                    .disabled(state.intelligence.running || state.intelligence.storageBusy)
+            } else if collection.kind == .smart {
                 Button(L10n.tr("编辑名称和规则…")) { editingSmartCollection = collection }
             } else {
                 Button(L10n.tr("重命名…")) { editingNormalCollection = collection }
             }
             Divider()
             Button(L10n.tr("删除分组"), role: .destructive) { confirmDeleteCollection(collection) }
+        }
+    }
+
+    private func aiCollections(archived: Bool) -> [ClipCollection] {
+        state.collections.filter { collection in
+            guard let group = state.intelligence.state.groups[collection.id] else { return false }
+            return (state.intelligence.groupActivity(group).stage == .archived && !group.retained) == archived
+        }.sorted { a, b in
+            guard let lhs = state.intelligence.state.groups[a.id], let rhs = state.intelligence.state.groups[b.id] else { return a.sortOrder < b.sortOrder }
+            if lhs.retained != rhs.retained { return lhs.retained }
+            let ls = state.intelligence.groupActivity(lhs).score, rs = state.intelligence.groupActivity(rhs).score
+            return ls == rs ? a.sortOrder < b.sortOrder : ls > rs
         }
     }
 
@@ -275,6 +307,17 @@ struct LibraryView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .quickActionShortcut(state.settings.quickShortcut(for: .quickActions))
+                    Menu {
+                        Button(L10n.tr("分析最近内容")) { state.intelligence.analyze() }
+                        Button(L10n.tr("检查整理建议")) { state.intelligence.showingReview = true }
+                            .disabled(state.intelligence.pending == nil)
+                        Button(L10n.tr("分批整理全库")) { state.intelligence.analyze(all: true) }
+                        if state.intelligence.latestUndoable != nil {
+                            Button(L10n.tr("撤销最近一次整理")) { Task { await state.intelligence.undo() } }
+                        }
+                    } label: { Label(L10n.tr("AI 整理"), systemImage: "sparkles") }
+                    .menuStyle(.borderlessButton).fixedSize()
+                    .disabled(state.intelligence.running)
                     if !state.libraryQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Button {
                             Task { state.libraryAggregationDraft = await state.makeLibraryAggregationDraft() }
@@ -452,6 +495,17 @@ struct LibraryView: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
+                        inspectorSection(L10n.tr("生命周期与 AI")) {
+                            HStack {
+                                let activity = state.settings.aiConfiguration.lifecycle.evaluate(clip.activity)
+                                Text(L10n.text(activity.stage.title)).font(.caption.weight(.semibold))
+                                Spacer()
+                                Text(activity.score.formatted(.percent.precision(.fractionLength(0)))).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                            }
+                            Toggle(L10n.tr("禁止此内容参与 AI 分析"), isOn: Binding(get: { clip.aiAnalysisExcluded == true }, set: { value in
+                                state.mutate(clip) { $0.aiAnalysisExcluded = value }
+                            })).toggleStyle(.switch).font(.caption)
+                        }
                         inspectorSection(L10n.tr("预览")) {
                             RepresentationPreview(clip: clip, attachments: state.attachments)
                                 .frame(minHeight: 150, maxHeight: 240)
@@ -910,6 +964,15 @@ private struct LibraryAggregationInspector: View {
             LibraryDivider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
+                    if let summary = state.intelligence.state.summaries[aggregation.id] {
+                        AISummaryCard(summary: summary, controller: state.intelligence) { id in
+                            Task {
+                                state.libraryFilter = state.intelligence.clipIndex[id]?.isArchived == true ? .archived : .all
+                                state.libraryQuery = ""; await state.refreshLibrary()
+                                state.selectedAggregationID = nil; state.selectedClipID = id
+                            }
+                        }
+                    }
                     VStack(alignment: .leading, spacing: 5) {
                         Text(aggregation.displayTitle).font(.headline)
                         if !aggregation.note.isEmpty { Text(aggregation.note).foregroundStyle(.secondary) }
@@ -1135,12 +1198,17 @@ struct CollectionNameEditor: View {
     @Environment(\.dismiss) private var dismiss
     let existing: ClipCollection?
     @State private var name: String
+    @State private var definition: String
+    @State private var retained: Bool
     @State private var error: String?
 
     init(state: AppState, existing: ClipCollection?) {
         self.state = state
         self.existing = existing
         _name = State(initialValue: existing?.name ?? "")
+        let profile = existing.flatMap { state.intelligence.state.groups[$0.id] }
+        _definition = State(initialValue: profile?.definition ?? "")
+        _retained = State(initialValue: profile?.retained ?? false)
     }
 
     var body: some View {
@@ -1149,6 +1217,19 @@ struct CollectionNameEditor: View {
             VStack(alignment: .leading, spacing: 5) {
                 TextField(L10n.tr("分组名称"), text: Binding(get: { name }, set: { name = String($0.prefix(40)) }))
                 Text("\(name.count)/40").font(.caption2).foregroundStyle(.tertiary).frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            if let existing, let profile = state.intelligence.state.groups[existing.id] {
+                Text(L10n.tr("主题定义")).font(.caption.weight(.semibold))
+                TextEditor(text: $definition).frame(height: 110).padding(5)
+                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.secondary.opacity(0.2)))
+                Text(L10n.tr("用户编辑的定义优先，AI 只维护成员和独立的内容概况。")).font(.caption).foregroundStyle(.secondary)
+                Toggle(L10n.tr("保留此分组"), isOn: $retained).toggleStyle(.switch)
+                if !profile.overview.isEmpty {
+                    Text(L10n.tr("当前内容概况")).font(.caption.weight(.semibold))
+                    Text(profile.overview).font(.caption).textSelection(.enabled)
+                    if profile.overviewIsStale { Text(L10n.tr("概况仅覆盖部分资料或需要更新")).font(.caption2).foregroundStyle(.orange) }
+                }
+                HStack { Spacer(); Button(L10n.tr("保存并重新检查成员")) { save(recheck: true) } }
             }
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
             HStack {
@@ -1162,11 +1243,15 @@ struct CollectionNameEditor: View {
         .onChange(of: name) { _, _ in error = nil }
     }
 
-    private func save() {
+    private func save(recheck: Bool = false) {
         if let message = state.collectionNameValidationMessage(name, excluding: existing?.id) { error = message; return }
         Task {
             let succeeded: Bool
-            if var existing {
+            if let existing, let profile = state.intelligence.state.groups[existing.id] {
+                succeeded = await state.intelligence.saveGroup(id: existing.id, name: name, definition: definition,
+                                                              retained: retained, expectedVersion: profile.definitionVersion)
+                if succeeded && recheck { state.intelligence.analyze(groupID: existing.id) }
+            } else if var existing {
                 existing.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
                 succeeded = await state.saveCollection(existing)
             } else {

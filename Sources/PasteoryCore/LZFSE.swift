@@ -5,7 +5,7 @@ public enum LZFSE {
     public static func compress(_ data: Data) throws -> Data {
         guard !data.isEmpty else { return data }
         var capacity = max(1024, data.count + data.count / 8 + 256)
-        while capacity < data.count * 4 {
+        while capacity <= max(4096, data.count * 4) {
             var destination = Data(count: capacity)
             let written = destination.withUnsafeMutableBytes { output in
                 data.withUnsafeBytes { input in

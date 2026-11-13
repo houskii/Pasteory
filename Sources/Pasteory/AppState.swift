@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import PasteoryCore
+import PasteoryAI
 
 enum QuickScope: Hashable {
     case all
@@ -87,6 +88,7 @@ final class AppState: ObservableObject {
     @Published var storageAnalyticsLoading = false
 
     let settings: AppSettings
+    let intelligence: AIOrganizationController
     let repository: any ClipRepository
     let attachments: AttachmentStore
     let quickTextActions: QuickTextActionCoordinator
@@ -105,6 +107,7 @@ final class AppState: ObservableObject {
     private var appliedLibraryFilter: ClipFilter = .all
     private var statusDismissTask: Task<Void, Never>?
     private var settingsObservation: AnyCancellable?
+    private var intelligenceObservation: AnyCancellable?
     private var storageAnalyticsRequest = UUID()
     private var storageAnalyticsRequestedPeriod: StorageAnalyticsPeriod?
     private let classificationPipeline = ClipClassificationPipeline()
@@ -125,6 +128,7 @@ final class AppState: ObservableObject {
         self.backup = backup
         self.storageAnalyticsService = storageAnalyticsService
         self.settings = settings
+        self.intelligence = AIOrganizationController(repository: repository, settings: settings)
         self.linkResolutionService = linkResolutionService
         let cache = WebCacheMaintenance(settings: settings, measure: {
             await storageAnalyticsService.webKitNetworkCacheBytes()
@@ -137,6 +141,15 @@ final class AppState: ObservableObject {
         }
         self.settingsObservation = settings.objectWillChange.sink { [weak self] in
             Task { @MainActor in self?.objectWillChange.send() }
+        }
+        self.intelligenceObservation = intelligence.objectWillChange.sink { [weak self] in
+            Task { @MainActor in self?.objectWillChange.send() }
+        }
+        intelligence.onApplied = { [weak self] in
+            Task { @MainActor in
+                await self?.refreshCollections(); await self?.refreshLibrary()
+                await self?.refreshQuick(); await self?.refreshAggregations()
+            }
         }
     }
 
@@ -164,7 +177,10 @@ final class AppState: ObservableObject {
         await refreshQuickStats()
         await refreshLinkResolutionData()
         guard processExistingClips else { return }
-        Task.detached(priority: .utility) { [archive] in _ = try? await archive.run() }
+        await intelligence.bootstrap()
+        if !settings.aiConfiguration.lifecycleEnabled {
+            Task.detached(priority: .utility) { [archive] in _ = try? await archive.run() }
+        }
         Task { [weak self] in
             await self?.prepareExistingLinkFallbacks()
             await self?.refreshRecentLinkCaches()
@@ -210,6 +226,7 @@ final class AppState: ObservableObject {
               !clip.previewText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         do {
             let stored = try await repository.saveCaptured(clip, context: capture.sourceContext)
+            intelligence.contentChanged(stored.id)
             replaceLocal(stored)
             quickClips.removeAll { $0.id == stored.id }
             quickClips.insert(stored, at: 0)
@@ -217,7 +234,7 @@ final class AppState: ObservableObject {
             quickClips = SearchRanker.rank(quickClips, query: quickQuery)
             await refreshLibrary()
             await refreshQuickStats()
-            if try await repository.activeClipCount() > RetentionPolicy.default.maximumHotClips {
+            if !settings.aiConfiguration.lifecycleEnabled, try await repository.activeClipCount() > RetentionPolicy.default.maximumHotClips {
                 Task.detached(priority: .utility) { [archive] in _ = try? await archive.run() }
             }
             Task { [weak self, linkResolutionService] in
@@ -727,9 +744,16 @@ final class AppState: ObservableObject {
     }
 
     func update(_ clip: Clip) {
-        replaceLocal(clip)
+        var changed = clip
+        if let previous = clips.first(where: { $0.id == clip.id }) ?? quickClips.first(where: { $0.id == clip.id }),
+           previous.title != clip.title || previous.note != clip.note || previous.previewText != clip.previewText {
+            var activity = previous.activity; activity.record(.edit)
+            changed.intelligenceActivity = activity; changed.lifecycleEvaluation = nil
+        }
+        let value = changed
+        replaceLocal(value)
         Task {
-            do { try await repository.updateExisting(clip) }
+            do { try await repository.updateExisting(value); intelligence.contentChanged(value.id) }
             catch { show(error) }
         }
     }

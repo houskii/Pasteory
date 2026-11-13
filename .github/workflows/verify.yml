@@ -85,6 +85,13 @@ jobs:
       - name: Capture isolated native UI
         timeout-minutes: 5
         run: ./scripts/capture_update_ui.sh
+      - name: Package isolated AI preview
+        run: ditto -c -k --sequesterRsrc --keepParent dist/Pasteory-QA.app dist/Pasteory-AI-Preview.zip
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Pasteory-AI-Preview-macOS-arm64
+          path: dist/Pasteory-AI-Preview.zip
+          if-no-files-found: error
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:

@@ -1,12 +1,15 @@
 import CryptoKit
 import Foundation
 import SQLite3
+import PasteoryAI
 
 public actor SQLiteClipRepository: ClipRepository {
     nonisolated(unsafe) private let database: OpaquePointer
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     private let storageRoot: URL
+    private let intelligencePayloads: ContentPayloadStore
+    private var applyingIntelligence = false
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
     private struct LinkGroupAccumulator {
@@ -24,6 +27,12 @@ public actor SQLiteClipRepository: ClipRepository {
         self.encoder = JSONEncoder()
         self.decoder = JSONDecoder()
         self.storageRoot = databaseURL.deletingLastPathComponent().deletingLastPathComponent()
+        self.intelligencePayloads = try ContentPayloadStore(
+            root: self.storageRoot.appendingPathComponent("AIContent"),
+            rawDirectory: self.storageRoot.appendingPathComponent("Attachments/AIContentRaw"),
+            packedDirectory: self.storageRoot.appendingPathComponent("Archives/AIContent/Packed"),
+            codec: AIPayloadLZFSECodec()
+        )
         self.encoder.dateEncodingStrategy = .millisecondsSince1970
         self.decoder.dateDecodingStrategy = .millisecondsSince1970
         do {
@@ -47,6 +56,8 @@ public actor SQLiteClipRepository: ClipRepository {
     public func saveCaptured(_ clip: Clip, context: CapturedSourceContext?) throws -> Clip {
         // Publish the attachment and its reference on the same actor as cleanup.
         var incoming = try AttachmentStore.externalize(clip, into: storageRoot.appendingPathComponent("Attachments"))
+        incoming.intelligenceActivity = ContentActivity(lastUsedAt: incoming.createdAt)
+        incoming.intelligenceActivity?.record(.copy, at: incoming.createdAt)
         if incoming.identityKey == nil {
             incoming.identityKey = (try? ClipIdentity.key(for: incoming, loadData: loadRepresentationData))
                 ?? "legacy:\(incoming.contentHash)"
@@ -55,6 +66,10 @@ public actor SQLiteClipRepository: ClipRepository {
         try transaction {
             if var previous = try activeClip(identityKey: incoming.deduplicationKey, kind: incoming.primaryKind) {
                 previous.copyCount += max(1, incoming.copyCount)
+                var activity = previous.activity
+                activity.record(.copy, at: incoming.createdAt)
+                previous.intelligenceActivity = activity
+                previous.lifecycleEvaluation = nil
                 previous.lastCopiedAt = max(previous.lastCopiedAt, incoming.createdAt)
                 previous.updatedAt = max(previous.updatedAt, incoming.createdAt)
                 previous.source = incoming.source
@@ -93,6 +108,7 @@ public actor SQLiteClipRepository: ClipRepository {
     }
 
     public func save(_ clip: Clip) throws {
+        let oldMemberships = applyingIntelligence ? nil : try self.clip(id: clip.id)?.collectionIDs
         let payload = try encoder.encode(clip)
         let sql = """
         INSERT INTO clips (
@@ -144,6 +160,9 @@ public actor SQLiteClipRepository: ClipRepository {
         try stepDone(statement)
         try syncCollections(for: clip)
         try updateFTS(for: clip)
+        if let oldMemberships, oldMemberships != clip.collectionIDs {
+            try recordManualAIMembershipChange(before: oldMemberships, clip: clip)
+        }
     }
 
     public func saveBatch(_ clips: [Clip]) throws {
@@ -221,6 +240,8 @@ public actor SQLiteClipRepository: ClipRepository {
         guard var clip = try clip(id: id) else { return nil }
         clip.pasteCount = clip.recordedPasteCount + 1
         clip.lastPastedAt = date
+        var activity = clip.activity; activity.record(.paste, at: date)
+        clip.intelligenceActivity = activity; clip.lifecycleEvaluation = nil
         clip.updatedAt = date
         try save(clip)
         return clip
@@ -456,6 +477,7 @@ public actor SQLiteClipRepository: ClipRepository {
     }
 
     public func saveCollection(_ collection: ClipCollection) throws {
+        let oldName = applyingIntelligence ? nil : try collections().first(where: { $0.id == collection.id })?.name
         let duplicate = try prepare("SELECT 1 FROM collections WHERE id<>? AND lower(trim(name))=lower(trim(?)) LIMIT 1;")
         bind(collection.id.uuidString, at: 1, to: duplicate)
         bind(collection.name, at: 2, to: duplicate)
@@ -469,7 +491,17 @@ public actor SQLiteClipRepository: ClipRepository {
         bind(collection.kind.rawValue, at: 3, to: statement); sqlite3_bind_int(statement, 4, Int32(collection.sortOrder))
         _ = data.withUnsafeBytes { sqlite3_bind_blob(statement, 5, $0.baseAddress, Int32(data.count), Self.transient) }
         try stepDone(statement)
-        try rebuildSearchIndex()
+        if !applyingIntelligence {
+            try rebuildSearchIndex()
+            if let oldName, oldName != collection.name {
+                try updateAIState { state in
+                    if var group = state.groups[collection.id] {
+                        group.name = collection.name; group.nameIsManual = true; group.revision += 1
+                        state.groups[group.id] = group
+                    }
+                }
+            }
+        }
     }
 
     public func removeCollection(id: UUID) throws {
@@ -1275,6 +1307,8 @@ public actor SQLiteClipRepository: ClipRepository {
     private static func migrate(_ database: OpaquePointer) throws {
         try execute(database, """
         CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS intelligence_state(id INTEGER PRIMARY KEY CHECK(id=1), payload_json BLOB NOT NULL);
+        CREATE TABLE IF NOT EXISTS intelligence_undo(id TEXT PRIMARY KEY, payload_json BLOB NOT NULL);
         CREATE TABLE IF NOT EXISTS clips(
           id TEXT PRIMARY KEY, created_at REAL NOT NULL, updated_at REAL NOT NULL, last_copied_at REAL NOT NULL,
           last_pasted_at REAL, last_used_at REAL NOT NULL,
@@ -1591,4 +1625,332 @@ public actor SQLiteClipRepository: ClipRepository {
         try execute(database, "CREATE UNIQUE INDEX IF NOT EXISTS idx_link_resources_canonical ON link_resources(canonical_resource_key);")
         try execute(database, "INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(7,strftime('%s','now'));")
     }
+}
+
+extension SQLiteClipRepository {
+    public func aiState() throws -> AIOrganizationState {
+        let s = try prepare("SELECT payload_json FROM intelligence_state WHERE id=1;")
+        defer { sqlite3_finalize(s) }
+        switch sqlite3_step(s) {
+        case SQLITE_ROW: return try decode(AIOrganizationState.self, statement: s, column: 0)
+        case SQLITE_DONE: return AIOrganizationState()
+        default: throw sqliteError()
+        }
+    }
+
+    public func updateAIState(_ mutation: @Sendable (inout AIOrganizationState) throws -> Void) throws {
+        func work() throws { var state = try aiState(); try mutation(&state); state.compact(); try writeAIState(state) }
+        if sqlite3_get_autocommit(database) == 0 { try work() } else { try transaction(work) }
+    }
+
+    private func writeAIState(_ state: AIOrganizationState) throws {
+        let bytes = try encoder.encode(state)
+        let s = try prepare("INSERT INTO intelligence_state(id,payload_json) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json;")
+        defer { sqlite3_finalize(s) }
+        _ = bytes.withUnsafeBytes { sqlite3_bind_blob(s, 1, $0.baseAddress, Int32(bytes.count), Self.transient) }
+        try stepDone(s)
+    }
+
+    private func recordManualAIMembershipChange(before: Set<UUID>, clip: Clip) throws {
+        var state = try aiState(); var changed = false
+        for id in before.symmetricDifference(clip.collectionIDs) {
+            guard var group = state.groups[id] else { continue }
+            if clip.collectionIDs.contains(id) {
+                group.memberIDs.insert(clip.id); group.excludedClipIDs.remove(clip.id)
+                group.aiMemberIDs.remove(clip.id)
+            } else {
+                group.memberIDs.remove(clip.id); group.aiMemberIDs.remove(clip.id)
+                group.excludedClipIDs.insert(clip.id)
+            }
+            group.revision += 1; state.groups[id] = group; changed = true
+        }
+        if changed { try writeAIState(state) }
+    }
+
+    public func recordHumanActivity(id: UUID, event: ContentActivity.Event, at date: Date) throws {
+        guard var clip = try clip(id: id), clip.deletedAt == nil else { return }
+        var activity = clip.activity; activity.record(event, at: date)
+        clip.intelligenceActivity = activity; clip.lifecycleEvaluation = nil
+        try updateExisting(clip)
+    }
+
+    public func updateAIGroupDefinition(id: UUID, name: String, definition: String, retained: Bool, expectedVersion: Int) throws {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.count <= 40, definition.count <= 2000 else { throw AIError.invalid("Invalid group definition") }
+        try transaction {
+            var state = try aiState()
+            guard var profile = state.groups[id], profile.definitionVersion == expectedVersion,
+                  var collection = try collections().first(where: { $0.id == id }) else { throw AIError.conflict("Topic definition") }
+            let oldApplying = applyingIntelligence; applyingIntelligence = true
+            defer { applyingIntelligence = oldApplying }
+            if collection.name != name { profile.nameIsManual = true }
+            collection.name = name; try saveCollection(collection)
+            profile.name = name; profile.definition = definition; profile.definitionIsManual = true
+            profile.definitionVersion += 1; profile.revision += 1; profile.retained = retained
+            state.groups[id] = profile; try writeAIState(state); try rebuildSearchIndex()
+        }
+    }
+
+    public func applyAIChangeSet(_ proposed: AIChangeSet) throws {
+        guard proposed.commands.count <= 20_000, !proposed.isRejected, !proposed.isUndone else { throw AIError.invalid("Invalid change set") }
+        try transaction {
+            var state = try aiState()
+            if let stored = state.changes.first(where: { $0.id == proposed.id }), stored.isApplied {
+                guard stored.fingerprint == proposed.fingerprint else { throw AIError.conflict("A different result already used this change-set ID") }
+                return
+            }
+            if let stored = state.changes.first(where: { $0.id == proposed.id }) {
+                guard proposed.commands.allSatisfy({ stored.commands.contains($0) }),
+                      proposed.clipRevisions == stored.clipRevisions, proposed.groupRevisions == stored.groupRevisions else {
+                    throw AIError.invalid("Only an unchanged subset of the recorded draft may be applied")
+                }
+            }
+            let currentClips = try allClips()
+            var clipsByID = Dictionary(uniqueKeysWithValues: currentClips.map { ($0.id, $0) })
+            for (id, version) in proposed.clipRevisions {
+                guard let clip = clipsByID[id], clip.mayParticipateInAI, clip.aiRevision == version else { throw AIError.conflict(id.uuidString) }
+            }
+            for (id, version) in proposed.groupRevisions {
+                guard state.groups[id]?.revision == version else { throw AIError.conflict(id.uuidString) }
+            }
+            var undo = AIUndoRecord(beforeMemberships: [:], afterMemberships: [:], beforeGroups: [:], afterGroups: [:],
+                                    createdGroupIDs: [], createdAggregations: [], beforeSummaries: [:], changedSummaryIDs: [])
+            var changedGroups = Set<UUID>()
+            var changedClips = Set<UUID>()
+            var createdAggregations = [UUID: ClipAggregation]()
+            var targetMap = [UUID: UUID]()
+            let existingAggregations = try aggregations()
+            let oldApplying = applyingIntelligence; applyingIntelligence = true
+            defer { applyingIntelligence = oldApplying }
+            for cmd in proposed.commands {
+                guard cmd.name.count <= 120, cmd.definition.count <= 2000, cmd.overview.count <= 2000,
+                      cmd.reason.count <= 1000, cmd.clipIDs.count <= 100,
+                      Set(cmd.clipIDs).count == cmd.clipIDs.count else { throw AIError.invalid("Invalid command bounds") }
+                if [.addItems, .removeItems, .createAggregation, .updateOverview].contains(cmd.kind) {
+                    for id in cmd.clipIDs {
+                        guard proposed.clipRevisions[id] != nil, clipsByID[id]?.mayParticipateInAI == true else {
+                            throw AIError.invalid("Unread or excluded content in a command")
+                        }
+                    }
+                }
+                switch cmd.kind {
+                case .createGroup:
+                    guard state.groups[cmd.targetID] == nil, !cmd.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                          cmd.name.count <= 40, !cmd.definition.isEmpty,
+                          !(try collections()).contains(where: { $0.id == cmd.targetID }) else { throw AIError.invalid("Invalid new group") }
+                    let collection = ClipCollection(id: cmd.targetID, name: cmd.name, kind: .normal, sortOrder: try collections().count)
+                    try saveCollection(collection)
+                    state.groups[cmd.targetID] = AIGroupProfile(id: cmd.targetID, name: cmd.name, definition: cmd.definition)
+                    undo.createdGroupIDs.insert(cmd.targetID); changedGroups.insert(cmd.targetID)
+                case .addItems, .removeItems, .updateOverview:
+                    guard var profile = state.groups[cmd.targetID],
+                          undo.createdGroupIDs.contains(cmd.targetID) || proposed.groupRevisions[cmd.targetID] != nil else {
+                        throw AIError.invalid("Only versioned AI groups can be changed")
+                    }
+                    if !undo.createdGroupIDs.contains(profile.id), undo.beforeGroups[profile.id] == nil { undo.beforeGroups[profile.id] = profile }
+                    if cmd.kind == .updateOverview {
+                        guard !cmd.clipIDs.isEmpty, Set(cmd.clipIDs).isSubset(of: profile.memberIDs), !cmd.overview.isEmpty else { throw AIError.invalid("Invalid overview coverage") }
+                        profile.overview = cmd.overview
+                        profile.overviewMemberFingerprint = Set(cmd.clipIDs) == profile.memberIDs ? profile.membershipFingerprint : ""
+                    } else {
+                        for id in cmd.clipIDs {
+                            guard var clip = clipsByID[id] else { throw AIError.invalid("Unknown content") }
+                            if undo.beforeMemberships[id] == nil { undo.beforeMemberships[id] = clip.collectionIDs }
+                            if cmd.kind == .addItems {
+                                guard !profile.excludedClipIDs.contains(id) else { throw AIError.invalid("This member was excluded by the user") }
+                                if !clip.collectionIDs.contains(profile.id) { profile.aiMemberIDs.insert(id) }
+                                profile.memberIDs.insert(id); clip.collectionIDs.insert(profile.id)
+                            } else {
+                                guard profile.aiMemberIDs.contains(id) else { throw AIError.invalid("Cannot remove a manually assigned member") }
+                                profile.memberIDs.remove(id); profile.aiMemberIDs.remove(id); clip.collectionIDs.remove(profile.id)
+                            }
+                            clipsByID[id] = clip; changedClips.insert(id)
+                        }
+                    }
+                    state.groups[profile.id] = profile; changedGroups.insert(profile.id)
+                case .createAggregation:
+                    guard cmd.clipIDs.count >= 2, !cmd.name.isEmpty,
+                          createdAggregations[cmd.targetID] == nil,
+                          !existingAggregations.contains(where: { $0.id == cmd.targetID }) else { throw AIError.invalid("Invalid aggregation") }
+                    // Repeated analysis of the same AI bundle reuses its identity.
+                    if let existing = existingAggregations.first(where: {
+                        state.summaries[$0.id] != nil && $0.title == cmd.name && Set($0.memberClipIDs) == Set(cmd.clipIDs)
+                    }) { targetMap[cmd.targetID] = existing.id; createdAggregations[cmd.targetID] = existing }
+                    else {
+                        let aggregation = ClipAggregation(id: cmd.targetID, title: cmd.name, memberClipIDs: cmd.clipIDs,
+                                                          membershipMode: .automatic, origin: .condition(summary: "AI"))
+                        createdAggregations[cmd.targetID] = aggregation; undo.createdAggregations.append(aggregation)
+                    }
+                case .setSummary:
+                    guard let target = createdAggregations[cmd.targetID], !cmd.claims.isEmpty, cmd.claims.count <= 20 else { throw AIError.invalid("Unknown summary target") }
+                    let resolved = targetMap[cmd.targetID] ?? cmd.targetID
+                    var revisions = [UUID: String]()
+                    for claim in cmd.claims {
+                        guard !claim.text.isEmpty, claim.text.count <= 1200, !claim.evidence.isEmpty, claim.evidence.count <= 10 else { throw AIError.invalid("Invalid claim") }
+                        for ref in claim.evidence {
+                            guard target.memberClipIDs.contains(ref.clipID), let clip = clipsByID[ref.clipID],
+                                  let revision = proposed.clipRevisions[ref.clipID], !ref.quote.isEmpty, ref.quote.count <= 800,
+                                  try evidenceText(for: clip).contains(ref.quote) else { throw AIError.invalid("Invalid original-text evidence") }
+                            _ = revision
+                            revisions[ref.clipID] = clip.aiContentRevision
+                        }
+                    }
+                    if let old = state.summaries[resolved], undo.beforeSummaries[resolved] == nil { undo.beforeSummaries[resolved] = old }
+                    undo.changedSummaryIDs.insert(resolved)
+                    state.summaries[resolved] = AISummary(targetID: resolved, claims: cmd.claims, sourceRevisions: revisions)
+                }
+            }
+            for id in changedGroups {
+                guard var profile = state.groups[id], !undo.createdGroupIDs.contains(id) || !profile.memberIDs.isEmpty else { throw AIError.invalid("Cannot commit an empty AI group") }
+                profile.revision += 1; state.groups[id] = profile; undo.afterGroups[id] = profile
+            }
+            for id in changedClips {
+                guard let clip = clipsByID[id] else { continue }
+                try save(clip); undo.afterMemberships[id] = clip.collectionIDs
+            }
+            for aggregation in undo.createdAggregations { _ = try saveAggregation(aggregation) }
+            var applied = proposed; applied.isApplied = true
+            state.changes.removeAll { $0.id == applied.id }; state.changes.append(applied); state.compact()
+            try writeAIState(state)
+            let bytes = try encoder.encode(undo)
+            let s = try prepare("INSERT INTO intelligence_undo(id,payload_json) VALUES(?,?);")
+            defer { sqlite3_finalize(s) }; bind(applied.id.uuidString, at: 1, to: s)
+            _ = bytes.withUnsafeBytes { sqlite3_bind_blob(s, 2, $0.baseAddress, Int32(bytes.count), Self.transient) }
+            try stepDone(s)
+        }
+    }
+
+    public func undoAIChangeSet(_ id: UUID) throws {
+        try transaction {
+            var state = try aiState()
+            guard let index = state.changes.firstIndex(where: { $0.id == id && $0.isApplied && !$0.isUndone }) else { throw AIError.invalid("No undoable change set") }
+            let s = try prepare("SELECT payload_json FROM intelligence_undo WHERE id=?;")
+            defer { sqlite3_finalize(s) }; bind(id.uuidString, at: 1, to: s)
+            guard sqlite3_step(s) == SQLITE_ROW else { throw AIError.invalid("Missing undo record") }
+            let undo = try decode(AIUndoRecord.self, statement: s, column: 0)
+            for (groupID, expected) in undo.afterGroups {
+                guard state.groups[groupID] == expected else { throw AIError.conflict("Group changed after this organization") }
+            }
+            for (clipID, expected) in undo.afterMemberships {
+                guard try clip(id: clipID)?.collectionIDs == expected else { throw AIError.conflict("Membership changed after this organization") }
+            }
+            for expected in undo.createdAggregations {
+                guard try aggregation(id: expected.id) == expected else { throw AIError.conflict("Aggregation changed after this organization") }
+            }
+            let oldApplying = applyingIntelligence; applyingIntelligence = true
+            defer { applyingIntelligence = oldApplying }
+            for (clipID, memberships) in undo.beforeMemberships {
+                guard var current = try clip(id: clipID) else { throw AIError.conflict("Content was removed") }
+                current.collectionIDs = memberships; try save(current)
+            }
+            for groupID in undo.createdGroupIDs { try removeCollection(id: groupID); state.groups.removeValue(forKey: groupID) }
+            for (groupID, profile) in undo.beforeGroups { state.groups[groupID] = profile }
+            for aggregation in undo.createdAggregations { try removeAggregation(id: aggregation.id) }
+            for target in undo.changedSummaryIDs { state.summaries[target] = undo.beforeSummaries[target] }
+            state.changes[index].isUndone = true
+            try writeAIState(state)
+        }
+    }
+
+    private func evidenceText(for clip: Clip) throws -> String {
+        var body = clip.previewText
+        if [.text, .code, .color].contains(clip.primaryKind) {
+            for r in clip.items.flatMap(\.representations) where ["public.utf8-plain-text", "public.plain-text"].contains(r.uti) && r.storage.byteCount <= 2_097_152 {
+                if let value = String(data: try loadRepresentationData(r), encoding: .utf8) { body = value; break }
+            }
+        }
+        return [clip.displayTitle, body, clip.note].joined(separator: "\n")
+    }
+
+    public func compressAIGroup(id groupID: UUID?, policy: LifecyclePolicy, now: Date) async throws -> Int {
+        try policy.validate()
+        let initial = try allClips()
+        let aggregations = try aggregations()
+        let selected = initial.filter {
+            $0.deletedAt == nil && !$0.isPinned && !$0.isFavorite &&
+            (groupID == nil || $0.collectionIDs.contains(groupID!)) && policy.evaluate($0.activity, now: now).compressionEligible
+        }
+        let beforeManifest = await intelligencePayloads.snapshot()
+        var touched = Set<String>()
+        for clip in selected {
+            try Task.checkCancellation()
+            for representation in clip.items.flatMap(\.representations) {
+                let data = try loadRepresentationData(representation)
+                guard data.count <= 536_870_912 else { continue }
+                let hash = AIHash.digest(data)
+                var owners = [String](); var toPack = [String]()
+                for other in initial {
+                    for rep in other.items.flatMap(\.representations) where payloadID(rep) == hash {
+                        let refs = payloadOwners(clip: other, representationID: rep.id, aggregations: aggregations)
+                        owners.append(contentsOf: refs)
+                        if other.id == clip.id {
+                            if let groupID {
+                                toPack.append(contentsOf: refs.filter { $0.hasPrefix("group:" + groupID.uuidString + ":") })
+                            } else { toPack.append(contentsOf: refs) }
+                        }
+                    }
+                }
+                let canonical = "canonical:" + hash
+                owners.append(canonical); toPack.append(canonical)
+                _ = try await intelligencePayloads.register(data, ownerIDs: owners)
+                // A genuinely re-used content version restores its raw demand;
+                // model-maintained overview timestamps never reach this check.
+                for owner in owners where !owner.hasPrefix("canonical:") {
+                    if let old = beforeManifest.references[owner], old.mode == .packed,
+                       clip.activity.lastUsedAt > old.changedAt { try await intelligencePayloads.restoreRaw(ownerID: owner) }
+                }
+                _ = try await intelligencePayloads.pack(ownerIDs: Array(Set(toPack)))
+                touched.insert(hash)
+            }
+        }
+        let manifest = await intelligencePayloads.snapshot()
+        var modes = [String: PayloadReferenceMode]()
+        for hash in touched { modes[hash] = await intelligencePayloads.referenceCounts(for: hash).raw == 0 ? .packed : .raw }
+        // Commit all database representations before considering any raw unlink.
+        // saveArchived compares the persisted object, including manual changes.
+        for original in try allClips() {
+            var changed = original
+            for item in changed.items.indices {
+                for index in changed.items[item].representations.indices {
+                    let rep = changed.items[item].representations[index]
+                    let hash = payloadID(rep)
+                    guard let mode = modes[hash], let record = manifest.records[hash], record.verified else { continue }
+                    if mode == .packed {
+                        changed.items[item].representations[index].storage = .archived(relativePath: "AIContent/Packed/" + record.packedFilename,
+                                                                                     checksum: hash, size: record.originalSize)
+                    } else {
+                        changed.items[item].representations[index].storage = .attachment(relativePath: "AIContentRaw/" + record.rawFilename,
+                                                                                       checksum: hash, size: record.originalSize)
+                    }
+                }
+            }
+            if changed.items != original.items { _ = try saveArchived(changed, replacing: original) }
+        }
+        var external = Set<String>()
+        for clip in try allClips() {
+            for rep in clip.items.flatMap(\.representations) {
+                if case .archived(let path, _, _) = rep.storage, path.hasPrefix("AIContent/Packed/") { continue }
+                external.insert(payloadID(rep))
+            }
+        }
+        return try await intelligencePayloads.releaseUnreferencedRaw(excluding: external)
+    }
+
+    private func payloadID(_ representation: ClipRepresentation) -> String {
+        switch representation.storage {
+        case .inline(let data): AIHash.digest(data)
+        case .attachment(_, let checksum, _), .archived(_, let checksum, _): checksum
+        }
+    }
+    private func payloadOwners(clip: Clip, representationID: UUID, aggregations: [ClipAggregation]) -> [String] {
+        let suffix = ":" + clip.id.uuidString + ":" + representationID.uuidString
+        var owners = clip.collectionIDs.map { "group:" + $0.uuidString + suffix }
+        owners += aggregations.filter { $0.memberClipIDs.contains(clip.id) }.map { "aggregation:" + $0.id.uuidString + suffix }
+        if owners.isEmpty { owners.append("library" + suffix) }
+        if clip.isPinned || clip.isFavorite || clip.deletedAt != nil { owners.append("protected" + suffix) }
+        return owners
+    }
+
+    public func exportAIContent(to destination: URL) async throws { try await intelligencePayloads.exportArchive(to: destination) }
+    public func importAIContent(from source: URL) async throws { try await intelligencePayloads.importArchive(from: source) }
 }

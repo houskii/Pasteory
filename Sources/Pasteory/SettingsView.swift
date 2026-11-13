@@ -123,6 +123,7 @@ struct SettingsView: View {
             settings.finishFileCommandLog(execution: execution, exitCode: 0)
         }
         if ProcessInfo.processInfo.arguments.contains("--debug-settings-links") { selectedDestination = .linkResolution }
+        if ProcessInfo.processInfo.arguments.contains("--debug-settings-ai") { selectedDestination = .aiOrganization }
         if ProcessInfo.processInfo.arguments.contains("--debug-settings-shortcuts") { selectedDestination = .shortcuts }
         if ProcessInfo.processInfo.arguments.contains("--debug-settings-storage") { selectedDestination = .storage }
         if ProcessInfo.processInfo.arguments.contains("--debug-settings-storage-thirty-days") {
@@ -201,6 +202,7 @@ struct SettingsView: View {
         case .shortcuts: shortcuts
         case .openBehavior: openBehavior
         case .linkResolution: linkResolution
+        case .aiOrganization: AISettingsView(controller: state.intelligence)
         case .storage: storage
         case .advanced: advanced
         case .about: about
@@ -211,7 +213,7 @@ struct SettingsView: View {
         [
             DestinationGroup(title: L10n.tr("内容"), destinations: [.library]),
             DestinationGroup(title: L10n.tr("基础设置"), destinations: [.general, .privacy]),
-            DestinationGroup(title: L10n.tr("交互与内容"), destinations: [.shortcuts, .openBehavior, .linkResolution]),
+            DestinationGroup(title: L10n.tr("交互与内容"), destinations: [.shortcuts, .openBehavior, .linkResolution, .aiOrganization]),
             DestinationGroup(title: L10n.tr("数据与支持"), destinations: [.storage, .advanced, .about])
         ]
     }

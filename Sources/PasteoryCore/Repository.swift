@@ -1,6 +1,16 @@
 import Foundation
+import PasteoryAI
 
 public protocol ClipRepository: Sendable {
+    func aiState() async throws -> AIOrganizationState
+    func updateAIState(_ mutation: @Sendable (inout AIOrganizationState) throws -> Void) async throws
+    func applyAIChangeSet(_ changeSet: AIChangeSet) async throws
+    func undoAIChangeSet(_ id: UUID) async throws
+    func recordHumanActivity(id: UUID, event: ContentActivity.Event, at: Date) async throws
+    func updateAIGroupDefinition(id: UUID, name: String, definition: String, retained: Bool, expectedVersion: Int) async throws
+    func compressAIGroup(id: UUID?, policy: LifecyclePolicy, now: Date) async throws -> Int
+    func exportAIContent(to: URL) async throws
+    func importAIContent(from: URL) async throws
     func saveCaptured(_ clip: Clip, context: CapturedSourceContext?) async throws -> Clip
     func save(_ clip: Clip) async throws
     func updateExisting(_ clip: Clip) async throws
@@ -47,6 +57,15 @@ public protocol ClipRepository: Sendable {
 }
 
 public extension ClipRepository {
+    func aiState() async throws -> AIOrganizationState { AIOrganizationState() }
+    func updateAIState(_ mutation: @Sendable (inout AIOrganizationState) throws -> Void) async throws { throw AIError.unavailable }
+    func applyAIChangeSet(_ changeSet: AIChangeSet) async throws { throw AIError.unavailable }
+    func undoAIChangeSet(_ id: UUID) async throws { throw AIError.unavailable }
+    func recordHumanActivity(id: UUID, event: ContentActivity.Event, at: Date) async throws { }
+    func updateAIGroupDefinition(id: UUID, name: String, definition: String, retained: Bool, expectedVersion: Int) async throws { throw AIError.unavailable }
+    func compressAIGroup(id: UUID?, policy: LifecyclePolicy, now: Date) async throws -> Int { throw AIError.unavailable }
+    func exportAIContent(to: URL) async throws { }
+    func importAIContent(from: URL) async throws { }
     func saveCaptured(_ clip: Clip) async throws -> Clip {
         try await saveCaptured(clip, context: nil)
     }

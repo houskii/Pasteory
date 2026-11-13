@@ -2,6 +2,7 @@ import Combine
 import Carbon
 import Foundation
 import PasteoryCore
+import PasteoryAI
 
 enum ClipboardPollingInterval: Double, CaseIterable, Identifiable {
     case oneTenthSecond = 0.1
@@ -187,6 +188,9 @@ enum QuickTabLayout: String, CaseIterable, Identifiable {
 
 @MainActor
 final class AppSettings: ObservableObject {
+    @Published var aiConfiguration: AIConfiguration {
+        didSet { if let data = try? JSONEncoder().encode(aiConfiguration) { defaults.set(data, forKey: "aiOrganizationConfiguration.v1") } }
+    }
     private enum Key {
         static let completedOnboarding = "completedOnboarding"
         static let monitoringEnabled = "monitoringEnabled"
@@ -283,6 +287,8 @@ final class AppSettings: ObservableObject {
 
     init(defaults: UserDefaults = .standard, logsDirectory: URL? = nil) {
         self.defaults = defaults
+        self.aiConfiguration = defaults.data(forKey: "aiOrganizationConfiguration.v1")
+            .flatMap { try? JSONDecoder().decode(AIConfiguration.self, from: $0) } ?? AIConfiguration()
         fileCommandLogsDirectory = logsDirectory?.appendingPathComponent("FileCommands", isDirectory: true)
         let initialLanguage = Self.preferredLanguage(in: defaults)
         appLanguage = initialLanguage
