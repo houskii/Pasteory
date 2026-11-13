@@ -1,0 +1,42 @@
+name: Publish Pasteory Beta
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: beta-release-${{ github.ref }}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check version and publish the signed DMG
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          version=$(python3 -c 'import plistlib; print(plistlib.load(open("Config/Info.plist","rb"))["CFBundleShortVersionString"])')
+          [[ "$tag" == "v$version" && "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          git merge-base --is-ancestor HEAD origin/main
+          dmg="Pasteory-$version-arm64.dmg"
+          [[ "$(find release/beta -maxdepth 1 -name '*.dmg' -print)" == "release/beta/$dmg" ]]
+          (cd release/beta && sha256sum "$dmg") > "$RUNNER_TEMP/$dmg.sha256"
+          if gh release view "$tag" --json assets > "$RUNNER_TEMP/assets.json"; then
+            mkdir "$RUNNER_TEMP/existing"
+            gh release download "$tag" --pattern "$dmg" --pattern "$dmg.sha256" --dir "$RUNNER_TEMP/existing"
+            cmp "release/beta/$dmg" "$RUNNER_TEMP/existing/$dmg"
+            cmp "$RUNNER_TEMP/$dmg.sha256" "$RUNNER_TEMP/existing/$dmg.sha256"
+          else
+            gh release create "$tag" "release/beta/$dmg" "$RUNNER_TEMP/$dmg.sha256" \
+              --verify-tag --notes-from-tag --title "Pasteory $version Beta" --prerelease
+          fi

@@ -115,7 +115,7 @@ struct LinkResolutionSettingsView: View {
             }
         }
         .sheet(item: $authenticationRequest) { request in
-            SiteLoginSheet(request: request) {
+            SiteLoginSheet(request: request, cache: state.webCacheMaintenance) {
                 sessionRevision = UUID()
                 authenticationRequest = nil
                 if let group = request.group {

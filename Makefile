@@ -1,4 +1,4 @@
-.PHONY: test benchmark signing app qa-app qa-verify qa-install dmg verify install clean
+.PHONY: test benchmark signing app qa-app qa-verify qa-install dmg verify install release clean
 
 test:
 	arch -arm64 /usr/bin/swift test --arch arm64
@@ -30,6 +30,9 @@ verify: dmg
 
 install: app
 	./scripts/install.sh
+
+release:
+	./scripts/release_beta.sh "$(RELEASE_NOTES)"
 
 clean:
 	arch -arm64 /usr/bin/swift package clean

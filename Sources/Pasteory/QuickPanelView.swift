@@ -4,6 +4,13 @@ import PasteoryCore
 import SwiftUI
 
 struct QuickPanelView: View {
+    private struct ListScrollState: Equatable {
+        let selectionID: UUID?
+        let aggregationID: UUID?
+        let resetID: UUID
+        let presentationID: UUID
+    }
+
     @ObservedObject var state: AppState
     let onCopy: (Clip, Bool, Bool) -> Void
     let onOpenLibrary: () -> Void
@@ -16,62 +23,7 @@ struct QuickPanelView: View {
     @State private var deletingCollection: ClipCollection?
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            groupTabs
-            Divider()
-            if state.quickMultiSelectActive { multiSelectionBar }
-            else if !state.quickQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                    !state.quickListEntries.isEmpty { aggregationSearchBar }
-            if state.quickListEntries.isEmpty { emptyState } else { clipList }
-            if let message = state.statusMessage {
-                HStack(spacing: 8) {
-                    Image(systemName: statusSymbol)
-                    Text(message).font(.caption.weight(.medium)).lineLimit(2)
-                    Spacer(minLength: 4)
-                    if state.undoableAggregation != nil {
-                        Button("撤销") { Task { await state.undoLastAggregation() } }
-                            .buttonStyle(.plain)
-                            .font(.caption.weight(.semibold))
-                    }
-                    Button { state.clearStatus() } label: { Image(systemName: "xmark") }
-                        .buttonStyle(.plain)
-                        .help("关闭提示")
-                }
-                .foregroundStyle(statusColor)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(statusColor.opacity(0.13))
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-            footer
-        }
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(.quaternary, lineWidth: 1))
-        .overlay {
-            if let clip = metadataEditorClip {
-                QuickMetadataEditor(
-                    state: state,
-                    clip: clip,
-                    initialField: state.quickMetadataEditorInitialField,
-                    onSave: { title, note, collectionIDs in
-                        state.updateMetadata(
-                            for: clip,
-                            title: title,
-                            note: note,
-                            collectionIDs: collectionIDs
-                        )
-                        state.dismissQuickMetadataEditor()
-                    },
-                    onCancel: { state.dismissQuickMetadataEditor() }
-                )
-            } else if let draft = state.quickAggregationDraft {
-                QuickAggregationEditor(state: state, draft: draft)
-            }
-        }
-        .frame(minWidth: 340, idealWidth: 380, maxWidth: 520, minHeight: 480, idealHeight: 660, maxHeight: 760)
+        panelSurface
         .pasteoryTheme(state.settings.themeColor)
         .sheet(isPresented: $state.quickNewNormalCollectionActive) {
             CollectionNameEditor(state: state, existing: nil)
@@ -183,10 +135,178 @@ struct QuickPanelView: View {
                 searchFocused = true
             }
 
+            QuickActionsToolbarMenu(state: state, clip: state.quickSelectedClip, compact: true)
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .buttonStyle(.plain).help("快捷操作")
+
             Button(action: onOpenSettings) { Image(systemName: "gearshape") }
                 .buttonStyle(.plain).help("打开设置")
         }
         .padding(12)
+    }
+
+    private var panelSurface: some View {
+        HStack(spacing: 0) {
+            if state.settings.quickTabLayout == .sidebar {
+                groupSidebar
+                Divider()
+            }
+            panelContent
+        }
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(.quaternary, lineWidth: 1))
+        .overlay {
+            if let clip = metadataEditorClip {
+                QuickMetadataEditor(
+                    state: state,
+                    clip: clip,
+                    initialField: state.quickMetadataEditorInitialField,
+                    onSave: { title, note, collectionIDs in
+                        state.updateMetadata(
+                            for: clip,
+                            title: title,
+                            note: note,
+                            collectionIDs: collectionIDs
+                        )
+                        state.dismissQuickMetadataEditor()
+                    },
+                    onCancel: { state.dismissQuickMetadataEditor() }
+                )
+            } else if let draft = state.quickAggregationDraft {
+                QuickAggregationEditor(state: state, draft: draft)
+            }
+        }
+        .frame(minWidth: 340 + state.settings.quickTabLayout.sidebarWidth, idealWidth: 380 + state.settings.quickTabLayout.sidebarWidth, maxWidth: 520 + state.settings.quickTabLayout.sidebarWidth, minHeight: 480, idealHeight: 660, maxHeight: 760)
+    }
+
+    private var panelContent: some View {
+        VStack(spacing: 0) {
+            header
+            if state.settings.quickTabLayout == .horizontal { groupTabs }
+            Divider()
+            if state.quickMultiSelectActive { multiSelectionBar }
+            else if !state.quickQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                    !state.quickListEntries.isEmpty { aggregationSearchBar }
+            if state.quickListEntries.isEmpty { emptyState } else { clipList }
+            if let message = state.statusMessage {
+                HStack(spacing: 8) {
+                    Image(systemName: statusSymbol)
+                    Text(message).font(.caption.weight(.medium)).lineLimit(2)
+                    Spacer(minLength: 4)
+                    if state.undoableAggregation != nil {
+                        Button("撤销") { Task { await state.undoLastAggregation() } }
+                            .buttonStyle(.plain)
+                            .font(.caption.weight(.semibold))
+                    }
+                    Button { state.clearStatus() } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.plain)
+                        .help("关闭提示")
+                }
+                .foregroundStyle(statusColor)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(statusColor.opacity(0.13))
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            footer
+        }
+    }
+
+    private var groupSidebar: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("分组").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Spacer()
+                collectionManagerButton
+            }
+            HStack(spacing: 3) {
+                directionKeycap("arrow.left")
+                directionKeycap("arrow.right")
+                Text("切换分组").font(.system(size: 10))
+            }
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .padding(.bottom, 2)
+            ScrollViewReader { proxy in
+                ScrollView(.vertical) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(state.quickTabs) { tab in
+                            quickTabButton(tab)
+                                .modifier(QuickTabDragModifier(tab: tab, state: state))
+                                .id(tab.scope)
+                        }
+                        Color.clear.frame(height: 20)
+                            .dropDestination(for: String.self) { identifiers, _ in
+                                guard let raw = identifiers.first, let id = UUID(uuidString: raw) else { return false }
+                                Task { await state.moveCollectionToEnd(id: id) }
+                                return true
+                            }
+                    }
+                }
+                .onAppear { proxy.scrollTo(state.quickScope, anchor: .center) }
+                .onChange(of: state.quickScope) { _, value in
+                    withAnimation(.easeOut(duration: 0.12)) { proxy.scrollTo(value, anchor: .center) }
+                }
+            }
+        }
+        .padding(8)
+        .frame(width: 139)
+        .frame(maxHeight: .infinity)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.35))
+    }
+
+    private var collectionManagerButton: some View {
+        Button {
+            showingCollectionOverview.toggle()
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "square.grid.2x2")
+                if !state.collections.isEmpty {
+                    Text("\(state.collections.count)").monospacedDigit()
+                }
+            }
+            .font(.system(size: 11, weight: .semibold))
+            .frame(minWidth: 28, minHeight: 28)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(showingCollectionOverview ? state.settings.themeColor.accentColor : Color.secondary)
+        .help("查看和管理全部分组")
+        .popover(isPresented: $showingCollectionOverview, arrowEdge: .bottom) {
+            QuickCollectionOverview(
+                state: state,
+                isPresented: $showingCollectionOverview,
+                onCreateText: onCreateTextClip,
+                onCreateNormal: {
+                    showingCollectionOverview = false
+                    DispatchQueue.main.async { state.quickNewNormalCollectionActive = true }
+                },
+                onCreateSmart: {
+                    showingCollectionOverview = false
+                    DispatchQueue.main.async {
+                        editingSmartCollection = ClipCollection(
+                            name: "",
+                            kind: .smart,
+                            sortOrder: state.collections.count,
+                            ruleSet: SmartRuleSet()
+                        )
+                    }
+                },
+                onEdit: { collection in
+                    showingCollectionOverview = false
+                    DispatchQueue.main.async {
+                        if collection.kind == .smart { editingSmartCollection = collection }
+                        else { editingNormalCollection = collection }
+                    }
+                },
+                onDelete: { collection in
+                    showingCollectionOverview = false
+                    DispatchQueue.main.async { deletingCollection = collection }
+                }
+            )
+        }
     }
 
     private var groupTabs: some View {
@@ -218,54 +338,7 @@ struct QuickPanelView: View {
                 Rectangle()
                     .fill(Color(nsColor: .separatorColor).opacity(0.7))
                     .frame(width: 1, height: 20)
-                Button {
-                    showingCollectionOverview.toggle()
-                } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: "square.grid.2x2")
-                        if !state.collections.isEmpty {
-                            Text("\(state.collections.count)").monospacedDigit()
-                        }
-                    }
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(minWidth: 28, minHeight: 28)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(showingCollectionOverview ? state.settings.themeColor.accentColor : Color.secondary)
-                .help("查看和管理全部分组")
-                .popover(isPresented: $showingCollectionOverview, arrowEdge: .bottom) {
-                    QuickCollectionOverview(
-                        state: state,
-                        isPresented: $showingCollectionOverview,
-                        onCreateText: onCreateTextClip,
-                        onCreateNormal: {
-                            showingCollectionOverview = false
-                            DispatchQueue.main.async { state.quickNewNormalCollectionActive = true }
-                        },
-                        onCreateSmart: {
-                            showingCollectionOverview = false
-                            DispatchQueue.main.async {
-                                editingSmartCollection = ClipCollection(
-                                    name: "",
-                                    kind: .smart,
-                                    sortOrder: state.collections.count,
-                                    ruleSet: SmartRuleSet()
-                                )
-                            }
-                        },
-                        onEdit: { collection in
-                            showingCollectionOverview = false
-                            DispatchQueue.main.async {
-                                if collection.kind == .smart { editingSmartCollection = collection }
-                                else { editingNormalCollection = collection }
-                            }
-                        },
-                        onDelete: { collection in
-                            showingCollectionOverview = false
-                            DispatchQueue.main.async { deletingCollection = collection }
-                        }
-                    )
-                }
+                collectionManagerButton
                 .padding(.trailing, 8)
             }
 
@@ -301,6 +374,15 @@ struct QuickPanelView: View {
         return "第 \(index + 1) / \(state.collections.count) 个分组"
     }
 
+    private func directionKeycap(_ symbol: String) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 9, weight: .semibold))
+            .frame(width: 18, height: 16)
+            .background(.background.opacity(0.75), in: RoundedRectangle(cornerRadius: 4))
+            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(.primary.opacity(0.15), lineWidth: 0.5))
+            .accessibilityHidden(true)
+    }
+
     private func quickTabButton(_ tab: QuickTab) -> some View {
         Button {
             selectQuickTab(tab)
@@ -312,7 +394,7 @@ struct QuickPanelView: View {
                 Text(tab.title)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .frame(maxWidth: 68, alignment: .leading)
+                    .frame(maxWidth: state.settings.quickTabLayout == .sidebar ? .infinity : 68, alignment: .leading)
             }
             .font(.system(size: 12, weight: state.quickScope == tab.scope ? .semibold : .regular))
             .padding(.horizontal, 8)
@@ -398,14 +480,17 @@ struct QuickPanelView: View {
                 .padding(.bottom, 10)
             }
             .contentMargins(.top, 0, for: .scrollContent)
-            .onChange(of: state.quickSelectionID) { _, _ in
-                scrollQuickSelection(proxy)
-            }
-            .onChange(of: state.quickSelectedAggregationID) { _, _ in
-                scrollQuickSelection(proxy)
-            }
-            .onChange(of: state.quickPresentationID) { _, _ in
-                DispatchQueue.main.async { proxy.scrollTo("quick-list-top", anchor: .top) }
+            .onChange(of: ListScrollState(
+                selectionID: state.quickSelectionID,
+                aggregationID: state.quickSelectedAggregationID,
+                resetID: state.quickListResetID,
+                presentationID: state.quickPresentationID
+            )) { previous, current in
+                if previous.resetID != current.resetID || previous.presentationID != current.presentationID {
+                    DispatchQueue.main.async { proxy.scrollTo("quick-list-top", anchor: .top) }
+                } else {
+                    scrollQuickSelection(proxy)
+                }
             }
             .onAppear { DispatchQueue.main.async { proxy.scrollTo("quick-list-top", anchor: .top) } }
         }
@@ -554,7 +639,9 @@ struct QuickPanelView: View {
                 .monospacedDigit()
                 .help("按本机时区的自然日统计：今日从 0 点开始，近 7 日包含今天；不包含废纸篓")
             Spacer(minLength: 12)
-            Text("↑↓←→ 选择　长按 Command 提示")
+            Text(state.settings.quickTabLayout == .sidebar
+                 ? "↑↓ 内容　长按 Command 提示"
+                 : "↑↓ 内容　←→ 分组　长按 Command 提示")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .font(.caption2)
@@ -883,6 +970,7 @@ struct QuickCommandHelpView: View {
             commandHelpSection("粘贴与复制", actions: [.directPaste, .copyOnly, .plainTextPaste, .plainTextCopy])
             commandHelpSection("内容打开", actions: [.openSelected])
             commandHelpSection("搜索", actions: [.toggleSearch])
+            commandHelpSection("文本工具", actions: [.quickActions])
             commandHelpSection(
                 "整理当前项目",
                 actions: [
@@ -893,7 +981,7 @@ struct QuickCommandHelpView: View {
             commandHelpSection("窗口与页面", actions: [.openLibrary, .openSettings, .closePanel])
             VStack(alignment: .leading, spacing: 6) {
                 commandHelpSectionTitle("固定导航快捷键")
-                commandHelpItem(shortcut: "↑↓←→", title: "选择项目和分组")
+                commandHelpItem(shortcut: "↑↓ / ←→", title: "选择内容 / 切换分组")
                 commandHelpItem(shortcut: "⌘1～⌘9", title: "快速粘贴前 9 项")
                 commandHelpItem(shortcut: "Esc", title: "关闭当前编辑层")
             }
@@ -953,6 +1041,7 @@ private struct QuickClipCard: View {
         )
             .padding(.horizontal, 12)
             .frame(height: ClipRowMetrics.height(for: clip, compact: true))
+            .background(QuickActionMenuAnchor(controller: state.quickActionsMenu, clipID: clip.id, scope: .quickPanel))
             .clipped()
             .background(
                 clip.isPinned ? state.settings.themeColor.accentColor.opacity(0.10) : Color(nsColor: .controlBackgroundColor).opacity(0.82),
@@ -988,6 +1077,9 @@ private struct QuickClipCard: View {
                     .quickActionShortcut(state.settings.quickShortcut(for: .plainTextPaste))
                 Button("纯文本复制") { onCopy(clip, true, false) }
                     .quickActionShortcut(state.settings.quickShortcut(for: .plainTextCopy))
+                QuickActionsMenu { action in
+                    state.runQuickTextAction(action, for: clip)
+                }
                 Divider()
                 Button(clip.isFavorite ? "取消收藏" : "收藏") { state.toggleFavorite(clip) }
                     .quickActionShortcut(state.settings.quickShortcut(for: .toggleFavorite))

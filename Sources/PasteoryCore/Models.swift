@@ -417,6 +417,7 @@ public struct Clip: Codable, Hashable, Identifiable, Sendable {
     public var codeMetadata: CodeMetadata?
     public var fileMetadata: FileClipMetadata?
     public var automaticTitle: String?
+    public var quickTextTransformations: [QuickTextTransformation]?
 
     public init(
         id: UUID = UUID(),
@@ -445,7 +446,8 @@ public struct Clip: Codable, Hashable, Identifiable, Sendable {
         collectionIDs: Set<UUID> = [],
         codeMetadata: CodeMetadata? = nil,
         fileMetadata: FileClipMetadata? = nil,
-        automaticTitle: String? = nil
+        automaticTitle: String? = nil,
+        quickTextTransformations: [QuickTextTransformation]? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -474,6 +476,7 @@ public struct Clip: Codable, Hashable, Identifiable, Sendable {
         self.codeMetadata = codeMetadata
         self.fileMetadata = fileMetadata
         self.automaticTitle = automaticTitle
+        self.quickTextTransformations = quickTextTransformations
     }
 
     public var displayTitle: String {
@@ -534,7 +537,7 @@ public struct ClipCollection: Codable, Hashable, Identifiable, Sendable {
 
 public enum RuleMatchMode: String, Codable, Sendable { case all, any }
 public enum SmartRuleField: String, Codable, CaseIterable, Sendable {
-    case sourceApp, sourceConfidence, createdAt, kind, title, body, note, byteSize, priority, favorite, copyCount
+    case sourceApp, sourceConfidence, createdAt, kind, title, body, note, byteSize, priority, favorite, copyCount, quickTextAction
 }
 public enum SmartRuleOperator: String, Codable, CaseIterable, Sendable {
     case contains, equals, matchesRegex, before, after, greaterThan, lessThan
@@ -545,7 +548,7 @@ public extension SmartRuleField {
         switch self {
         case .title, .body, .note:
             [.contains, .equals, .matchesRegex]
-        case .sourceApp, .sourceConfidence, .kind, .priority, .favorite:
+        case .sourceApp, .sourceConfidence, .kind, .priority, .favorite, .quickTextAction:
             [.equals]
         case .createdAt:
             [.before, .after]
@@ -560,6 +563,7 @@ public extension SmartRuleField {
         case .kind: ClipKind.text.rawValue
         case .priority: "0"
         case .favorite: "true"
+        case .quickTextAction: "any"
         case .createdAt: "7"
         case .byteSize, .copyCount: "1"
         case .sourceApp, .title, .body, .note: ""

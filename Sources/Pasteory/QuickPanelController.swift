@@ -1,5 +1,6 @@
 import AppKit
 import Carbon
+import Combine
 import PasteoryCore
 import SwiftUI
 
@@ -22,6 +23,8 @@ final class QuickPanelController: NSObject {
     private var commandHelpPanel: NSPanel?
     private var commandHelpArmed = false
     private var commandHelpTask: Task<Void, Never>?
+    private var layoutObservation: AnyCancellable?
+    private var appliedTabLayout: QuickTabLayout = .horizontal
     private var eventMonitor: Any?
     private var globalMouseMonitor: Any?
     private let frameAutosaveName = "PasteoryQuickPanelWindow"
@@ -67,14 +70,17 @@ final class QuickPanelController: NSObject {
 #else
         let panelStyleMask: NSWindow.StyleMask = [.nonactivatingPanel, .borderless, .resizable]
 #endif
+        let sidebarWidth = state.settings.quickTabLayout.sidebarWidth
         panel = PasteoryPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 380, height: 660),
+            contentRect: NSRect(x: 0, y: 0, width: 380 + sidebarWidth, height: 660),
             styleMask: panelStyleMask,
             backing: .buffered,
             defer: false
         )
         super.init()
+        panel.title = "Pasteory 快捷面板"
 #if DEBUG
+        if isDebugUIQA { state.quickPanelPinned = true }
         panel.allowsMainWindow = isDebugUIQA
         panel.isFloatingPanel = !isDebugUIQA; panel.level = isDebugUIQA ? .normal : .floating; panel.hidesOnDeactivate = false
 #else
@@ -85,7 +91,8 @@ final class QuickPanelController: NSObject {
         panel.animationBehavior = .none
         panel.becomesKeyOnlyIfNeeded = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
-        panel.minSize = NSSize(width: 340, height: 480); panel.maxSize = NSSize(width: 520, height: 760)
+        panel.minSize = NSSize(width: 340 + sidebarWidth, height: 480)
+        panel.maxSize = NSSize(width: 520 + sidebarWidth, height: 760)
         panel.isMovableByWindowBackground = true
         let view = QuickPanelView(
             state: state,
@@ -95,12 +102,38 @@ final class QuickPanelController: NSObject {
             onCreateTextClip: { [weak self] in self?.close(restoreTargetApplication: false); onCreateTextClip() }
         )
         panel.contentViewController = NSHostingController(rootView: view)
-        panel.setContentSize(NSSize(width: 380, height: 660))
+        panel.setContentSize(NSSize(width: 380 + sidebarWidth, height: 660))
         hasInitialPlacement = panel.setFrameUsingName(frameAutosaveName)
         panel.setFrameAutosaveName(frameAutosaveName)
+        // Saved frames already include the sidebar width when that layout is active.
+        appliedTabLayout = state.settings.quickTabLayout
+        updateTabLayout(state.settings.quickTabLayout)
+        layoutObservation = state.settings.$quickTabLayout.dropFirst().sink { [weak self] layout in
+            self?.updateTabLayout(layout)
+        }
+    }
+
+    private func updateTabLayout(_ layout: QuickTabLayout) {
+        let widthDelta = layout.sidebarWidth - appliedTabLayout.sidebarWidth
+        appliedTabLayout = layout
+        var frame = panel.frame
+        panel.minSize = NSSize(width: 340 + layout.sidebarWidth, height: 480)
+        panel.maxSize = NSSize(width: 520 + layout.sidebarWidth, height: 760)
+        frame.size.width = min(max(frame.width + widthDelta, panel.minSize.width), panel.maxSize.width)
+        if let visible = panel.screen?.visibleFrame {
+            frame.origin.x = min(max(frame.minX, visible.minX), visible.maxX - frame.width)
+        }
+        panel.setFrame(frame, display: panel.isVisible)
     }
 
     func toggle() { panel.isVisible ? close() : show() }
+
+    private func showQuickActions() {
+        state.quickCommandKeyDown = false
+        cancelPendingCommandHelp()
+        hideCommandHelp()
+        state.presentQuickActions(for: state.quickSelectedClip, scope: .quickPanel, in: panel)
+    }
 
     func show() {
         activatedApplicationForQuickPanel = false
@@ -156,6 +189,7 @@ final class QuickPanelController: NSObject {
         state.quickCommandKeyDown = false
         state.quickSearchFocused = false
         state.quickQuery = ""
+        state.quickActionsMenu.cancel()
         commandHelpArmed = false
         cancelPendingCommandHelp()
         hideCommandHelp()
@@ -221,6 +255,7 @@ final class QuickPanelController: NSObject {
                     hideCommandHelp()
                 }
             }
+            if state.quickActionsMenu.isPresenting { return event }
             if TextEditingCommands.handle(event, in: self.panel) {
                 state.quickCommandKeyDown = false
                 hideCommandHelp()
@@ -317,6 +352,7 @@ final class QuickPanelController: NSObject {
             )
             let numberKeyIndexes: [UInt16: Int] = [18: 0, 19: 1, 20: 2, 21: 3, 23: 4, 22: 5, 26: 6, 28: 7, 25: 8]
             if state.quickSearchFocused {
+                if self.textInputHasMarkedText { return event }
                 switch event.keyCode {
                 case 53:
                     if state.quickMultiSelectActive { state.exitQuickMultiSelect() }
@@ -337,7 +373,7 @@ final class QuickPanelController: NSObject {
                     }
                 case 125: self.state.moveQuickSelection(by: 1); return nil
                 case 126: self.state.moveQuickSelection(by: -1); return nil
-                case 123, 124: return nil
+                case 123, 124: return event
                 default: break
                 }
                 if modifiers.contains(.command) {
@@ -427,6 +463,8 @@ final class QuickPanelController: NSObject {
         case .copyOnly: performSelected(plainText: false, paste: false)
         case .plainTextPaste: performSelected(plainText: true, paste: true)
         case .plainTextCopy: performSelected(plainText: true, paste: false)
+        case .quickActions:
+            showQuickActions()
         case .toggleFavorite:
             if let aggregation = state.quickSelectedAggregation {
                 Task { await state.toggleAggregationFavorite(aggregation) }
@@ -559,6 +597,7 @@ final class QuickPanelController: NSObject {
             guard panel.isVisible,
                   modifiers == .command,
                   commandHelpArmed,
+                  !state.quickActionsMenu.isPresenting,
                   !state.quickMetadataEditorActive,
                   !state.quickCollectionPickerActive,
                   !state.quickCollectionManagerActive,
@@ -595,6 +634,7 @@ final class QuickPanelController: NSObject {
             Task { @MainActor in
                 guard let self,
                       !self.state.quickPanelPinned,
+                      !self.state.quickActionsMenu.isPresenting,
                       !self.state.quickMetadataEditorActive,
                       !self.state.quickCollectionPickerActive,
                       !self.state.quickCollectionManagerActive,

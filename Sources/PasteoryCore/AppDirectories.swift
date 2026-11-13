@@ -9,10 +9,12 @@ public struct AppDirectories: Sendable {
     public let logs: URL
     public let applicationCache: URL
     public let browserContextInbox: URL
+    public let webKitNetworkCache: URL?
 
     public init(
         root: URL? = nil,
-        identity: PasteoryRuntimeIdentity = .current
+        identity: PasteoryRuntimeIdentity = .current,
+        cachesRoot: URL? = nil
     ) throws {
         let base = root ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(identity.applicationSupportDirectoryName, isDirectory: true)
@@ -24,6 +26,12 @@ public struct AppDirectories: Sendable {
         self.logs = base.appendingPathComponent("Logs", isDirectory: true)
         self.applicationCache = base.appendingPathComponent("ApplicationCache", isDirectory: true)
         self.browserContextInbox = base.appendingPathComponent("BrowserContextInbox", isDirectory: true)
+        let caches = cachesRoot ?? (root == nil
+            ? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            : nil)
+        self.webKitNetworkCache = caches?
+            .appendingPathComponent(identity.bundleIdentifier, isDirectory: true)
+            .appendingPathComponent("WebKit/NetworkCache", isDirectory: true)
         for directory in [base, database, attachments, archives, backups, logs, applicationCache, browserContextInbox] {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         }

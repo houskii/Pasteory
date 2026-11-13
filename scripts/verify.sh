@@ -36,5 +36,17 @@ while IFS= read -r -d '' icon; do
 done < <(find "$FILE_ICON_DIR" -maxdepth 1 -type f -name '*.png' -print0)
 "$PROJECT_DIR/scripts/verify_signing.sh" "$APP_DIR"
 hdiutil verify "$DMG_PATH"
+DMG_MOUNT=$(mktemp -d)
+cleanup_dmg() {
+  hdiutil detach "$DMG_MOUNT" >/dev/null 2>&1 || true
+  rmdir "$DMG_MOUNT"
+}
+trap cleanup_dmg EXIT
+hdiutil attach "$DMG_PATH" -readonly -nobrowse -mountpoint "$DMG_MOUNT" >/dev/null
+PACKAGED_APP="$DMG_MOUNT/Pasteory.app"
+cmp "$PLIST" "$PACKAGED_APP/Contents/Info.plist"
+cmp "$BINARY" "$PACKAGED_APP/Contents/MacOS/Pasteory"
+cmp "$APP_DIR/Contents/_CodeSignature/CodeResources" "$PACKAGED_APP/Contents/_CodeSignature/CodeResources"
+"$SCRIPT_DIR/verify_signing.sh" "$PACKAGED_APP"
 file "$BINARY"
 echo "Pasteory.app 与 DMG 验证通过"

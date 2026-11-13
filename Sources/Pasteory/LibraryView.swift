@@ -37,6 +37,18 @@ struct LibraryView: View {
         }
         .frame(minWidth: 900, maxWidth: .infinity, minHeight: 600, maxHeight: .infinity)
         .pasteoryTheme(state.settings.themeColor)
+        .overlay(alignment: .bottom) {
+            if let message = state.statusMessage {
+                Text(message)
+                    .font(.callout)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+                    .shadow(radius: 4, y: 2)
+                    .padding(16)
+                    .allowsHitTesting(false)
+            }
+        }
         .sheet(isPresented: $showNewNormalCollection) { CollectionNameEditor(state: state, existing: nil) }
         .sheet(item: $editingNormalCollection) { CollectionNameEditor(state: state, existing: $0) }
         .sheet(item: $editingSmartCollection) { SmartCollectionEditor(state: state, existing: $0) }
@@ -223,6 +235,10 @@ struct LibraryView: View {
                         Text(librarySubtitle).font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
+                    QuickActionsToolbarMenu(state: state, clip: state.selectedClip)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .quickActionShortcut(state.settings.quickShortcut(for: .quickActions))
                     if !state.libraryQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Button {
                             Task { state.libraryAggregationDraft = await state.makeLibraryAggregationDraft() }
@@ -270,52 +286,64 @@ struct LibraryView: View {
             if state.libraryListEntries.isEmpty {
                 LibraryEmptyState(query: state.libraryQuery)
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 9) {
-                        ForEach(state.libraryListEntries) { entry in
-                            switch entry.content {
-                            case .aggregation(let aggregation):
-                                LibraryAggregationCard(
-                                    state: state,
-                                    aggregation: aggregation,
-                                    selected: state.selectedAggregationID == aggregation.id,
-                                    onEdit: { state.libraryAggregationDraft = AggregationDraft(
-                                        aggregationID: aggregation.id,
-                                        memberClipIDs: aggregation.memberClipIDs,
-                                        title: aggregation.title,
-                                        note: aggregation.note,
-                                        origin: aggregation.origin
-                                    ) }
-                                )
-                            case .clip(let clip, let parentID):
-                                LibraryClipCard(
-                                    clip: clip,
-                                    attachments: state.attachments,
-                                    selected: state.selectedAggregationID == nil && state.selectedClipID == clip.id
-                                )
-                                .padding(.leading, parentID == nil ? 0 : 16)
-                                .overlay(alignment: .leading) {
-                                    if parentID != nil {
-                                        AggregationChildMarker(
-                                            accentColor: state.settings.themeColor.accentColor,
-                                            gap: 9,
-                                            isFirst: entry.isFirstChild,
-                                            isLast: entry.isLastChild
-                                        )
-                                        .frame(width: 16)
-                                    }
+                clipList
+            }
+        }
+    }
+
+    private var clipList: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                Color.clear.frame(height: 0).id("library-list-top")
+                LazyVStack(spacing: 9) {
+                    ForEach(state.libraryListEntries) { entry in
+                        switch entry.content {
+                        case .aggregation(let aggregation):
+                            LibraryAggregationCard(
+                                state: state,
+                                aggregation: aggregation,
+                                selected: state.selectedAggregationID == aggregation.id,
+                                onEdit: { state.libraryAggregationDraft = AggregationDraft(
+                                    aggregationID: aggregation.id,
+                                    memberClipIDs: aggregation.memberClipIDs,
+                                    title: aggregation.title,
+                                    note: aggregation.note,
+                                    origin: aggregation.origin
+                                ) }
+                            )
+                        case .clip(let clip, let parentID):
+                            LibraryClipCard(
+                                clip: clip,
+                                attachments: state.attachments,
+                                selected: state.selectedAggregationID == nil && state.selectedClipID == clip.id
+                            )
+                            .background(QuickActionMenuAnchor(controller: state.quickActionsMenu, clipID: clip.id, scope: .library))
+                            .padding(.leading, parentID == nil ? 0 : 16)
+                            .overlay(alignment: .leading) {
+                                if parentID != nil {
+                                    AggregationChildMarker(
+                                        accentColor: state.settings.themeColor.accentColor,
+                                        gap: 9,
+                                        isFirst: entry.isFirstChild,
+                                        isLast: entry.isLastChild
+                                    )
+                                    .frame(width: 16)
                                 }
-                                .onTapGesture { state.selectLibraryEntry(entry) }
-                                .simultaneousGesture(TapGesture(count: 2).onEnded { onPaste(clip, false, true) })
-                                .contextMenu { contextMenu(for: clip, parentAggregationID: parentID) }
                             }
+                            .onTapGesture { state.selectLibraryEntry(entry) }
+                            .simultaneousGesture(TapGesture(count: 2).onEnded { onPaste(clip, false, true) })
+                            .contextMenu { contextMenu(for: clip, parentAggregationID: parentID) }
                         }
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 14)
                 }
-                .contentMargins(.top, 0, for: .scrollContent)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 14)
             }
+            .contentMargins(.top, 0, for: .scrollContent)
+            .onChange(of: state.libraryListResetID) { _, _ in
+                DispatchQueue.main.async { proxy.scrollTo("library-list-top", anchor: .top) }
+            }
+            .onAppear { DispatchQueue.main.async { proxy.scrollTo("library-list-top", anchor: .top) } }
         }
     }
 
@@ -655,6 +683,9 @@ struct LibraryView: View {
     @ViewBuilder
     private func contextMenu(for clip: Clip, parentAggregationID: UUID?) -> some View {
         Button("粘贴") { onPaste(clip, false, true) }; Button("复制") { onPaste(clip, false, false) }
+        QuickActionsMenu { action in
+            state.runQuickTextAction(action, for: clip)
+        }
         Button("纯文本粘贴") { onPaste(clip, true, true) }; Divider()
         Button(clip.isFavorite ? "取消收藏" : "收藏") { state.toggleFavorite(clip) }
         if let parentAggregationID,
@@ -1496,6 +1527,13 @@ private struct SmartConditionRow: View {
                 Text("未收藏").tag("false")
             }
             .labelsHidden()
+        case .quickTextAction:
+            Picker("快捷工具转换", selection: $condition.value) {
+                Text("任意快捷工具").tag("any")
+                ForEach(QuickTextAction.allCases) { action in Text(action.title).tag(action.rawValue) }
+                Text("未使用快捷工具").tag("none")
+            }
+            .labelsHidden()
         case .priority:
             Picker("优先级", selection: $condition.value) {
                 Text("无").tag("0")
@@ -1541,6 +1579,7 @@ private extension SmartRuleField {
         case .priority: "优先级"
         case .favorite: "收藏"
         case .copyCount: "复制次数"
+        case .quickTextAction: "快捷工具转换"
         }
     }
 }
@@ -1549,7 +1588,7 @@ private extension SmartRuleOperator {
     func displayName(for field: SmartRuleField) -> String {
         switch self {
         case .contains: "包含"
-        case .equals: [.sourceApp, .sourceConfidence, .kind, .priority, .favorite].contains(field) ? "是" : "等于"
+        case .equals: [.sourceApp, .sourceConfidence, .kind, .priority, .favorite, .quickTextAction].contains(field) ? "是" : "等于"
         case .matchesRegex: "匹配正则"
         case .before: "距今超过"
         case .after: "距今以内"

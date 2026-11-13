@@ -69,7 +69,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             directories = try AppDirectories()
             settingsDefaults = .standard
 #endif
-            let repository = try SQLiteClipRepository(databaseURL: directories.databaseFile)
+            let repository = try SQLiteClipRepository(
+                databaseURL: directories.databaseFile,
+                normalizeExistingData: !ProcessInfo.processInfo.arguments.contains("--skip-existing-maintenance")
+            )
             let attachments = AttachmentStore(directories: directories)
             let archive = ArchiveService(repository: repository, directories: directories)
             let backup = BackupService(repository: repository, directories: directories)
@@ -104,7 +107,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
 #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("--debug-show-quick-window") {
+        if ProcessInfo.processInfo.arguments.contains("--debug-show-quick-window")
+            || ProcessInfo.processInfo.arguments.contains("--debug-show-quick-panel") {
             return false
         }
 #endif

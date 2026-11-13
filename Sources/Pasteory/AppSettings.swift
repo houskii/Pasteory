@@ -102,6 +102,7 @@ enum QuickPanelAction: String, CaseIterable, Codable, Identifiable {
     case copyOnly
     case plainTextPaste
     case plainTextCopy
+    case quickActions
     case toggleFavorite
     case togglePinned
     case editMetadata
@@ -124,6 +125,7 @@ enum QuickPanelAction: String, CaseIterable, Codable, Identifiable {
         case .copyOnly: "只复制"
         case .plainTextPaste: "纯文本粘贴"
         case .plainTextCopy: "纯文本复制"
+        case .quickActions: "快捷操作"
         case .toggleFavorite: "收藏／取消收藏"
         case .togglePinned: "置顶／取消置顶"
         case .editMetadata: "编辑信息"
@@ -168,6 +170,21 @@ struct FileCommandExecution: Identifiable, Equatable {
     var logURL: URL
 }
 
+enum QuickTabLayout: String, CaseIterable, Identifiable {
+    case horizontal
+    case sidebar
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .horizontal: "搜索框下方横排"
+        case .sidebar: "左侧竖排"
+        }
+    }
+
+    var sidebarWidth: CGFloat { self == .sidebar ? 140 : 0 }
+}
+
 @MainActor
 final class AppSettings: ObservableObject {
     private enum Key {
@@ -184,7 +201,10 @@ final class AppSettings: ObservableObject {
         static let quickActionShortcuts = "quickActionShortcuts"
         static let disabledQuickActions = "disabledQuickActions"
         static let linkResolutionEnabled = "linkResolutionEnabled"
+        static let automaticWebCacheCleanup = "automaticWebCacheCleanup"
+        static let lastWebCacheCleanup = "lastWebCacheCleanup"
         static let themeColor = "themeColor"
+        static let quickTabLayout = "quickTabLayout"
         static let browserBundleIdentifier = "browserBundleIdentifier"
         static let codeEditorBundleIdentifier = "codeEditorBundleIdentifier"
         static let fileOpenRules = "fileOpenRules"
@@ -200,6 +220,15 @@ final class AppSettings: ObservableObject {
     }
     @Published var defaultDirectPaste: Bool { didSet { defaults.set(defaultDirectPaste, forKey: Key.defaultDirectPaste) } }
     @Published var linkResolutionEnabled: Bool { didSet { defaults.set(linkResolutionEnabled, forKey: Key.linkResolutionEnabled) } }
+    @Published var automaticWebCacheCleanup: Bool {
+        didSet { defaults.set(automaticWebCacheCleanup, forKey: Key.automaticWebCacheCleanup) }
+    }
+    @Published var lastWebCacheCleanup: Date? {
+        didSet { defaults.set(lastWebCacheCleanup, forKey: Key.lastWebCacheCleanup) }
+    }
+    @Published var quickTabLayout: QuickTabLayout {
+        didSet { defaults.set(quickTabLayout.rawValue, forKey: Key.quickTabLayout) }
+    }
     @Published var themeColor: PasteoryThemeColor {
         didSet { defaults.set(themeColor.rawValue, forKey: Key.themeColor) }
     }
@@ -257,6 +286,9 @@ final class AppSettings: ObservableObject {
         ) ?? .oneSecond
         defaultDirectPaste = defaults.object(forKey: Key.defaultDirectPaste) as? Bool ?? true
         linkResolutionEnabled = defaults.object(forKey: Key.linkResolutionEnabled) as? Bool ?? false
+        automaticWebCacheCleanup = defaults.object(forKey: Key.automaticWebCacheCleanup) as? Bool ?? true
+        lastWebCacheCleanup = defaults.object(forKey: Key.lastWebCacheCleanup) as? Date
+        quickTabLayout = QuickTabLayout(rawValue: defaults.string(forKey: Key.quickTabLayout) ?? "") ?? .horizontal
         themeColor = PasteoryThemeColor(rawValue: defaults.string(forKey: Key.themeColor) ?? "") ?? .blueViolet
         browserBundleIdentifier = defaults.string(forKey: Key.browserBundleIdentifier) ?? ""
         codeEditorBundleIdentifier = defaults.string(forKey: Key.codeEditorBundleIdentifier) ?? ""
@@ -302,7 +334,7 @@ final class AppSettings: ObservableObject {
                 if let action = QuickPanelAction(rawValue: rawAction) { values[action] = shortcut }
             }
             let newlyAddedActions: [QuickPanelAction] = [
-                .createCollection, .aggregateContent, .expandAggregation, .collapseAggregation
+                .createCollection, .aggregateContent, .expandAggregation, .collapseAggregation, .quickActions
             ]
             for action in newlyAddedActions where stored[action.rawValue] == nil {
                 guard let proposed = Self.defaultQuickActionShortcuts[action],
@@ -634,6 +666,7 @@ final class AppSettings: ObservableObject {
             .copyOnly: PasteoryShortcut(keyCode: 8, modifiers: command),
             .plainTextPaste: PasteoryShortcut(keyCode: 36, modifiers: option),
             .plainTextCopy: PasteoryShortcut(keyCode: 8, modifiers: command | option),
+            .quickActions: PasteoryShortcut(keyCode: 40, modifiers: command | shift),
             .toggleFavorite: PasteoryShortcut(keyCode: 3, modifiers: command | shift),
             .togglePinned: PasteoryShortcut(keyCode: 17, modifiers: command),
             .editMetadata: PasteoryShortcut(keyCode: 14, modifiers: command),

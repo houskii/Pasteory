@@ -18,8 +18,10 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
     private var debugQuickWindow: NSWindow?
 #endif
     private var workspaceObserver: NSObjectProtocol?
+    private var wakeObserver: NSObjectProtocol?
     private var windowCloseKeyMonitor: Any?
     private var maintenanceTimer: Timer?
+    private var webCacheTimer: Timer?
     private var lastExternalApplication: NSRunningApplication?
     private lazy var quickPanel = QuickPanelController(
         state: state,
@@ -39,6 +41,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
         }
         super.init()
         pasteCoordinator.monitor = monitor
+        state.quickTextActions.monitor = monitor
         hotKeyManager.onPress = { [weak self] in self?.quickPanel.toggle() }
         workspaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
@@ -52,6 +55,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
         }
         windowCloseKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
+            if self.state.quickActionsMenu.isPresenting { return event }
             if TextEditingCommands.handle(event, in: NSApp.keyWindow) { return nil }
             if self.libraryWindow?.isKeyWindow == true,
                self.libraryWindow?.attachedSheet == nil {
@@ -61,6 +65,9 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
                     modifiers: self.carbonModifiers(from: modifiers)
                 )
                 switch action {
+                case .quickActions:
+                    self.state.presentQuickActions(for: self.state.selectedClip, scope: .library, in: self.libraryWindow)
+                    return nil
                 case .aggregateContent:
                     Task { self.state.libraryAggregationDraft = await self.state.makeLibraryAggregationDraft() }
                     return nil
@@ -102,7 +109,18 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
 #else
         registerHotKey()
 #endif
-        Task { await state.bootstrap() }
+        Task {
+            await state.bootstrap(processExistingClips: !ProcessInfo.processInfo.arguments.contains("--skip-existing-maintenance"))
+        }
+        Task { await state.webCacheMaintenance.check() }
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak state] _ in
+            Task { @MainActor in await state?.webCacheMaintenance.check() }
+        }
+        webCacheTimer = Timer.scheduledTimer(withTimeInterval: 3_600, repeats: true) { [weak state] _ in
+            Task { @MainActor in await state?.webCacheMaintenance.check() }
+        }
         maintenanceTimer = Timer.scheduledTimer(withTimeInterval: 86_400, repeats: true) { [weak state] _ in
             Task { @MainActor in await state?.runArchive() }
         }
@@ -176,15 +194,16 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
             onOpenSettings: {},
             onCreateTextClip: {}
         )
+        let panelWidth = 380 + state.settings.quickTabLayout.sidebarWidth
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 380, height: 660),
+            contentRect: NSRect(x: 0, y: 0, width: panelWidth, height: 660),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Pasteory 快捷面板实际测试"
-        window.contentViewController = NSHostingController(rootView: view.frame(width: 380, height: 660))
-        window.setContentSize(NSSize(width: 380, height: 660))
+        window.contentViewController = NSHostingController(rootView: view.frame(width: panelWidth, height: 660))
+        window.setContentSize(NSSize(width: panelWidth, height: 660))
         window.center()
         window.isReleasedWhenClosed = false
         debugQuickWindow = window
@@ -192,6 +211,9 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
         NSApp.activate(ignoringOtherApps: true)
         Task {
             await state.prepareQuickPanel()
+            if ProcessInfo.processInfo.arguments.contains("--debug-quick-actions") {
+                state.presentQuickActions(for: state.quickSelectedClip, scope: .quickPanel, in: window)
+            }
             if ProcessInfo.processInfo.arguments.contains("--debug-open-aggregation-editor"),
                let aggregation = state.aggregations.first {
                 state.quickSelectedAggregationID = aggregation.id
