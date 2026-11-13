@@ -6,8 +6,8 @@ public enum FileOpenAction: String, CaseIterable, Codable, Sendable {
 
     public var displayName: String {
         switch self {
-        case .application: "使用 App 打开"
-        case .command: "执行命令"
+        case .application: L10n.tr("使用 App 打开")
+        case .command: L10n.tr("执行命令")
         }
     }
 }
@@ -26,8 +26,8 @@ public enum FileCommandPresentation: String, CaseIterable, Codable, Sendable {
 
     public var displayName: String {
         switch self {
-        case .terminalWindow: "显示终端窗口"
-        case .silent: "静默执行"
+        case .terminalWindow: L10n.tr("显示终端窗口")
+        case .silent: L10n.tr("静默执行")
         }
     }
 }

@@ -59,9 +59,9 @@ public enum StorageError: LocalizedError {
     case checksumMismatch, compressionFailed, invalidArchive
     public var errorDescription: String? {
         switch self {
-        case .checksumMismatch: "文件校验失败"
-        case .compressionFailed: "压缩或解压失败"
-        case .invalidArchive: "归档文件无效"
+        case .checksumMismatch: L10n.tr("文件校验失败")
+        case .compressionFailed: L10n.tr("压缩或解压失败")
+        case .invalidArchive: L10n.tr("归档文件无效")
         }
     }
 }

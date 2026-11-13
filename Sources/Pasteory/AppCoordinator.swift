@@ -1,5 +1,6 @@
 import AppKit
 import Carbon
+import Combine
 import PasteoryCore
 import SwiftUI
 
@@ -22,6 +23,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
     private var workspaceObserver: NSObjectProtocol?
     private var wakeObserver: NSObjectProtocol?
     private var windowCloseKeyMonitor: Any?
+    private var languageObservation: AnyCancellable?
     private var maintenanceTimer: Timer?
     private var webCacheTimer: Timer?
     private var lastExternalApplication: NSRunningApplication?
@@ -47,6 +49,10 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
         super.init()
         updateService.onPresent = { [weak self] in self?.presentUpdateDialog() }
         updateService.onDismiss = { [weak self] in self?.updateWindow?.orderOut(nil) }
+        languageObservation = settings.$appLanguage.dropFirst().sink { [weak self] language in
+            L10n.activate(language)
+            Task { @MainActor [weak self] in self?.refreshLanguage(language) }
+        }
         pasteCoordinator.monitor = monitor
         state.quickTextActions.monitor = monitor
         hotKeyManager.onPress = { [weak self] in self?.quickPanel.toggle() }
@@ -161,13 +167,13 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
         if ProcessInfo.processInfo.arguments.contains("--debug-show-quick-window") {
             Task { [weak self] in
                 guard let self else { return }
-                if ProcessInfo.processInfo.arguments.contains("--debug-seed") { await seedDebugData() }
+                if ProcessInfo.processInfo.arguments.contains("--debug-seed") || ProcessInfo.processInfo.arguments.contains("--debug-readme-seed") { await seedDebugData() }
                 try? await Task.sleep(for: .milliseconds(600)); openDebugQuickWindow()
             }
         } else if ProcessInfo.processInfo.arguments.contains("--debug-show-quick-panel") {
             Task { [weak self] in
                 guard let self else { return }
-                if ProcessInfo.processInfo.arguments.contains("--debug-seed") { await seedDebugData() }
+                if ProcessInfo.processInfo.arguments.contains("--debug-seed") || ProcessInfo.processInfo.arguments.contains("--debug-readme-seed") { await seedDebugData() }
                 try? await Task.sleep(for: .milliseconds(600)); quickPanel.show()
                 if ProcessInfo.processInfo.arguments.contains("--debug-open-metadata-editor") {
                     state.quickSelectionID = state.quickClips.first(where: {
@@ -187,7 +193,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
         if ProcessInfo.processInfo.arguments.contains("--debug-open-library") {
             Task { [weak self] in
                 guard let self else { return }
-                if ProcessInfo.processInfo.arguments.contains("--debug-seed") { await seedDebugData() }
+                if ProcessInfo.processInfo.arguments.contains("--debug-seed") || ProcessInfo.processInfo.arguments.contains("--debug-readme-seed") { await seedDebugData() }
                 try? await Task.sleep(for: .milliseconds(600))
                 openLibrary()
             }
@@ -195,7 +201,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
         if ProcessInfo.processInfo.arguments.contains("--debug-open-settings") {
             Task { [weak self] in
                 guard let self else { return }
-                if ProcessInfo.processInfo.arguments.contains("--debug-seed") { await seedDebugData() }
+                if ProcessInfo.processInfo.arguments.contains("--debug-seed") || ProcessInfo.processInfo.arguments.contains("--debug-readme-seed") { await seedDebugData() }
                 try? await Task.sleep(for: .milliseconds(300))
                 openSettings()
             }
@@ -229,7 +235,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "Pasteory 快捷面板实际测试"
+        window.title = L10n.tr("Pasteory 快捷面板实际测试")
         window.contentViewController = NSHostingController(rootView: view.frame(width: panelWidth, height: 660))
         window.setContentSize(NSSize(width: panelWidth, height: 660))
         window.center()
@@ -291,15 +297,86 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
     }
 
     private func saveDebugSnapshot(of window: NSWindow, to path: String) {
+        if let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--debug-switch-language=") }),
+           let language = AppLanguage(rawValue: String(argument.dropFirst("--debug-switch-language=".count))),
+           settings.appLanguage != language {
+            settings.appLanguage = language
+            Task {
+                try? await Task.sleep(for: .milliseconds(400))
+                saveDebugSnapshot(of: window, to: path)
+            }
+            return
+        }
         guard let view = window.contentView else { return }
         view.layoutSubtreeIfNeeded()
         guard let representation = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
         view.cacheDisplay(in: view.bounds, to: representation)
         guard let data = representation.representation(using: .png, properties: [:]) else { return }
+        let metadata: [String: Any] = [
+            "language": settings.appLanguage.rawValue,
+            "textLabel": ClipKind.text.displayName,
+            "editMenuTitle": NSApp.mainMenu?.items.dropFirst().first?.submenu?.title ?? "",
+            "windowTitle": window.title,
+            "sampleTitles": state.quickClips.map(\.title)
+        ]
+        if let metadataData = try? JSONSerialization.data(withJSONObject: metadata, options: [.prettyPrinted, .sortedKeys]) {
+            try? metadataData.write(to: URL(fileURLWithPath: path + ".json"), options: .atomic)
+        }
         try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
     }
 
+    /// Public demo content only, used for README screenshots in the isolated QA app.
+    private func seedReadmeData() async {
+        func localized(_ english: String, _ chinese: String) -> String {
+            settings.appLanguage == .english ? english : chinese
+        }
+        func accept(_ uti: String, _ data: Data, _ app: String, _ bundle: String) async {
+            await state.accept(PasteboardCapture(
+                items: [CapturedItem(order: 0, representations: [CapturedRepresentation(uti: uti, data: data)])],
+                source: ClipSource(appName: app, bundleIdentifier: bundle, confidence: .high)
+            ))
+        }
+        await accept("public.utf8-plain-text", Data("#7C3AED".utf8), "Figma", "com.figma.Desktop")
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Pasteory-Readme-Demo", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appendingPathComponent("project-notes.md")
+        try? Data("# Project Notes\n\nIdeas worth keeping.\n".utf8).write(to: file)
+        await accept("public.file-url", Data(file.absoluteString.utf8), "Finder", "com.apple.finder")
+        let image = NSImage(size: NSSize(width: 360, height: 160))
+        image.lockFocus()
+        for (index, color) in [NSColor.systemIndigo, .systemCyan, .systemOrange].enumerated() {
+            color.setFill()
+            NSBezierPath(roundedRect: NSRect(x: CGFloat(12 + index * 116), y: 12, width: 104, height: 136), xRadius: 14, yRadius: 14).fill()
+        }
+        image.unlockFocus()
+        if let data = image.tiffRepresentation { await accept("public.tiff", data, "Preview", "com.apple.Preview") }
+        await accept("public.swift-source", Data("let ideas = clipboard.history\n    .filter { $0.isFavorite }\n    .sorted { $0.date > $1.date }".utf8), "Xcode", "com.apple.dt.Xcode")
+        await accept("public.url", Data("https://github.com/houskii/Pasteory".utf8), "Safari", "com.apple.Safari")
+        let text = localized("A small place for everything you copy.\nKeep the useful bits. Find them when you need them.", "为每一次复制，留一个位置。\n留下有用的片段，在需要的时候找到它们。")
+        await accept("public.utf8-plain-text", Data(text.utf8), "Notes", "com.apple.Notes")
+        if var clip = state.quickClips.first {
+            clip.title = localized("Ideas worth keeping", "值得留下的灵感")
+            clip.note = localized("A thought for the next release", "留给下个版本的一点想法")
+            clip.isFavorite = true
+            clip.isPinned = true
+            clip.copyCount = 3
+            clip.pasteCount = 2
+            state.update(clip)
+        }
+        _ = await state.addCollection(name: localized("Design", "设计灵感"), smart: false)
+        _ = await state.addCollection(name: localized("Development", "开发资料"), smart: false)
+        _ = await state.addCollection(name: localized("Writing", "写作片段"), smart: false)
+        await state.refreshQuick()
+        await state.refreshLibrary()
+        state.quickSelectionID = state.quickClips.first?.id
+        state.selectedClipID = state.clips.first?.id
+    }
+
     private func seedDebugData() async {
+        if ProcessInfo.processInfo.arguments.contains("--debug-readme-seed") {
+            await seedReadmeData()
+            return
+        }
         let samples = [
             ("这是一条用于验证超长文本截断和布局边界的剪贴板内容，它不应该把时间、来源应用或快捷键挤出卡片，也不能覆盖相邻的条目。", "com.apple.Terminal", "一个名称同样非常长的测试来源应用"),
             ("What was broken", "com.apple.Terminal", "终端"),
@@ -461,6 +538,16 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
     }
 #endif
 
+    private func refreshLanguage(_ language: AppLanguage) {
+        L10n.activate(language)
+        TextEditingCommands.installMainMenu(on: NSApp)
+        configureStatusItem()
+        settingsWindow?.title = L10n.tr("Pasteory 设置")
+        onboardingWindow?.title = L10n.tr("欢迎使用 Pasteory")
+        updateWindow?.title = L10n.tr("Pasteory 更新")
+        quickPanel.refreshLanguage()
+    }
+
     private func configureStatusItem() {
         if let button = statusItem.button {
             button.image = PasteoryBrand.menuBarImage()
@@ -469,19 +556,19 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
             button.toolTip = PasteoryBrand.name
         }
         let menu = NSMenu(); menu.delegate = self
-        menu.addItem(menuItem("打开快捷面板", action: #selector(toggleQuickPanel), key: ""))
-        menu.addItem(menuItem("打开资料库", action: #selector(openLibraryAction), key: ""))
+        menu.addItem(menuItem(L10n.tr("打开快捷面板"), action: #selector(toggleQuickPanel), key: ""))
+        menu.addItem(menuItem(L10n.tr("打开资料库"), action: #selector(openLibraryAction), key: ""))
         menu.addItem(.separator())
-        menu.addItem(menuItem("设置…", action: #selector(openSettingsAction), key: ","))
-        menu.addItem(menuItem("退出 Pasteory", action: #selector(quit), key: "q"))
+        menu.addItem(menuItem(L10n.tr("设置…"), action: #selector(openSettingsAction), key: ","))
+        menu.addItem(menuItem(L10n.tr("退出 Pasteory"), action: #selector(quit), key: "q"))
         statusItem.menu = menu
     }
 
     func menuWillOpen(_ menu: NSMenu) {
         if let shortcut = settings.globalShortcut {
-            menu.items.first?.title = "打开快捷面板（\(ShortcutFormatter.display(keyCode: shortcut.keyCode, modifiers: shortcut.modifiers))）"
+            menu.items.first?.title = L10n.tr("打开快捷面板（\(ShortcutFormatter.display(keyCode: shortcut.keyCode, modifiers: shortcut.modifiers))）")
         } else {
-            menu.items.first?.title = "打开快捷面板（未设置快捷键）"
+            menu.items.first?.title = L10n.tr("打开快捷面板（未设置快捷键）")
         }
         statusItem.button?.image = PasteoryBrand.menuBarImage()
     }
@@ -510,7 +597,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
             return
         }
         if !hotKeyManager.register(keyCode: shortcut.keyCode, modifiers: shortcut.modifiers) {
-            state.presentStatus(hotKeyManager.lastError ?? "快捷键注册失败", kind: .error, dismissAfter: 5)
+            state.presentStatus(hotKeyManager.lastError ?? L10n.tr("快捷键注册失败"), kind: .error, dismissAfter: 5)
         }
     }
 
@@ -522,7 +609,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
             let hostingController = NSHostingController(rootView: view)
             hostingController.sizingOptions = []
             let window = NSWindow(contentViewController: hostingController)
-            window.title = "欢迎使用 Pasteory"; window.styleMask = [.titled, .closable, .miniaturizable]
+            window.title = L10n.tr("欢迎使用 Pasteory"); window.styleMask = [.titled, .closable, .miniaturizable]
             window.setContentSize(NSSize(width: 780, height: 590)); window.center(); window.isReleasedWhenClosed = false
             onboardingWindow = window
         }
@@ -629,7 +716,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
 #else
             let window = NSWindow(contentViewController: hostingController)
 #endif
-            window.title = "Pasteory 设置"
+            window.title = L10n.tr("Pasteory 设置")
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             let visibleSize = (NSScreen.main?.visibleFrame.size ?? NSSize(width: 1440, height: 900))
             let availableSize = NSSize(width: max(980, visibleSize.width - 40), height: max(620, visibleSize.height - 60))
@@ -666,7 +753,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
             let controller = NSHostingController(rootView: UpdateDialogView(service: updateService, settings: settings))
             controller.sizingOptions = []
             let window = NSWindow(contentViewController: controller)
-            window.title = "Pasteory 更新"
+            window.title = L10n.tr("Pasteory 更新")
             window.styleMask = [.titled, .closable]
             window.setContentSize(NSSize(width: 560, height: 540))
             window.isReleasedWhenClosed = false
@@ -705,10 +792,10 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
                 let result = try await pasteCoordinator.perform(clip, plainText: plainText, paste: paste, target: target)
                 switch result {
                 case .pasted:
-                    if await state.recordPaste(clip) { state.presentStatus("已粘贴") }
-                case .copied: state.presentStatus("已复制")
-                case .copiedFallback: state.presentStatus("已复制，请手动粘贴", kind: .warning, dismissAfter: 5)
-                case .copiedPermissionRequired: state.presentStatus("已复制；请允许 Pasteory 使用辅助功能后重试", kind: .warning, dismissAfter: 5)
+                    if await state.recordPaste(clip) { state.presentStatus(L10n.tr("已粘贴")) }
+                case .copied: state.presentStatus(L10n.tr("已复制"))
+                case .copiedFallback: state.presentStatus(L10n.tr("已复制，请手动粘贴"), kind: .warning, dismissAfter: 5)
+                case .copiedPermissionRequired: state.presentStatus(L10n.tr("已复制；请允许 Pasteory 使用辅助功能后重试"), kind: .warning, dismissAfter: 5)
                 }
             } catch { state.show(error) }
         }

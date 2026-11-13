@@ -1,3 +1,4 @@
+import PasteoryCore
 import AppKit
 
 @MainActor
@@ -7,22 +8,22 @@ enum TextEditingCommands {
 
         let applicationItem = NSMenuItem()
         let applicationMenu = NSMenu(title: "Pasteory")
-        applicationMenu.addItem(withTitle: "隐藏 Pasteory", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        applicationMenu.addItem(withTitle: L10n.tr("隐藏 Pasteory"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         applicationMenu.addItem(NSMenuItem.separator())
-        applicationMenu.addItem(withTitle: "退出 Pasteory", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        applicationMenu.addItem(withTitle: L10n.tr("退出 Pasteory"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         applicationItem.submenu = applicationMenu
         mainMenu.addItem(applicationItem)
 
         let editItem = NSMenuItem()
-        let editMenu = NSMenu(title: "编辑")
-        editMenu.addItem(withTitle: "撤销", action: Selector(("undo:")), keyEquivalent: "z")
-        let redo = editMenu.addItem(withTitle: "重做", action: Selector(("redo:")), keyEquivalent: "Z")
+        let editMenu = NSMenu(title: L10n.tr("编辑"))
+        editMenu.addItem(withTitle: L10n.tr("撤销"), action: Selector(("undo:")), keyEquivalent: "z")
+        let redo = editMenu.addItem(withTitle: L10n.tr("重做"), action: Selector(("redo:")), keyEquivalent: "Z")
         redo.keyEquivalentModifierMask = [.command, .shift]
         editMenu.addItem(NSMenuItem.separator())
-        editMenu.addItem(withTitle: "剪切", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        editMenu.addItem(withTitle: "复制", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        editMenu.addItem(withTitle: "粘贴", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        editMenu.addItem(withTitle: "全选", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editMenu.addItem(withTitle: L10n.tr("剪切"), action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: L10n.tr("复制"), action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: L10n.tr("粘贴"), action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: L10n.tr("全选"), action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editItem.submenu = editMenu
         mainMenu.addItem(editItem)
 

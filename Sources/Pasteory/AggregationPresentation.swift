@@ -285,7 +285,7 @@ extension AppState {
 
         if quickMultiSelectActive {
             guard quickMultiSelectionIDs.count >= 2 else {
-                presentStatus("至少需要两项不同内容才能创建聚合", kind: .warning)
+                presentStatus(L10n.tr("至少需要两项不同内容才能创建聚合"), kind: .warning)
                 return
             }
             var seen = Set<UUID>()
@@ -295,7 +295,7 @@ extension AppState {
                       seen.insert(clip.id).inserted else { return nil }
                 return clip.id
             }
-            presentAggregationDraft(memberIDs: order, title: "新建聚合", origin: .manual)
+            presentAggregationDraft(memberIDs: order, title: L10n.tr("新建聚合"), origin: .manual)
             return
         }
 
@@ -308,7 +308,7 @@ extension AppState {
                 }
                 presentAggregationDraft(
                     memberIDs: candidates,
-                    title: "\(String(query.prefix(60))) 相关内容",
+                    title: L10n.tr("\(String(query.prefix(60))) 相关内容"),
                     origin: .search(query: query)
                 )
             } catch { show(error) }
@@ -316,13 +316,13 @@ extension AppState {
         }
 
         guard let id = quickSelectionID else {
-            presentStatus("请先选择内容", kind: .warning)
+            presentStatus(L10n.tr("请先选择内容"), kind: .warning)
             return
         }
         quickMultiSelectActive = true
         quickMultiSelectionIDs = [id]
         quickMultiSelectionAnchorID = id
-        presentStatus("已进入多选；至少再选择一项内容")
+        presentStatus(L10n.tr("已进入多选；至少再选择一项内容"))
     }
 
     func saveQuickAggregation(title: String, note: String, memberIDs: [UUID]? = nil) async {
@@ -354,7 +354,7 @@ extension AppState {
             await refreshAggregations()
             quickSelectedAggregationID = saved.id
             quickSelectionID = nil
-            presentStatus(previous == nil ? "已聚合 \(saved.memberClipIDs.count) 项内容" : "聚合信息已更新")
+            presentStatus(previous == nil ? L10n.tr("已聚合 \(saved.memberClipIDs.count) 项内容") : L10n.tr("聚合信息已更新"))
         } catch { show(error) }
     }
 
@@ -368,7 +368,7 @@ extension AppState {
         do {
             try await repository.removeAggregation(id: aggregation.id)
             await refreshAggregations()
-            presentStatus("聚合已删除，原内容已保留")
+            presentStatus(L10n.tr("聚合已删除，原内容已保留"))
         } catch { show(error) }
     }
 
@@ -423,11 +423,11 @@ extension AppState {
         value.updatedAt = Date()
         if value.memberClipIDs.count < 2 {
             await removeAggregation(aggregation)
-            presentStatus("成员不足两项，聚合已解散；原内容已保留")
+            presentStatus(L10n.tr("成员不足两项，聚合已解散；原内容已保留"))
             return
         }
         await saveAggregationState(value)
-        presentStatus("已移出当前聚合，原内容已保留")
+        presentStatus(L10n.tr("已移出当前聚合，原内容已保留"))
     }
 
     private func updateAllMembers(
@@ -446,7 +446,7 @@ extension AppState {
             await refreshQuick()
             await refreshLibrary()
             await refreshAggregations()
-            presentStatus("已整理全部成员")
+            presentStatus(L10n.tr("已整理全部成员"))
         } catch { show(error) }
     }
 
@@ -475,7 +475,7 @@ extension AppState {
         }
         let query = libraryQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else {
-            presentStatus("请先搜索需要聚合的内容", kind: .warning)
+            presentStatus(L10n.tr("请先搜索需要聚合的内容"), kind: .warning)
             return nil
         }
         do {
@@ -486,13 +486,13 @@ extension AppState {
             var seen = Set<UUID>()
             let unique = candidates.filter { seen.insert($0).inserted }
             guard unique.count >= 2 else {
-                presentStatus("至少需要两项不同内容才能创建聚合", kind: .warning)
+                presentStatus(L10n.tr("至少需要两项不同内容才能创建聚合"), kind: .warning)
                 return nil
             }
             return AggregationDraft(
                 aggregationID: nil,
                 memberClipIDs: unique,
-                title: "\(String(query.prefix(60))) 相关内容",
+                title: L10n.tr("\(String(query.prefix(60))) 相关内容"),
                 note: "",
                 origin: .search(query: query)
             )
@@ -522,7 +522,7 @@ extension AppState {
             await refreshAggregations()
             selectedAggregationID = saved.id
             selectedClipID = nil
-            presentStatus(previous == nil ? "已聚合 \(saved.memberClipIDs.count) 项内容" : "聚合信息已更新")
+            presentStatus(previous == nil ? L10n.tr("已聚合 \(saved.memberClipIDs.count) 项内容") : L10n.tr("聚合信息已更新"))
             return true
         } catch {
             show(error)
@@ -534,7 +534,7 @@ extension AppState {
         var seen = Set<UUID>()
         let unique = memberIDs.filter { seen.insert($0).inserted }
         guard unique.count >= 2 else {
-            presentStatus("至少需要两项不同内容才能创建聚合", kind: .warning)
+            presentStatus(L10n.tr("至少需要两项不同内容才能创建聚合"), kind: .warning)
             return
         }
         quickAggregationDraft = AggregationDraft(

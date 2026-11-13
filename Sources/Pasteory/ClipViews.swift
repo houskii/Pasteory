@@ -55,22 +55,19 @@ struct ClipRowView: View {
                         .fixedSize()
                         .layoutPriority(2)
                     if clip.primaryKind != .file, clip.items.count > 1 {
-                        Text("\(clip.items.count) 项")
+                        Text(L10n.tr("\(clip.items.count) 项"))
                     }
                     if clip.primaryKind == .code,
                        let lineCount = clip.codeMetadata?.totalLineCount,
                        lineCount > 1 {
-                        Text("\(lineCount) 行").fixedSize()
+                        Text(L10n.tr("\(lineCount) 行")).fixedSize()
                     }
-                    Text(
-                        "复制 ×\(CompactCountFormatter.string(for: clip.copyCount)) · "
-                            + "粘贴 ×\(CompactCountFormatter.string(for: clip.recordedPasteCount))"
-                    )
+                    usageCount
                         .fixedSize()
                         .layoutPriority(2)
-                        .help("复制 \(clip.copyCount) 次，通过 Pasteory 粘贴 \(clip.recordedPasteCount) 次")
-                        .accessibilityLabel("复制 \(clip.copyCount) 次，通过 Pasteory 粘贴 \(clip.recordedPasteCount) 次")
-                    if clip.isPinned { Image(systemName: "pin.fill").foregroundStyle(pasteoryAccentColor).help("已置顶") }
+                        .help(L10n.tr("复制 \(clip.copyCount) 次，通过 Pasteory 粘贴 \(clip.recordedPasteCount) 次"))
+                        .accessibilityLabel(L10n.tr("复制 \(clip.copyCount) 次，通过 Pasteory 粘贴 \(clip.recordedPasteCount) 次"))
+                    if clip.isPinned { Image(systemName: "pin.fill").foregroundStyle(pasteoryAccentColor).help(L10n.tr("已置顶")) }
                     if clip.isFavorite { Image(systemName: "star.fill").foregroundStyle(.yellow) }
                     if clip.priority > 0 { Text("P\(clip.priority)").font(.caption2.bold()).foregroundStyle(pasteoryAccentColor) }
                 }
@@ -112,6 +109,24 @@ struct ClipRowView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await refreshFileAvailability() }
+        }
+    }
+
+    @ViewBuilder
+    private var usageCount: some View {
+        if compact && L10n.language == .english {
+            HStack(spacing: 3) {
+                Image(systemName: "doc.on.doc")
+                Text(CompactCountFormatter.string(for: clip.copyCount))
+                Text("·")
+                Image(systemName: "doc.on.clipboard")
+                Text(CompactCountFormatter.string(for: clip.recordedPasteCount))
+            }
+        } else {
+            Text(
+                L10n.tr("复制 ×\(CompactCountFormatter.string(for: clip.copyCount)) · ")
+                    + L10n.tr("粘贴 ×\(CompactCountFormatter.string(for: clip.recordedPasteCount))")
+            )
         }
     }
 
@@ -332,7 +347,7 @@ struct ClipRowView: View {
         let title = String(clip.displayTitle.prefix(120))
         let preview = String(clip.previewText.prefix(240))
         let note = String(clip.note.prefix(160))
-        return "\(clip.primaryKind.displayName)，\(title)，\(preview)，\(note)，来自 \(String(clip.source.appName.prefix(80)))\(clip.isPinned ? "，已置顶" : "")"
+        return L10n.tr("\(clip.primaryKind.displayName)，\(title)，\(preview)，\(note)，来自 \(String(clip.source.appName.prefix(80)))\(clip.isPinned ? L10n.tr("，已置顶") : "")")
     }
 
     private var hasImagePreview: Bool {
@@ -782,11 +797,11 @@ private struct CodeSnippetPreview: View {
             HStack(spacing: 6) {
                 Image(systemName: "chevron.left.forwardslash.chevron.right")
                     .font(.system(size: 10, weight: .bold))
-                Text(metadata?.displayName ?? "代码")
+                Text(metadata?.displayName ?? L10n.tr("代码"))
                     .font(.system(size: 11, weight: .semibold))
                 Spacer()
                 if let lineCount = metadata?.totalLineCount, lineCount > 1 {
-                    Text("\(lineCount) 行")
+                    Text(L10n.tr("\(lineCount) 行"))
                         .font(.system(size: 10, weight: .medium).monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
@@ -794,7 +809,7 @@ private struct CodeSnippetPreview: View {
                     Text("\(Int((metadata.confidence * 100).rounded()))%")
                         .font(.system(size: 10, weight: .medium).monospacedDigit())
                         .foregroundStyle(.secondary)
-                        .help("代码识别置信度")
+                        .help(L10n.tr("代码识别置信度"))
                 }
             }
             .foregroundStyle(ClipKind.code.markerColor)
@@ -814,7 +829,7 @@ private struct CodeSnippetPreview: View {
 
             if isTruncated {
                 Divider().opacity(0.55)
-                Text("仅预览前 64 KB，复制仍保留完整内容")
+                Text(L10n.tr("仅预览前 64 KB，复制仍保留完整内容"))
                     .font(.system(size: 10.5, weight: .medium))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 10)

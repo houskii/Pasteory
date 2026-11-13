@@ -1,6 +1,6 @@
 const HOST_NAME = "app.pasteory.web_context";
 let nativePort = null;
-let config = { chromeEnabled: false, bridgeConnected: false };
+let config = { chromeEnabled: false, bridgeConnected: false, language: "en" };
 let blockedHosts = new Set();
 let lastConfigRequestAt = 0;
 let idleTimer = null;
@@ -40,6 +40,7 @@ function handleNativeMessage(message) {
   if (message.type === "config") {
     config = {
       chromeEnabled: Boolean(message.chromeEnabled),
+      language: message.language === "zh-Hans" ? "zh-Hans" : "en",
       bridgeConnected: true
     };
     lastConfigRequestAt = Date.now();
@@ -132,7 +133,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message.type === "popup-status") {
-    sitePolicyReady.then(() => {
+    Promise.all([sitePolicyReady, requestConfig()]).then(() => {
       const host = String(message.host || "").toLowerCase();
       sendResponse({
         ...config,

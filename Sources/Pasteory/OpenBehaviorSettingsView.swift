@@ -9,43 +9,43 @@ struct OpenBehaviorSettingsView: View {
 
     var body: some View {
         Form {
-            Section("链接") {
+            Section(L10n.tr("链接")) {
                 applicationRow(
-                    title: "指定浏览器",
+                    title: L10n.tr("指定浏览器"),
                     bundleIdentifier: $settings.browserBundleIdentifier,
-                    placeholder: "选择浏览器",
-                    pickerTitle: "选择链接浏览器"
+                    placeholder: L10n.tr("选择浏览器"),
+                    pickerTitle: L10n.tr("选择链接浏览器")
                 )
-                Text("未选择浏览器时，快捷面板不会打开链接。")
+                Text(L10n.tr("未选择浏览器时，快捷面板不会打开链接。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            Section("图片") {
-                LabeledContent("打开方式", value: "系统图片预览器（预览）")
+            Section(L10n.tr("图片")) {
+                LabeledContent(L10n.tr("打开方式"), value: L10n.tr("系统图片预览器（预览）"))
             }
 
-            Section("代码") {
+            Section(L10n.tr("代码")) {
                 applicationRow(
-                    title: "代码编辑器",
+                    title: L10n.tr("代码编辑器"),
                     bundleIdentifier: $settings.codeEditorBundleIdentifier,
-                    placeholder: "选择代码编辑器",
-                    pickerTitle: "选择代码编辑器"
+                    placeholder: L10n.tr("选择代码编辑器"),
+                    pickerTitle: L10n.tr("选择代码编辑器")
                 )
-                Text("代码会按识别出的语言生成临时文件，再交给所选编辑器打开。未选择编辑器时不执行。")
+                Text(L10n.tr("代码会按识别出的语言生成临时文件，再交给所选编辑器打开。未选择编辑器时不执行。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            Section("文件") {
-                Picker("命令 Shell", selection: $settings.fileCommandShell) {
+            Section(L10n.tr("文件")) {
+                Picker(L10n.tr("命令 Shell"), selection: $settings.fileCommandShell) {
                     ForEach(FileCommandShell.allCases, id: \.self) { shell in
                         Text(shell.displayName).tag(shell)
                     }
                 }
                 .pickerStyle(.segmented)
 
-                Picker("命令执行方式", selection: $settings.fileCommandPresentation) {
+                Picker(L10n.tr("命令执行方式"), selection: $settings.fileCommandPresentation) {
                     ForEach(FileCommandPresentation.allCases, id: \.self) { presentation in
                         Text(presentation.displayName).tag(presentation)
                     }
@@ -58,9 +58,9 @@ struct OpenBehaviorSettingsView: View {
 
                 if settings.fileOpenRules.isEmpty {
                     ContentUnavailableView(
-                        "尚未设置文件打开规则",
+                        L10n.tr("尚未设置文件打开规则"),
                         systemImage: "doc.badge.gearshape",
-                        description: Text("可以按预设或自定义后缀选择 App，也可以执行使用 $file 的命令。")
+                        description: Text(L10n.tr("可以按预设或自定义后缀选择 App，也可以执行使用 $file 的命令。"))
                     )
                     .frame(maxWidth: .infinity, minHeight: 110)
                 } else {
@@ -72,23 +72,23 @@ struct OpenBehaviorSettingsView: View {
                 HStack {
                     Spacer(minLength: 0)
                     if settings.fileCommandLogsDirectory != nil {
-                        Button("打开静默命令日志目录", systemImage: "folder") {
+                        Button(L10n.tr("打开静默命令日志目录"), systemImage: "folder") {
                             revealFileCommandLogs()
                         }
                     }
                     Menu {
-                        Button("预设文件后缀", systemImage: "square.grid.2x2") {
+                        Button(L10n.tr("预设文件后缀"), systemImage: "square.grid.2x2") {
                             settings.addFileOpenRule()
                         }
                         .disabled(configuredFileExtensions.count >= FileIconResolver.allFileExtensions.count)
-                        Button("自定义后缀", systemImage: "textformat") {
+                        Button(L10n.tr("自定义后缀"), systemImage: "textformat") {
                             settings.addCustomFileOpenRule()
                         }
                     } label: {
-                        Label("添加文件规则", systemImage: "plus")
+                        Label(L10n.tr("添加文件规则"), systemImage: "plus")
                     }
                 }
-                Text("每条规则只匹配一个后缀。可以从预设目录选择，也可以输入 .hap、.tar.gz 等自定义后缀；同名时自定义规则优先。")
+                Text(L10n.tr("每条规则只匹配一个后缀。可以从预设目录选择，也可以输入 .hap、.tar.gz 等自定义后缀；同名时自定义规则优先。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -154,7 +154,7 @@ struct OpenBehaviorSettingsView: View {
             .buttonStyle(.plain)
             .foregroundStyle(Color.secondary.opacity(bundleIdentifier.wrappedValue.isEmpty ? 0.4 : 1))
             .disabled(bundleIdentifier.wrappedValue.isEmpty)
-            .help("清除所选应用")
+            .help(L10n.tr("清除所选应用"))
         }
         .frame(maxWidth: .infinity)
     }
@@ -171,7 +171,7 @@ struct OpenBehaviorSettingsView: View {
                     customExtensionEditor(rule)
                 }
 
-                Picker("处理方式", selection: actionBinding(for: rule)) {
+                Picker(L10n.tr("处理方式"), selection: actionBinding(for: rule)) {
                     ForEach(FileOpenAction.allCases, id: \.self) { action in
                         Text(action.displayName).tag(action)
                     }
@@ -185,7 +185,7 @@ struct OpenBehaviorSettingsView: View {
                         .frame(width: 24, height: 24)
                 }
                 .buttonStyle(.plain)
-                .help("删除这条规则")
+                .help(L10n.tr("删除这条规则"))
             }
 
             switch rule.action {
@@ -193,25 +193,25 @@ struct OpenBehaviorSettingsView: View {
                 ApplicationSelectionControl(
                     bundleIdentifier: bundleIdentifierBinding(for: rule),
                     additionalApplications: [],
-                    placeholder: "选择打开应用",
-                    pickerTitle: "选择用于\(ruleDisplayName(rule))的应用"
+                    placeholder: L10n.tr("选择打开应用"),
+                    pickerTitle: L10n.tr("选择用于\(ruleDisplayName(rule))的应用")
                 )
                 .frame(maxWidth: .infinity)
             case .command:
                 FileCommandEditor(command: rule.command) { command in
                     settings.updateFileOpenRuleCommand(id: rule.id, command: command)
                 }
-                Text("Pasteory 会把原文件的绝对路径放入 $file，并把工作目录设为文件所在目录。")
+                Text(L10n.tr("Pasteory 会把原文件的绝对路径放入 $file，并把工作目录设为文件所在目录。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 if let execution = settings.recentFileCommandExecution(for: rule.matchIdentifier) {
                     HStack(spacing: 8) {
                         Label(execution.status.displayName, systemImage: executionStatusSymbol(execution.status))
                             .foregroundStyle(executionStatusColor(execution.status))
-                        Text(execution.startedAt.formatted(date: .omitted, time: .standard))
+                        Text(execution.startedAt.formatted(Date.FormatStyle(date: .omitted, time: .standard).locale(L10n.language.locale)))
                             .foregroundStyle(.secondary)
                         Spacer(minLength: 0)
-                        Button("查看本次命令输出") { viewedExecution = execution }
+                        Button(L10n.tr("查看本次命令输出")) { viewedExecution = execution }
                     }
                     .font(.caption)
                 }
@@ -233,7 +233,7 @@ struct OpenBehaviorSettingsView: View {
             ?? FileExtensionDescriptor(
                 fileExtension: rule.normalizedFileExtension,
                 assetName: rule.fileType,
-                displayName: FileIconResolver.fileType(assetName: rule.fileType)?.displayName ?? "文件",
+                displayName: FileIconResolver.fileType(assetName: rule.fileType)?.displayName ?? L10n.tr("文件"),
                 label: FileIconResolver.fileType(assetName: rule.fileType)?.label ?? "FILE"
             )
         return Button {
@@ -260,7 +260,7 @@ struct OpenBehaviorSettingsView: View {
             .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color(nsColor: .separatorColor)))
         }
         .buttonStyle(.plain)
-        .help("只匹配 \(descriptor.pattern)")
+        .help(L10n.tr("只匹配 \(descriptor.pattern)"))
     }
 
     private func fileTypeButton(_ rule: FileOpenRule) -> some View {
@@ -291,7 +291,7 @@ struct OpenBehaviorSettingsView: View {
             .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color(nsColor: .separatorColor)))
         }
         .buttonStyle(.plain)
-        .help("覆盖：\(fileType.suffixSummary)")
+        .help(L10n.tr("覆盖：\(fileType.suffixSummary)"))
     }
 
     private func customExtensionEditor(_ rule: FileOpenRule) -> some View {
@@ -306,7 +306,7 @@ struct OpenBehaviorSettingsView: View {
                         settings.updateFileOpenRuleExtension(id: rule.id, fileExtension: fileExtension)
                     }
                 }
-                Text("自定义后缀")
+                Text(L10n.tr("自定义后缀"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -320,9 +320,9 @@ struct OpenBehaviorSettingsView: View {
     private var commandPresentationDescription: String {
         switch settings.fileCommandPresentation {
         case .terminalWindow:
-            "每次执行会新建一个 Terminal.app 窗口，只显示简短的启动命令和实际输出，不展开 $file、PATH 等内部参数。命令完成后保留结果 3 秒，再关闭这个新窗口。首次使用需要允许 Pasteory 控制终端。"
+            L10n.tr("每次执行会新建一个 Terminal.app 窗口，只显示简短的启动命令和实际输出，不展开 $file、PATH 等内部参数。命令完成后保留结果 3 秒，再关闭这个新窗口。首次使用需要允许 Pasteory 控制终端。")
         case .silent:
-            "文件命令在后台执行，不显示窗口，也不读取 bash 或 zsh 的登录配置。命令的 stdout 和 stderr 会写入下方的静默命令日志，不包含 Pasteory App 日志。需要输入或确认的命令请使用终端窗口。"
+            L10n.tr("文件命令在后台执行，不显示窗口，也不读取 bash 或 zsh 的登录配置。命令的 stdout 和 stderr 会写入下方的静默命令日志，不包含 Pasteory App 日志。需要输入或确认的命令请使用终端窗口。")
         }
     }
 
@@ -351,9 +351,9 @@ struct OpenBehaviorSettingsView: View {
     private func ruleDisplayName(_ rule: FileOpenRule) -> String {
         switch rule.matchKind {
         case .fileType:
-            FileIconResolver.fileType(assetName: rule.fileType)?.displayName ?? "该文件类型"
+            FileIconResolver.fileType(assetName: rule.fileType)?.displayName ?? L10n.tr("该文件类型")
         case .catalogExtension, .fileExtension:
-            rule.normalizedFileExtension.isEmpty ? "该自定义后缀" : ".\(rule.normalizedFileExtension)"
+            rule.normalizedFileExtension.isEmpty ? L10n.tr("该自定义后缀") : ".\(rule.normalizedFileExtension)"
         }
     }
 
@@ -428,14 +428,14 @@ private struct FileExtensionSelectionView: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("选择文件后缀")
+                    Text(L10n.tr("选择文件后缀"))
                         .font(.title2.bold())
-                    Text("每条规则只匹配一个后缀，并按后缀升序排列。")
+                    Text(L10n.tr("每条规则只匹配一个后缀，并按后缀升序排列。"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("取消") { dismiss() }
+                Button(L10n.tr("取消")) { dismiss() }
                     .keyboardShortcut(.cancelAction)
             }
             .padding(18)
@@ -461,7 +461,7 @@ private struct FileExtensionSelectionView: View {
                             Image(systemName: "checkmark")
                                 .foregroundStyle(.tint)
                         } else if unavailableFileExtensions.contains(descriptor.fileExtension) {
-                            Text("已添加")
+                            Text(L10n.tr("已添加"))
                                 .font(.caption)
                                 .foregroundStyle(.tertiary)
                         }
@@ -474,10 +474,10 @@ private struct FileExtensionSelectionView: View {
                     descriptor.fileExtension != selectedFileExtension
                         && unavailableFileExtensions.contains(descriptor.fileExtension)
                 )
-                .help("只匹配 \(descriptor.pattern)")
+                .help(L10n.tr("只匹配 \(descriptor.pattern)"))
             }
             .listStyle(.inset)
-            .searchable(text: $query, placement: .toolbar, prompt: "搜索后缀或类型")
+            .searchable(text: $query, placement: .toolbar, prompt: L10n.tr("搜索后缀或类型"))
         }
         .frame(width: 520, height: 600)
         .background(Color(nsColor: .windowBackgroundColor))
@@ -497,7 +497,7 @@ private struct FileCommandEditor: View {
     }
 
     var body: some View {
-        TextField("命令，例如：open -a Xcode \"$file\"", text: $draft)
+        TextField(L10n.tr("命令，例如：open -a Xcode \"$file\""), text: $draft)
             .textFieldStyle(.roundedBorder)
             .labelsHidden()
             .font(.system(.body, design: .monospaced))
@@ -556,7 +556,7 @@ private struct FileCommandLogViewer: View {
     @ObservedObject var settings: AppSettings
     let fileType: String
     let initialLogURL: URL
-    @State private var content = "正在读取日志…"
+    @State private var content = L10n.tr("正在读取日志…")
 
     private var execution: FileCommandExecution? {
         settings.recentFileCommandExecution(for: fileType)
@@ -568,8 +568,8 @@ private struct FileCommandLogViewer: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("文件静默命令日志").font(.title2.bold())
-                    Text(execution?.status.displayName ?? "历史日志")
+                    Text(L10n.tr("文件静默命令日志")).font(.title2.bold())
+                    Text(execution?.status.displayName ?? L10n.tr("历史日志"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -577,12 +577,12 @@ private struct FileCommandLogViewer: View {
                 Button {
                     NSWorkspace.shared.activateFileViewerSelecting([logURL])
                 } label: {
-                    Label("在 Finder 中显示", systemImage: "folder")
+                    Label(L10n.tr("在 Finder 中显示"), systemImage: "folder")
                         .foregroundStyle(.primary)
                 }
                 .buttonStyle(.bordered)
                 Button { dismiss() } label: {
-                    Text("关闭").foregroundStyle(.primary)
+                    Text(L10n.tr("关闭")).foregroundStyle(.primary)
                 }
                     .buttonStyle(.bordered)
                     .keyboardShortcut(.cancelAction)
@@ -610,13 +610,13 @@ private struct FileCommandLogViewer: View {
     }
 
     private func readLogTail(from url: URL) -> String {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return "日志文件暂不可用。" }
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return L10n.tr("日志文件暂不可用。") }
         defer { try? handle.close() }
         let size = (try? handle.seekToEnd()) ?? 0
         let maximumBytes: UInt64 = 256 * 1024
         try? handle.seek(toOffset: size > maximumBytes ? size - maximumBytes : 0)
         let data = (try? handle.readToEnd()) ?? Data()
         let body = String(decoding: data, as: UTF8.self)
-        return size > maximumBytes ? "…仅显示最后 256 KB…\n\n\(body)" : body
+        return size > maximumBytes ? L10n.tr("…仅显示最后 256 KB…\n\n\(body)") : body
     }
 }

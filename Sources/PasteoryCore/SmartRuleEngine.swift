@@ -7,24 +7,24 @@ public enum SmartRuleError: LocalizedError {
     case invalidValue(SmartRuleField)
     public var errorDescription: String? {
         switch self {
-        case .tooManyConditions: "一个智能分组最多包含 50 个条件"
-        case .tooManyNestedLevels: "规则组最多可以嵌套 5 层"
-        case .emptyRuleGroup: "子规则组至少需要一个条件或规则组"
-        case .invalidRegularExpression: "正则表达式无效"
-        case .unsafeRegularExpression: "正则表达式过长或复杂度过高"
-        case .unsupportedOperator: "当前字段不支持这个判断条件"
+        case .tooManyConditions: L10n.tr("一个智能分组最多包含 50 个条件")
+        case .tooManyNestedLevels: L10n.tr("规则组最多可以嵌套 5 层")
+        case .emptyRuleGroup: L10n.tr("子规则组至少需要一个条件或规则组")
+        case .invalidRegularExpression: L10n.tr("正则表达式无效")
+        case .unsafeRegularExpression: L10n.tr("正则表达式过长或复杂度过高")
+        case .unsupportedOperator: L10n.tr("当前字段不支持这个判断条件")
         case .invalidValue(let field):
             switch field {
-            case .createdAt: "时间必须填写大于或等于 0 的天数"
-            case .byteSize: "大小必须填写大于或等于 0 的字节数"
-            case .copyCount: "复制次数必须填写大于或等于 0 的整数"
-            case .priority: "优先级必须是无、P1、P2 或 P3"
-            case .favorite: "收藏状态无效"
-            case .kind: "内容类型无效"
-            case .sourceConfidence: "来源可信度无效"
-            case .sourceApp: "请选择来源 App"
-            case .quickTextAction: "请选择快捷工具转换类型"
-            case .title, .body, .note: "请输入匹配内容"
+            case .createdAt: L10n.tr("时间必须填写大于或等于 0 的天数")
+            case .byteSize: L10n.tr("大小必须填写大于或等于 0 的字节数")
+            case .copyCount: L10n.tr("复制次数必须填写大于或等于 0 的整数")
+            case .priority: L10n.tr("优先级必须是无、P1、P2 或 P3")
+            case .favorite: L10n.tr("收藏状态无效")
+            case .kind: L10n.tr("内容类型无效")
+            case .sourceConfidence: L10n.tr("来源可信度无效")
+            case .sourceApp: L10n.tr("请选择来源 App")
+            case .quickTextAction: L10n.tr("请选择快捷工具转换类型")
+            case .title, .body, .note: L10n.tr("请输入匹配内容")
             }
         }
     }

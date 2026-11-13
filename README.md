@@ -1,74 +1,52 @@
 # Pasteory
 
+**English** | [简体中文](README.zh-CN.md)
+
 **Pasteory learns from what you copied.**
 
-从复制过的内容里，学会你做事的习惯。
+A local-first clipboard manager for macOS. Keep text, images, links, code, colors, and file references within reach—then find and paste them without leaving your work.
 
-Pasteory 是一个本地优先的 macOS 剪贴板资料库。它运行在菜单栏，通过 `⌘⇧V` 打开快捷面板，支持文字、图片、链接、颜色、代码和文件引用。唤起快捷键可以在设置中修改。
+[Download the latest Beta](https://github.com/houskii/Pasteory/releases) · [All releases](https://github.com/houskii/Pasteory/releases)
 
-产品的核心洞察和当前边界见 [`docs/PRODUCT.md`](docs/PRODUCT.md)，设置页布局规则见 [`docs/SETTINGS_UI.md`](docs/SETTINGS_UI.md)，快捷面板的打开与搜索规则见 [`docs/QUICK_PANEL_INTERACTIONS.md`](docs/QUICK_PANEL_INTERACTIONS.md)，文件后缀与图标映射见 [`docs/FILE_ICON_SYSTEM.md`](docs/FILE_ICON_SYSTEM.md)。
+## Your clipboard, a shortcut away
 
-资料库已整合到可缩放的设置窗口，`⌘L` 直接定位“资料库”，`⌘,` 定位“通用”。“设置 → 关于”可手动检查更新；默认每 24 小时自动检查，发现新版时快捷面板显示“更新 ↓”，确认后从 GitHub 下载、校验、安装并重启。首次发布配置与签名流程见 [`docs/UPDATES.md`](docs/UPDATES.md)。
+Press **⌘⇧V** to open the Quick Panel. Search your history, switch groups, and paste a previous copy into the app you’re using.
 
-![Pasteory 0.1.29 的资料库，展示文字、图像、链接和代码等演示内容](docs/pasteory-library.png)
+<img src="docs/screenshots/quick-panel-en.png" width="380" alt="Pasteory Quick Panel in English with saved text, a link, code, and an image">
 
-[下载最新 Beta 安装包](https://github.com/houskii/Pasteory/releases/tag/v0.1.29)
+- **Find it again.** Search content, titles, notes, groups, or the source app.
+- **Keep useful things close.** Favorite, pin, group, or stack related clips. Smart groups collect matching items automatically.
+- **Paste your way.** Paste the original content or use plain text. Open links, code, and files in your preferred apps.
+- **Make it yours.** Choose a theme color, a tab layout, custom shortcuts, and English or 简体中文. English is the first-launch default.
+- **Stay up to date.** Review release notes and confirm an update before Pasteory downloads and installs it.
 
-## 系统要求
+## A Library for the things you keep
 
-- macOS 14 或更高版本
-- Apple Silicon Mac
-- Xcode 26 或兼容的 Swift 6 工具链
+Open the Library with **⌘L** from the Quick Panel to browse your saved content, add notes, and organize it in a larger, resizable window.
 
-## 构建与安装
+![Pasteory Library in Settings, with groups, saved items, and a content preview](docs/screenshots/library-en.png)
 
-```bash
-make test
-make app
-make qa-verify
-make dmg
-make verify
-make install
-```
+## Get started
 
-构建产物位于 `dist/Pasteory.app` 和 `dist/Pasteory-<版本号>-arm64.dmg`。本机构建不使用 ad-hoc 签名，也没有经过 Apple 公证。
+Requires **macOS 14 or later** on an **Apple Silicon Mac**.
 
-QA 包通过 `make qa-app` 构建为 `dist/Pasteory-QA.app`，通过 `make qa-install` 安装到 `/Applications/Pasteory QA.app`。正式包与 QA 包分别使用 `app.pasteory.Pasteory` 和 `app.pasteory.Pasteory.qa`，数据目录分别为 `Pasteory` 和 `Pasteory QA`。`make qa-verify` 会同时校验 Bundle ID、显示名称、数据目录、Chrome 原生消息桥和签名 requirement，防止测试包再次复用正式身份。QA 包默认不注册 Chrome 原生消息桥。
+1. Download the Beta DMG from [Releases](https://github.com/houskii/Pasteory/releases), open it, and drag Pasteory to Applications.
+2. Launch Pasteory. It lives in the menu bar and starts saving new copies.
+3. Copy something, then press **⌘⇧V**. Use **↑↓** to select an item, **⌘F** to search, and **Return** to paste. **⌘C** copies without pasting.
+4. Allow Accessibility access when prompted to paste directly into other apps. You can also copy an item and paste it yourself.
 
-首次执行 `make app`、`make install` 或 `make signing` 时，脚本会在 `~/Library/Application Support/Pasteory/Signing/` 自动创建隔离的 `Pasteory Local Build` 签名身份。钥匙串、加密恢复文件和随机密码仅对当前用户可读，不会进入仓库。本机已有其他稳定代码签名证书时，也可以通过环境变量指定身份：
+Use **⌥Return** to paste as plain text. **Space** opens the selected item; choose your browser, code editor, and file actions in **Settings → Open With** first.
 
-```bash
-PASTEORY_SIGN_IDENTITY="Apple Development: …" make install
-```
+Change the interface language anytime in **Settings → General → Interface Language**. To switch to Chinese, choose **简体中文**.
 
-后续构建持续使用同一证书和 Bundle ID。脚本会锁定证书指纹，并在构建、安装和产物验证三个阶段拒绝 ad-hoc 签名或身份意外变化，避免更新后再次丢失辅助功能授权。不要删除签名目录，也不要把证书、私钥或密码放进仓库。
+## Privacy, by default
 
-更新时如需跳过本次启动的存量整理、归档和旧链接重试，使用 `PASTEORY_SKIP_EXISTING_MAINTENANCE=1 make install`。新复制的内容和快捷工具转换结果仍正常入库。
+Your clipboard history stays on your Mac. Pasteory has no cloud sync or AI analysis. Password apps and hidden or temporary clipboard content are ignored by default; you can exclude other apps in Settings.
 
-从 ad-hoc 签名首次切换到 `Pasteory Local Build` 后，需要在“系统设置 → 隐私与安全性 → 辅助功能”中重新授权一次。之后只要保留签名目录，更新安装无需重复授权。
+Optional page-title resolution visits the copied link’s website. Source-context capture for Chrome, Lark, and WeChat is opt-in. Update checks contact GitHub and never send clipboard content. You can turn them off in Settings → About.
 
-## 首次使用
+Copied images are saved locally. Copied files remain references to the originals. Local backup, archiving, history cleanup, and Trash are available in Settings.
 
-1. 启动 Pasteory。应用会自动记录之后新复制的内容，已有剪贴板不会被导入。
-2. 可以在“设置 → 采集与隐私”中把剪贴板检测频率设为 0.1 秒、0.5 秒或 1 秒，默认 1 秒。
-3. 复制一段测试文字，按 `⌘⇧V` 打开快捷面板。
-4. 面板打开后默认不聚焦搜索框。空格打开所选内容，`⌘F` 进入或退出搜索；链接、代码和文件需要先在“设置 → 打开方式”中配置。
-5. Return 会尝试直接粘贴；`⌘C` 只复制；`⌥Return` 纯文本粘贴；`⌘⌥C` 只复制纯文本。
-6. 直接粘贴需要在“系统设置 → 隐私与安全性 → 辅助功能”中允许 Pasteory。首次尝试直接粘贴时会主动打开授权提示；没有权限时，内容仍会复制到系统剪贴板。
-7. 来源详情分为“浏览器”和“通信软件”：浏览器目前支持 Chrome，通信软件支持飞书和微信。请在“设置 → 采集与隐私”中逐个打开；Chrome 插件可在“高级诊断”中准备安装。
-8. 单个合法 HTTP／HTTPS URL 被复制后会自动添加到资料库。普通网页由匿名请求自动解析；需要登录的网站可以在“设置 → 链接解析 → 添加登录解析…”中配置正则，正则直接匹配 `host + path`，不需要填写 `https://`。
+## Contributing
 
-## 隐私边界
-
-- 剪贴板资料库保存在 `~/Library/Application Support/Pasteory/`。WebKit 网页缓存保存在 `~/Library/Caches/app.pasteory.Pasteory/WebKit/NetworkCache/`。
-- 默认每天向 GitHub 检查版本信息，不上传剪贴板内容，可在“设置 → 关于”关闭。用户在“设置 → 链接解析”中打开自动解析后，Pasteory 会先以不携带 Cookie 的普通请求获取网页标题。BITS、飞书、Codebase 以及用户添加的正则规则只有在建立 Pasteory 独立 WebKit 登录会话后才会使用该会话；保存规则时会统计并纳入当前覆盖的未解析链接，登录完成后批量重试，以后新复制的匹配链接也会自动使用该会话。会话不读取 Chrome Cookie，也不会保存网页正文。
-- 当前版本不包含 AI 分析或云同步。
-- 默认忽略钥匙串、密码应用及隐藏或临时剪贴板类型。
-- 复制文件时只保存引用和元数据；直接复制图片时，Pasteory 会保存剪贴板里的图片数据，原文件移走后仍可粘贴。
-- 自动归档不会删除内容；废纸篓内容保留 30 天。
-- “设置 → 存储与清理”会显示网页缓存占用。自动清理默认开启：距上次清理满 24 小时，或占用超过 100 MB，就等链接解析和登录结束后清空磁盘缓存。已有标题和登录状态会保留。也可以手动清缓存，或按最后使用时间和单条大小预览、删除历史。
-- 网页和会话上下文默认关闭，并与用户填写的标题、备注分开保存。完整边界见 [`docs/SOURCE_CONTEXT.md`](docs/SOURCE_CONTEXT.md)。
-
-## 开发
-
-直接在 Xcode 中打开 `Package.swift`。核心数据、存储、搜索、规则和归档位于 `PasteoryCore`，AppKit／SwiftUI 应用壳位于 `Pasteory`。
+Bug reports and suggestions are welcome in [Issues](https://github.com/houskii/Pasteory/issues). For building from source, see the [development guide](docs/DEVELOPMENT.md).

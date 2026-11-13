@@ -16,7 +16,8 @@ final class UpdateService: NSObject, ObservableObject, SPUUserDriver, SPUUpdater
     @Published private(set) var automaticChecksEnabled: Bool
     @Published private(set) var releaseNotes = ""
     @Published private(set) var isShowingDialog = false
-    @Published private(set) var configurationMessage: String?
+    @Published private var configurationMessageKey: String?
+    var configurationMessage: String? { configurationMessageKey.map { L10n.text($0) } }
 
     let currentVersion: String
     let currentBuild: String
@@ -40,7 +41,7 @@ final class UpdateService: NSObject, ObservableObject, SPUUserDriver, SPUUpdater
     init(defaults: UserDefaults = .standard, bundle: Bundle = .main) {
         self.defaults = defaults
         self.bundle = bundle
-        currentVersion = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "未知"
+        currentVersion = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? L10n.tr("未知")
         currentBuild = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
         automaticChecksEnabled = defaults.object(forKey: "SUEnableAutomaticChecks") as? Bool ?? true
         lastCheckedAt = defaults.object(forKey: checkDateKey) as? Date
@@ -64,18 +65,18 @@ final class UpdateService: NSObject, ObservableObject, SPUUserDriver, SPUUpdater
 #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--debug-update-available") {
             availableUpdate = AppUpdate(
-                version: "0.1.31", build: "36", publishedAt: Date(),
-                notes: "资料库已整合到设置。\n新增每日更新检查和 GitHub 自动下载安装。",
-                downloadURL: URL(string: "https://github.com/houskii/Pasteory/releases/download/v0.1.31/Pasteory-0.1.31-arm64.dmg"),
+                version: "0.1.32", build: "37", publishedAt: Date(),
+                notes: L10n.tr("资料库已整合到设置。\n新增每日更新检查和 GitHub 自动下载安装。"),
+                downloadURL: URL(string: "https://github.com/houskii/Pasteory/releases/download/v0.1.32/Pasteory-0.1.32-arm64.dmg"),
                 releaseURL: nil
             )
             releaseNotes = availableUpdate?.notes ?? ""
-            configurationMessage = "更新预览使用演示数据，不执行下载安装。"
+            configurationMessageKey = "更新预览使用演示数据，不执行下载安装。"
             return
         }
 #endif
         guard PasteoryRuntimeIdentity.identity(for: bundle.bundleIdentifier).variant == .production else {
-            configurationMessage = "QA 版本使用隔离环境，不接收正式应用更新。"
+            configurationMessageKey = "QA 版本使用隔离环境，不接收正式应用更新。"
             automaticChecksEnabled = false
             availableUpdate = nil
             return
@@ -83,14 +84,14 @@ final class UpdateService: NSObject, ObservableObject, SPUUserDriver, SPUUpdater
 #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--debug-ui-qa")
             || ProcessInfo.processInfo.arguments.contains("--debug-data-root") {
-            configurationMessage = "隔离调试环境不检查正式更新。"
+            configurationMessageKey = "隔离调试环境不检查正式更新。"
             return
         }
 #endif
         guard bundle.bundleURL.pathExtension == "app",
               let key = bundle.object(forInfoDictionaryKey: "SUPublicEDKey") as? String,
               Data(base64Encoded: key)?.count == 32 else {
-            configurationMessage = "此构建尚未配置更新签名，请安装正式发布的 Pasteory。"
+            configurationMessageKey = "此构建尚未配置更新签名，请安装正式发布的 Pasteory。"
             availableUpdate = nil
             return
         }
@@ -102,7 +103,7 @@ final class UpdateService: NSObject, ObservableObject, SPUUserDriver, SPUUpdater
             lastCheckedAt = lastCheckedAt ?? updater.lastUpdateCheckDate
         } catch {
             self.updater = nil
-            configurationMessage = error.localizedDescription
+            configurationMessageKey = error.localizedDescription
         }
         observers.append(NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
@@ -134,7 +135,7 @@ final class UpdateService: NSObject, ObservableObject, SPUUserDriver, SPUUpdater
         }
 #endif
         guard let updater else {
-            lastError = configurationMessage ?? "更新服务尚未就绪。"
+            lastError = configurationMessage ?? L10n.tr("更新服务尚未就绪。")
             stage = .failed
             presentDialog()
             return
@@ -224,8 +225,8 @@ final class UpdateService: NSObject, ObservableObject, SPUUserDriver, SPUUpdater
         AppUpdate(
             version: item.displayVersionString, build: item.versionString, publishedAt: item.date,
             notes: item.itemDescriptionFormat == "plain-text"
-                ? (item.itemDescription ?? "暂无更新说明。")
-                : Self.plainTextNotes(item.itemDescription ?? "暂无更新说明。"),
+                ? (item.itemDescription ?? L10n.tr("暂无更新说明。"))
+                : Self.plainTextNotes(item.itemDescription ?? L10n.tr("暂无更新说明。")),
             downloadURL: item.fileURL,
             releaseURL: AppUpdatePolicy.isGitHubReleasePage(item.infoURL) ? item.infoURL : nil
         )
@@ -248,7 +249,7 @@ final class UpdateService: NSObject, ObservableObject, SPUUserDriver, SPUUpdater
         cancellation = nil
         guard AppUpdatePolicy.isGitHubDownload(appcastItem.fileURL) else {
             cache(nil)
-            lastError = "此更新未提供可安装的 GitHub 发布包，请到发布页面查看说明。"
+            lastError = L10n.tr("此更新未提供可安装的 GitHub 发布包，请到发布页面查看说明。")
             stage = .failed
             reply(.dismiss)
             if state.userInitiated { presentDialog() }
@@ -274,7 +275,7 @@ final class UpdateService: NSObject, ObservableObject, SPUUserDriver, SPUUpdater
     }
 
     func showUpdateReleaseNotesFailedToDownloadWithError(_ error: Error) {
-        if releaseNotes.isEmpty { releaseNotes = "暂时无法加载更新说明，可稍后重试。" }
+        if releaseNotes.isEmpty { releaseNotes = L10n.tr("暂时无法加载更新说明，可稍后重试。") }
     }
 
     func showUpdateNotFoundWithError(_ error: Error, acknowledgement: @escaping () -> Void) {

@@ -25,7 +25,7 @@ private final class FileCommandLogCapture: @unchecked Sendable {
             outputBytes += accepted.count
         }
         if data.count > remaining, !wroteTruncationNotice {
-            try? handle.write(contentsOf: Data("\n\n…日志输出超过 1 MB，后续内容已省略…\n".utf8))
+            try? handle.write(contentsOf: Data(L10n.tr("\n\n…日志输出超过 1 MB，后续内容已省略…\n").utf8))
             wroteTruncationNotice = true
         }
     }
@@ -33,7 +33,7 @@ private final class FileCommandLogCapture: @unchecked Sendable {
     func finish(exitCode: Int32) {
         lock.lock()
         defer { lock.unlock() }
-        let footer = "\n\n结束：\(Date().formatted(.iso8601))\n退出码：\(exitCode)\n"
+        let footer = L10n.tr("\n\n结束：\(Date().formatted(.iso8601))\n退出码：\(exitCode)\n")
         try? handle.write(contentsOf: Data(footer.utf8))
         try? handle.close()
     }
@@ -41,7 +41,7 @@ private final class FileCommandLogCapture: @unchecked Sendable {
     func failToLaunch(_ error: Error) {
         lock.lock()
         defer { lock.unlock() }
-        let footer = "\n\n启动失败：\(error.localizedDescription)\n"
+        let footer = L10n.tr("\n\n启动失败：\(error.localizedDescription)\n")
         try? handle.write(contentsOf: Data(footer.utf8))
         try? handle.close()
     }
@@ -153,15 +153,15 @@ enum ClipOpenError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .unsupportedKind(let kind): "暂不支持打开“\(kind.displayName)”内容"
-        case .browserNotConfigured: "尚未配置链接浏览器，请先前往“设置 → 打开方式”"
-        case .codeEditorNotConfigured: "尚未配置代码编辑器，请先前往“设置 → 打开方式”"
-        case .fileRuleNotConfigured(let fileType): "尚未为“\(fileType)”配置打开方式"
-        case .fileApplicationNotConfigured(let fileType): "尚未为“\(fileType)”选择打开应用"
-        case .fileCommandNotConfigured(let fileType): "尚未为“\(fileType)”填写命令"
-        case .fileUnavailable: "原文件已经删除，无法打开"
-        case .applicationUnavailable(let bundleIdentifier): "找不到已配置的应用（\(bundleIdentifier)）"
-        case .contentUnavailable: "当前项目没有可打开的原始内容"
+        case .unsupportedKind(let kind): L10n.tr("暂不支持打开“\(kind.displayName)”内容")
+        case .browserNotConfigured: L10n.tr("尚未配置链接浏览器，请先前往“设置 → 打开方式”")
+        case .codeEditorNotConfigured: L10n.tr("尚未配置代码编辑器，请先前往“设置 → 打开方式”")
+        case .fileRuleNotConfigured(let fileType): L10n.tr("尚未为“\(fileType)”配置打开方式")
+        case .fileApplicationNotConfigured(let fileType): L10n.tr("尚未为“\(fileType)”选择打开应用")
+        case .fileCommandNotConfigured(let fileType): L10n.tr("尚未为“\(fileType)”填写命令")
+        case .fileUnavailable: L10n.tr("原文件已经删除，无法打开")
+        case .applicationUnavailable(let bundleIdentifier): L10n.tr("找不到已配置的应用（\(bundleIdentifier)）")
+        case .contentUnavailable: L10n.tr("当前项目没有可打开的原始内容")
         }
     }
 }

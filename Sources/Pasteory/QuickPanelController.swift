@@ -52,10 +52,10 @@ final class QuickPanelController: NSObject {
                 case .running:
                     break
                 case .succeeded:
-                    state.presentStatus("文件命令已完成，可在“设置 → 打开方式”查看本次命令输出")
+                    state.presentStatus(L10n.tr("文件命令已完成，可在“设置 → 打开方式”查看本次命令输出"))
                 case .failed(let exitCode):
                     state.presentStatus(
-                        "文件命令执行失败（退出码 \(exitCode)），请在“设置 → 打开方式”查看本次命令输出",
+                        L10n.tr("文件命令执行失败（退出码 \(exitCode)），请在“设置 → 打开方式”查看本次命令输出"),
                         kind: .error,
                         dismissAfter: 6
                     )
@@ -80,7 +80,7 @@ final class QuickPanelController: NSObject {
             defer: false
         )
         super.init()
-        panel.title = "Pasteory 快捷面板"
+        panel.title = L10n.tr("Pasteory 快捷面板")
 #if DEBUG
         if isDebugUIQA { state.quickPanelPinned = true }
         panel.allowsMainWindow = isDebugUIQA
@@ -128,6 +128,10 @@ final class QuickPanelController: NSObject {
             frame.origin.x = min(max(frame.minX, visible.minX), visible.maxX - frame.width)
         }
         panel.setFrame(frame, display: panel.isVisible)
+    }
+
+    func refreshLanguage() {
+        panel.title = L10n.tr("Pasteory 快捷面板")
     }
 
     func toggle() { panel.isVisible ? close() : show() }
@@ -234,10 +238,10 @@ final class QuickPanelController: NSObject {
                 let result = try await pasteCoordinator.perform(clip, plainText: plainText, paste: paste, target: target)
                 switch result {
                 case .pasted:
-                    if await state.recordPaste(clip) { state.presentStatus("已粘贴") }
-                case .copied: state.presentStatus("已复制")
-                case .copiedFallback: state.presentStatus("目标应用未能恢复，内容已复制，请手动粘贴", kind: .warning, dismissAfter: 5); showFallbackNotification()
-                case .copiedPermissionRequired: state.presentStatus("已复制；请在系统设置中允许辅助功能后再次按 Return", kind: .warning, dismissAfter: 5); showFallbackNotification()
+                    if await state.recordPaste(clip) { state.presentStatus(L10n.tr("已粘贴")) }
+                case .copied: state.presentStatus(L10n.tr("已复制"))
+                case .copiedFallback: state.presentStatus(L10n.tr("目标应用未能恢复，内容已复制，请手动粘贴"), kind: .warning, dismissAfter: 5); showFallbackNotification()
+                case .copiedPermissionRequired: state.presentStatus(L10n.tr("已复制；请在系统设置中允许辅助功能后再次按 Return"), kind: .warning, dismissAfter: 5); showFallbackNotification()
                 }
             } catch { state.show(error); showFallbackNotification() }
         }

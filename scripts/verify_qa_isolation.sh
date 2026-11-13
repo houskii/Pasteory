@@ -32,6 +32,13 @@ plist_value() {
 "$SCRIPT_DIR/verify_signing.sh" "$PRODUCTION_APP" "app.pasteory.Pasteory" >/dev/null
 "$SCRIPT_DIR/verify_signing.sh" "$QA_APP" "app.pasteory.Pasteory.qa" >/dev/null
 
+for app in "$PRODUCTION_APP" "$QA_APP"; do
+  [[ -s "$app/Contents/Resources/Pasteory_PasteoryCore.bundle/en.json" || -s "$app/Contents/Resources/Pasteory_PasteoryCore.bundle/Contents/Resources/en.json" ]]
+  [[ -s "$app/Contents/Resources/en.lproj/InfoPlist.strings" ]]
+  [[ -s "$app/Contents/Resources/zh-Hans.lproj/InfoPlist.strings" ]]
+  [[ "$(plist_value "$app/Contents/Info.plist" CFBundleDevelopmentRegion)" == "en" ]]
+done
+
 production_requirement=$(codesign -d -r- "$PRODUCTION_APP" 2>&1)
 qa_requirement=$(codesign -d -r- "$QA_APP" 2>&1)
 [[ "$production_requirement" == *'identifier "app.pasteory.Pasteory"'* ]]

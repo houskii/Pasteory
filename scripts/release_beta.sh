@@ -12,7 +12,7 @@ notes=${1:-}
 git diff --quiet
 [[ -z "$(git ls-files --others --exclude-standard)" ]]
 git diff --cached --check
-git fetch origin main
+git fetch origin main --tags
 git merge-base --is-ancestor origin/main HEAD
 version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Config/Info.plist)
 build=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' Config/Info.plist)
@@ -24,6 +24,20 @@ remote_tag=$(git ls-remote --tags origin "refs/tags/$tag")
 old_plist=$(git show origin/main:Config/Info.plist)
 old_version=$(print -r -- "$old_plist" | plutil -extract CFBundleShortVersionString raw -o - -)
 old_build=$(print -r -- "$old_plist" | plutil -extract CFBundleVersion raw -o - -)
+# PRs may merge the version bump before the publisher Mac builds the release.
+# In that case compare against the latest reachable release tag, never the same source version.
+if [[ "$version" == "$old_version" ]]; then
+  [[ "$build" == "$old_build" ]]
+  previous_tag=$(git describe --tags --abbrev=0 --match 'v[0-9]*' origin/main 2>/dev/null || true)
+  if [[ -n "$previous_tag" ]]; then
+    previous_plist=$(git show "${previous_tag}:Config/Info.plist")
+    old_version=$(print -r -- "$previous_plist" | plutil -extract CFBundleShortVersionString raw -o - -)
+    old_build=$(print -r -- "$previous_plist" | plutil -extract CFBundleVersion raw -o - -)
+  else
+    old_version=0.0.0
+    old_build=0
+  fi
+fi
 autoload -Uz is-at-least
 [[ "$version" != "$old_version" && "$build" -gt "$old_build" ]]
 is-at-least "$old_version" "$version"

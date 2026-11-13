@@ -56,7 +56,7 @@ def appcast_bytes(info, tag, notes, asset_name, size, signature, published_at):
     channel = ET.SubElement(root, "channel")
     ET.SubElement(channel, "title").text = "Pasteory Beta"
     ET.SubElement(channel, "link").text = f"{REPOSITORY}/releases"
-    ET.SubElement(channel, "language").text = "zh-cn"
+    ET.SubElement(channel, "language").text = "en"
     item = ET.SubElement(channel, "item")
     ET.SubElement(item, "title").text = f"Pasteory {info['CFBundleShortVersionString']}"
     ET.SubElement(item, "link").text = f"{REPOSITORY}/releases/tag/{tag}"

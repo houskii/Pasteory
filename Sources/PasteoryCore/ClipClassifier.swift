@@ -44,7 +44,7 @@ public enum ClipClassifier {
         } else {
             FileClipMetadata(
                 fileNames: fileURLs.enumerated().map { index, url in
-                    if FileReferenceDecoder.isOpaqueFileReference(url) { return "文件 \(index + 1)" }
+                    if FileReferenceDecoder.isOpaqueFileReference(url) { return L10n.tr("文件 \(index + 1)") }
                     return url.lastPathComponent.isEmpty ? url.path : url.lastPathComponent
                 },
                 filePaths: {
@@ -96,7 +96,7 @@ public enum ClipClassifier {
         if item.representations.contains(where: {
             !$0.data.isEmpty && UTType($0.uti)?.conforms(to: .image) == true
         }) {
-            previewCandidates.append("图像")
+            previewCandidates.append(L10n.tr("图像"))
             return ItemClassification(kind: .image)
         }
         if types.contains(where: { $0 == "public.file-url" || $0 == "NSFilenamesPboardType" }) {
@@ -104,16 +104,16 @@ public enum ClipClassifier {
             return ItemClassification(kind: .file)
         }
         if types.contains(where: { $0 == "com.adobe.pdf" || UTType($0)?.conforms(to: .image) == true }) {
-            previewCandidates.append("图像")
+            previewCandidates.append(L10n.tr("图像"))
             return ItemClassification(kind: .image)
         }
         let text = bestText(item)
         if types.contains("public.url") || types.contains("public.url-name") || text.flatMap(URL.init(string:))?.scheme != nil {
-            previewCandidates.append(text ?? "链接")
+            previewCandidates.append(text ?? L10n.tr("链接"))
             return ItemClassification(kind: .link)
         }
         if types.contains("com.apple.cocoa.pasteboard.color") || types.contains("NSColorPboardType") || text.map(isColor) == true {
-            previewCandidates.append(text ?? "颜色")
+            previewCandidates.append(text ?? L10n.tr("颜色"))
             return ItemClassification(kind: .color)
         }
         if let text {
@@ -346,7 +346,7 @@ public enum ClipClassifier {
     }
 
     private static func filePreview(_ item: CapturedItem) -> String {
-        guard let url = FileReferenceDecoder.urls(in: item).first else { return "文件" }
+        guard let url = FileReferenceDecoder.urls(in: item).first else { return L10n.tr("文件") }
         return url.lastPathComponent.isEmpty ? url.path : url.lastPathComponent
     }
 
@@ -356,7 +356,7 @@ public enum ClipClassifier {
     }
 
     private static func defaultPreview(for kind: ClipKind, itemCount: Int) -> String {
-        itemCount > 1 ? "\(itemCount) 项\(kind.displayName)" : kind.displayName
+        itemCount > 1 ? L10n.tr("\(itemCount) 项\(kind.displayName)") : kind.displayName
     }
 }
 

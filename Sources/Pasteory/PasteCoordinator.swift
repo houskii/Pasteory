@@ -93,8 +93,8 @@ enum PasteError: LocalizedError {
     case noPlainText, writeFailed
     var errorDescription: String? {
         switch self {
-        case .noPlainText: "此内容没有可用的纯文本格式"
-        case .writeFailed: "无法写入系统剪贴板"
+        case .noPlainText: L10n.tr("此内容没有可用的纯文本格式")
+        case .writeFailed: L10n.tr("无法写入系统剪贴板")
         }
     }
 }

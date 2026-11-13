@@ -14,6 +14,7 @@ let package = Package(
     targets: [
         .target(
             name: "PasteoryCore",
+            resources: [.process("Resources")],
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         .executableTarget(

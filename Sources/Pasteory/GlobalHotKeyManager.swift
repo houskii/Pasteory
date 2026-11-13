@@ -1,3 +1,4 @@
+import PasteoryCore
 import Carbon
 import Foundation
 
@@ -33,7 +34,7 @@ final class GlobalHotKeyManager {
         if status == noErr {
             reference = newReference; lastError = nil; return true
         }
-        lastError = "快捷键已被其他应用占用（错误码 \(status)）"
+        lastError = L10n.tr("快捷键已被其他应用占用（错误码 \(status)）")
         return false
     }
 

@@ -16,18 +16,18 @@ public enum LinkRequestState: String, Codable, CaseIterable, Sendable {
 
     public var displayName: String {
         switch self {
-        case .pending: "等待解析"
-        case .resolved: "已解析"
-        case .genericTitle: "只有通用标题"
-        case .missingTitle: "没有找到标题"
-        case .needsAuthentication: "需要登录"
-        case .verificationRequired: "需要网页验证"
-        case .forbidden: "没有访问权限"
-        case .notFound: "页面不存在"
-        case .blockedByPolicy: "已被安全策略拦截"
-        case .networkError: "网络错误"
-        case .timeout: "请求超时"
-        case .parserError: "页面无法解析"
+        case .pending: L10n.tr("等待解析")
+        case .resolved: L10n.tr("已解析")
+        case .genericTitle: L10n.tr("只有通用标题")
+        case .missingTitle: L10n.tr("没有找到标题")
+        case .needsAuthentication: L10n.tr("需要登录")
+        case .verificationRequired: L10n.tr("需要网页验证")
+        case .forbidden: L10n.tr("没有访问权限")
+        case .notFound: L10n.tr("页面不存在")
+        case .blockedByPolicy: L10n.tr("已被安全策略拦截")
+        case .networkError: L10n.tr("网络错误")
+        case .timeout: L10n.tr("请求超时")
+        case .parserError: L10n.tr("页面无法解析")
         }
     }
 
@@ -44,12 +44,12 @@ public enum LinkTitleQuality: String, Codable, CaseIterable, Sendable {
 
     public var displayName: String {
         switch self {
-        case .verified: "已验证"
-        case .distinctive: "可区分资源"
-        case .identifierOnly: "只有资源标识"
-        case .ambiguous: "待确认"
-        case .generic: "通用标题"
-        case .loginOrError: "登录或错误页面"
+        case .verified: L10n.tr("已验证")
+        case .distinctive: L10n.tr("可区分资源")
+        case .identifierOnly: L10n.tr("只有资源标识")
+        case .ambiguous: L10n.tr("待确认")
+        case .generic: L10n.tr("通用标题")
+        case .loginOrError: L10n.tr("登录或错误页面")
         }
     }
 
@@ -170,7 +170,7 @@ public enum URLFallbackRuleOrigin: String, Codable, CaseIterable, Sendable {
     case builtIn
     case user
 
-    public var displayName: String { self == .builtIn ? "内置规则" : "用户规则" }
+    public var displayName: String { self == .builtIn ? L10n.tr("内置规则") : L10n.tr("用户规则") }
 }
 
 public struct URLFallbackRule: Codable, Hashable, Identifiable, Sendable {
@@ -287,9 +287,9 @@ public enum LinkFallbackState: String, Codable, CaseIterable, Sendable {
 
     public var displayName: String {
         switch self {
-        case .matchedBuiltInRule: "内置兜底"
-        case .matchedUserRule: "用户兜底"
-        case .genericURLFallback: "通用 URL 兜底"
+        case .matchedBuiltInRule: L10n.tr("内置兜底")
+        case .matchedUserRule: L10n.tr("用户兜底")
+        case .genericURLFallback: L10n.tr("通用 URL 兜底")
         }
     }
 }
@@ -311,11 +311,11 @@ public enum LinkResolutionSource: String, Codable, CaseIterable, Sendable {
 
     public var displayName: String {
         switch self {
-        case .anonymousHTTP: "普通请求"
+        case .anonymousHTTP: L10n.tr("普通请求")
         case .browserExtension: "Chrome"
-        case .webKit: "登录 WebKit"
-        case .siteAPI: "站点 API"
-        case .fallbackRule: "兜底规则"
+        case .webKit: L10n.tr("登录 WebKit")
+        case .siteAPI: L10n.tr("站点 API")
+        case .fallbackRule: L10n.tr("兜底规则")
         }
     }
 }

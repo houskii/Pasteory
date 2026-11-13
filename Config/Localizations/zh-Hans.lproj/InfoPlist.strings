@@ -1,0 +1,1 @@
+"NSAppleEventsUsageDescription" = "用于在用户选择“显示终端窗口”时执行文件命令，并在完成 3 秒后关闭本次新建的终端窗口。";

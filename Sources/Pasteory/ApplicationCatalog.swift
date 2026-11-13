@@ -1,3 +1,4 @@
+import PasteoryCore
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
@@ -369,7 +370,7 @@ struct ApplicationPickerSheet: View {
             Text(title).font(.title2.bold())
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("搜索应用名称、Bundle ID 或路径", text: $query).textFieldStyle(.plain)
+                TextField(L10n.tr("搜索应用名称、Bundle ID 或路径"), text: $query).textFieldStyle(.plain)
             }
             .padding(.horizontal, 10)
             .frame(height: 34)
@@ -393,9 +394,9 @@ struct ApplicationPickerSheet: View {
             }
             .overlay {
                 if isLoading {
-                    ProgressView("正在读取应用…")
+                    ProgressView(L10n.tr("正在读取应用…"))
                 } else if applications.isEmpty {
-                    ContentUnavailableView("没有找到应用", systemImage: "app.dashed")
+                    ContentUnavailableView(L10n.tr("没有找到应用"), systemImage: "app.dashed")
                 } else if filteredApplications.isEmpty {
                     ContentUnavailableView.search(text: query)
                 }
@@ -408,9 +409,9 @@ struct ApplicationPickerSheet: View {
             }
 
             HStack {
-                Button("选择其他 App…") { chooseOtherApplication() }
+                Button(L10n.tr("选择其他 App…")) { chooseOtherApplication() }
                 Spacer()
-                Button("取消") { dismiss() }
+                Button(L10n.tr("取消")) { dismiss() }
             }
         }
         .padding(20)
@@ -434,15 +435,15 @@ struct ApplicationPickerSheet: View {
 
     private func chooseOtherApplication() {
         let panel = NSOpenPanel()
-        panel.title = "选择应用"
-        panel.prompt = "选择"
+        panel.title = L10n.tr("选择应用")
+        panel.prompt = L10n.tr("选择")
         panel.allowedContentTypes = [.applicationBundle]
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
         guard let application = ApplicationCatalog.reference(for: url) else {
-            error = "无法读取这个 App 的 Bundle ID"
+            error = L10n.tr("无法读取这个 App 的 Bundle ID")
             return
         }
         ApplicationCatalog.rememberCustomApplication(url)
@@ -454,8 +455,8 @@ struct ApplicationPickerSheet: View {
 struct ApplicationSelectionControl: View {
     @Binding var bundleIdentifier: String
     let additionalApplications: [ApplicationReference]
-    var placeholder = "选择来源 App"
-    var pickerTitle = "选择来源 App"
+    var placeholder = L10n.tr("选择来源 App")
+    var pickerTitle = L10n.tr("选择来源 App")
 
     @State private var applications = [ApplicationReference]()
     @State private var showingPicker = false
