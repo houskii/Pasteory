@@ -2,6 +2,7 @@ import base64
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import tempfile
 import unittest
 
@@ -12,6 +13,9 @@ class UpdateKeyTests(unittest.TestCase):
         public_key = base64.b64encode(bytes(32)).decode()
         with tempfile.TemporaryDirectory() as directory:
             tools = Path(directory)
+            fixture_script = tools / "project/scripts/ensure_update_signing_key.sh"
+            fixture_script.parent.mkdir(parents=True)
+            shutil.copyfile(script, fixture_script)
             fake = tools / "generate_keys"
             fake.write_text(f'''#!/bin/zsh
 marker="${{0:A:h}}/created"
@@ -30,8 +34,8 @@ fi
             fake.chmod(0o755)
             env = dict(os.environ, PASTEORY_SPARKLE_TOOLS=directory)
             env.pop("PASTEORY_UPDATE_PUBLIC_KEY", None)
-            first = subprocess.run(["zsh", str(script)], env=env, check=True, capture_output=True, text=True)
-            second = subprocess.run(["zsh", str(script)], env=env, check=True, capture_output=True, text=True)
+            first = subprocess.run(["zsh", str(fixture_script)], env=env, check=True, capture_output=True, text=True)
+            second = subprocess.run(["zsh", str(fixture_script)], env=env, check=True, capture_output=True, text=True)
             self.assertEqual(first.stdout.strip(), public_key)
             self.assertEqual(second.stdout.strip(), public_key)
             self.assertIn("Generated fixture key", first.stderr)
