@@ -135,7 +135,7 @@ enum QuickPanelAction: String, CaseIterable, Codable, Identifiable {
         case .expandAggregation: "展开聚合"
         case .collapseAggregation: "收起聚合"
         case .moveToTrash: "移到废纸篓"
-        case .openLibrary: "打开资料库"
+        case .openLibrary: "打开设置中的资料库"
         case .openSettings: "打开设置"
         case .closePanel: "关闭快捷面板"
         }

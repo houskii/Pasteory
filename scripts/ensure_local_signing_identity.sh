@@ -1,5 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
+SIGNING_PHASE="初始化稳定代码签名身份"
+trap 'print -u2 "Pasteory 稳定签名失败：$SIGNING_PHASE"' ZERR
 
 SIGNING_DIR="$HOME/Library/Application Support/Pasteory/Signing"
 BUILD_KEYCHAIN="$SIGNING_DIR/PasteoryBuild.keychain-db"
@@ -24,12 +26,14 @@ identity_hash() {
 }
 
 configure_keychain() {
+  SIGNING_PHASE="解锁构建钥匙串"
   local password=$1
   security unlock-keychain -p "$password" "$BUILD_KEYCHAIN"
   security set-keychain-settings -lut 21600 "$BUILD_KEYCHAIN"
 }
 
 import_recovery_identity() {
+  SIGNING_PHASE="导入稳定签名身份"
   local password=$1
   [[ -f "$RECOVERY_IDENTITY" && -f "$RECOVERY_CERTIFICATE" ]] \
     || fail "本地钥匙串缺少签名身份，且恢复文件不完整。请保留 $SIGNING_DIR 后人工检查。"
@@ -37,12 +41,22 @@ import_recovery_identity() {
   security set-key-partition-list \
     -S apple-tool:,apple:,codesign: \
     -s -k "$password" "$BUILD_KEYCHAIN" >/dev/null
-  security add-trusted-cert \
-    -r trustRoot -p codeSign \
-    -k "$BUILD_KEYCHAIN" "$RECOVERY_CERTIFICATE" >/dev/null
+  SIGNING_PHASE="设置信任的代码签名证书"
+  if [[ ${GITHUB_ACTIONS:-false} == true ]]; then
+    # The hosted runner is ephemeral. Admin trust avoids an unattended GUI prompt.
+    print -u2 "Pasteory CI：配置临时构建证书信任"
+    sudo -n security add-trusted-cert -d -r trustRoot -p codeSign \
+      -k /Library/Keychains/System.keychain "$RECOVERY_CERTIFICATE" >/dev/null
+  else
+    security add-trusted-cert \
+      -r trustRoot -p codeSign \
+      -k "$BUILD_KEYCHAIN" "$RECOVERY_CERTIFICATE" >/dev/null
+  fi
 }
 
 create_identity() {
+  SIGNING_PHASE="创建稳定代码签名证书"
+  if [[ ${GITHUB_ACTIONS:-false} == true ]]; then print -u2 "Pasteory CI：创建临时构建证书"; fi
   local password=$1
   local certificate_work
   certificate_work=$(mktemp -d /tmp/pasteory-signing.XXXXXX)
@@ -116,4 +130,9 @@ else
 fi
 
 chmod 600 "$PASSWORD_FILE" "$RECOVERY_IDENTITY" "$RECOVERY_CERTIFICATE" "$IDENTITY_HASH_FILE" "$BUILD_KEYCHAIN"
+if [[ ${GITHUB_ACTIONS:-false} == true ]]; then
+  # Keep both the code-signing key and Sparkle's test key in this unlocked CI keychain.
+  security default-keychain -d user -s "$BUILD_KEYCHAIN" >/dev/null
+  security list-keychains -d user -s "$BUILD_KEYCHAIN" >/dev/null
+fi
 print -r -- "$IDENTITY_HASH"

@@ -8,6 +8,8 @@ Pasteory 是一个本地优先的 macOS 剪贴板资料库。它运行在菜单�
 
 产品的核心洞察和当前边界见 [`docs/PRODUCT.md`](docs/PRODUCT.md)，设置页布局规则见 [`docs/SETTINGS_UI.md`](docs/SETTINGS_UI.md)，快捷面板的打开与搜索规则见 [`docs/QUICK_PANEL_INTERACTIONS.md`](docs/QUICK_PANEL_INTERACTIONS.md)，文件后缀与图标映射见 [`docs/FILE_ICON_SYSTEM.md`](docs/FILE_ICON_SYSTEM.md)。
 
+资料库已整合到可缩放的设置窗口，`⌘L` 直接定位“资料库”，`⌘,` 定位“通用”。“设置 → 关于”可手动检查更新；默认每 24 小时自动检查，发现新版时快捷面板显示“更新 ↓”，确认后从 GitHub 下载、校验、安装并重启。首次发布配置与签名流程见 [`docs/UPDATES.md`](docs/UPDATES.md)。
+
 ![Pasteory 0.1.29 的资料库，展示文字、图像、链接和代码等演示内容](docs/pasteory-library.png)
 
 [下载最新 Beta 安装包](https://github.com/houskii/Pasteory/releases/tag/v0.1.29)
@@ -59,7 +61,7 @@ PASTEORY_SIGN_IDENTITY="Apple Development: …" make install
 ## 隐私边界
 
 - 剪贴板资料库保存在 `~/Library/Application Support/Pasteory/`。WebKit 网页缓存保存在 `~/Library/Caches/app.pasteory.Pasteory/WebKit/NetworkCache/`。
-- 默认不发起网络请求。用户在“设置 → 链接解析”中打开自动解析后，Pasteory 会先以不携带 Cookie 的普通请求获取网页标题。BITS、飞书、Codebase 以及用户添加的正则规则只有在建立 Pasteory 独立 WebKit 登录会话后才会使用该会话；保存规则时会统计并纳入当前覆盖的未解析链接，登录完成后批量重试，以后新复制的匹配链接也会自动使用该会话。会话不读取 Chrome Cookie，也不会保存网页正文。
+- 默认每天向 GitHub 检查版本信息，不上传剪贴板内容，可在“设置 → 关于”关闭。用户在“设置 → 链接解析”中打开自动解析后，Pasteory 会先以不携带 Cookie 的普通请求获取网页标题。BITS、飞书、Codebase 以及用户添加的正则规则只有在建立 Pasteory 独立 WebKit 登录会话后才会使用该会话；保存规则时会统计并纳入当前覆盖的未解析链接，登录完成后批量重试，以后新复制的匹配链接也会自动使用该会话。会话不读取 Chrome Cookie，也不会保存网页正文。
 - 当前版本不包含 AI 分析或云同步。
 - 默认忽略钥匙串、密码应用及隐藏或临时剪贴板类型。
 - 复制文件时只保存引用和元数据；直接复制图片时，Pasteory 会保存剪贴板里的图片数据，原文件移走后仍可粘贴。

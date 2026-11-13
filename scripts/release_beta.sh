@@ -32,15 +32,18 @@ phase="运行测试和签名打包"
 make test
 PASTEORY_BUILD_VARIANT=production PASTEORY_BUILD_CONFIGURATION=release make verify
 dmg="Pasteory-$version-arm64.dmg"
+phase="准备签名更新索引"
+python3 "$SCRIPT_DIR/prepare_update.py" --tag "$tag" --notes "$notes" --dmg "dist/$dmg"
 phase="安装已验证的 App"
 PASTEORY_SKIP_EXISTING_MAINTENANCE=1 "$SCRIPT_DIR/install.sh"
 
 phase="提交源码和最新安装包"
 cp "dist/$dmg" "release/beta/$dmg"
+cp dist/update/appcast.xml "release/beta/appcast-$version.xml"
 for previous in release/beta/Pasteory-*-arm64.dmg(N); do
   if [[ "$previous" != "release/beta/$dmg" ]]; then git rm -- "$previous"; fi
 done
-git add -- "release/beta/$dmg"
+git add -- "release/beta/$dmg" "release/beta/appcast-$version.xml"
 git diff --cached --check
 git commit -m "Release Pasteory $version"
 git tag -a "$tag" -F "$notes"
@@ -59,4 +62,15 @@ done
 curl -fsSL --max-time 60 "$base/$dmg" -o "$download/$dmg"
 (cd "$download" && shasum -a 256 -c "$dmg.sha256")
 cmp "release/beta/$dmg" "$download/$dmg"
+phase="核对签名更新索引"
+curl -fsSL --max-time 30 "$base/appcast-$version.xml" -o "$download/appcast.xml"
+cmp "release/beta/appcast-$version.xml" "$download/appcast.xml"
+for attempt in {1..60}; do
+  git fetch origin main
+  git show origin/main:release/beta/appcast.xml > "$download/current-appcast.xml"
+  if cmp -s "$download/appcast.xml" "$download/current-appcast.xml"; then break; fi
+  sleep 5
+done
+cmp "$download/appcast.xml" "$download/current-appcast.xml"
+git merge --ff-only origin/main
 print "https://github.com/houskii/Pasteory/releases/tag/$tag"

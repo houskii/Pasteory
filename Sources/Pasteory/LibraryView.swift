@@ -5,12 +5,16 @@ import SwiftUI
 struct LibraryView: View {
     @ObservedObject var state: AppState
     let onPaste: (Clip, Bool, Bool) -> Void
-    let onOpenSettings: () -> Void
+    var onOpenSettings: () -> Void = {}
+    var embedded = false
     @State private var showNewNormalCollection = false
     @State private var editingNormalCollection: ClipCollection?
     @State private var editingSmartCollection: ClipCollection?
     @State private var inspectorCaptureEvents = [ClipCaptureEvent]()
     @State private var inspectorLinkResource: LinkResource?
+    @State private var availableWidth: CGFloat = 0
+    @State private var showingCompactInspector = false
+    @State private var pendingAggregationDraft: AggregationDraft?
 
     private var accentColor: Color { state.settings.themeColor.accentColor }
     private var brandGradient: LinearGradient { state.settings.themeColor.gradient }
@@ -34,9 +38,27 @@ struct LibraryView: View {
                 )
                 .ignoresSafeArea()
             }
+            .onChange(of: geometry.size.width, initial: true) { _, width in
+                availableWidth = width
+                if width >= 1_050 { showingCompactInspector = false }
+            }
         }
-        .frame(minWidth: 900, maxWidth: .infinity, minHeight: 600, maxHeight: .infinity)
+        .frame(minWidth: embedded ? 663 : 900, maxWidth: .infinity, minHeight: 600, maxHeight: .infinity)
         .pasteoryTheme(state.settings.themeColor)
+        .sheet(isPresented: $showingCompactInspector, onDismiss: {
+            if let draft = pendingAggregationDraft {
+                pendingAggregationDraft = nil
+                state.libraryAggregationDraft = draft
+            }
+        }) {
+            VStack(spacing: 0) {
+                HStack { Spacer(); Button("完成") { showingCompactInspector = false } }
+                    .padding(12)
+                inspector
+            }
+            .frame(width: 380, height: 620)
+            .pasteoryTheme(state.settings.themeColor)
+        }
         .overlay(alignment: .bottom) {
             if let message = state.statusMessage {
                 Text(message)
@@ -65,6 +87,7 @@ struct LibraryView: View {
 
     private var sidebar: some View {
         VStack(spacing: 0) {
+            if !embedded {
             HStack(spacing: 10) {
                 Image(nsImage: PasteoryBrand.appIconImage())
                     .resizable()
@@ -79,6 +102,7 @@ struct LibraryView: View {
             .padding(.horizontal, 16)
             .padding(.top, 16)
             .padding(.bottom, 14)
+            }
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 4) {
@@ -112,12 +136,14 @@ struct LibraryView: View {
 
             LibraryDivider()
             HStack {
+                if !embedded {
                 Button(action: onOpenSettings) {
                     Label("设置", systemImage: "gearshape")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
+                }
                 Spacer()
                 Text("\(state.clips.count) 条")
                     .font(.caption.monospacedDigit())
@@ -235,6 +261,16 @@ struct LibraryView: View {
                         Text(librarySubtitle).font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
+                    if availableWidth < 1_050 {
+                        Button { showingCompactInspector = true } label: {
+                            Image(systemName: "sidebar.right")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help("查看详情")
+                        .accessibilityLabel("查看详情")
+                        .disabled(state.selectedClip == nil && state.selectedAggregation == nil)
+                    }
                     QuickActionsToolbarMenu(state: state, clip: state.selectedClip)
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -379,13 +415,19 @@ struct LibraryView: View {
             LibraryAggregationInspector(
                 state: state,
                 aggregation: aggregation,
-                onEdit: { state.libraryAggregationDraft = AggregationDraft(
-                    aggregationID: aggregation.id,
-                    memberClipIDs: aggregation.memberClipIDs,
-                    title: aggregation.title,
-                    note: aggregation.note,
-                    origin: aggregation.origin
-                ) }
+                onEdit: {
+                    let draft = AggregationDraft(
+                        aggregationID: aggregation.id,
+                        memberClipIDs: aggregation.memberClipIDs,
+                        title: aggregation.title,
+                        note: aggregation.note,
+                        origin: aggregation.origin
+                    )
+                    if showingCompactInspector {
+                        pendingAggregationDraft = draft
+                        showingCompactInspector = false
+                    } else { state.libraryAggregationDraft = draft }
+                }
             )
         } else if let clip = state.selectedClip {
             VStack(spacing: 0) {

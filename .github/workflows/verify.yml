@@ -1,0 +1,75 @@
+name: macOS verification
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths-ignore: ['release/**', 'docs/**', 'README.md']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Swift tests and application type checking
+        run: swift test
+      - name: Release build
+        run: swift build -c release
+      - name: Select OpenSSL 3 for local signing tools
+        run: echo "$(brew --prefix openssl@3)/bin" >> "$GITHUB_PATH"
+      - name: Prepare isolated CI update signing key
+        run: |
+          ./scripts/ensure_local_signing_identity.sh >/dev/null
+          tools=.build/artifacts/sparkle/Sparkle/bin
+          account=app.pasteory.Pasteory.updates
+          if ! "$tools/generate_keys" --account "$account" -p >/dev/null 2>&1; then
+            "$tools/generate_keys" --account "$account" >/dev/null
+          fi
+          ci_update_public_key=$("$tools/generate_keys" --account "$account" -p)
+          # CI never uses or needs the publisher's private key, even after its public key is pinned.
+          printf 'PASTEORY_UPDATE_PUBLIC_KEY=%s\n' "$ci_update_public_key" >> "$GITHUB_ENV"
+          # Avoid a first-access GUI permission prompt from the separate sign_update tool.
+          # Export only this ephemeral CI key, never the publisher's key.
+          umask 077
+          "$tools/generate_keys" --account "$account" -x "$RUNNER_TEMP/ci-update-key"
+          mkdir -p "$RUNNER_TEMP/sparkle-ci-tools"
+          ln -s "$PWD/$tools/generate_keys" "$RUNNER_TEMP/sparkle-ci-tools/generate_keys"
+          cat > "$RUNNER_TEMP/sparkle-ci-tools/sign_update" <<'SIGN_UPDATE'
+          #!/bin/bash
+          exec "$PASTEORY_CI_SIGN_UPDATE" --ed-key-file "$PASTEORY_CI_UPDATE_KEY_FILE" "$@"
+          SIGN_UPDATE
+          chmod 700 "$RUNNER_TEMP/sparkle-ci-tools/sign_update"
+          printf 'PASTEORY_CI_SIGN_UPDATE=%s\n' "$PWD/$tools/sign_update" >> "$GITHUB_ENV"
+          printf 'PASTEORY_CI_UPDATE_KEY_FILE=%s\n' "$RUNNER_TEMP/ci-update-key" >> "$GITHUB_ENV"
+          printf 'PASTEORY_CI_SPARKLE_TOOLS=%s\n' "$RUNNER_TEMP/sparkle-ci-tools" >> "$GITHUB_ENV"
+      - name: Verify packaged app and QA identities
+        timeout-minutes: 6
+        run: make qa-verify
+      - name: Check release metadata generation
+        run: python3 -m unittest discover -s scripts/tests -v
+      - name: Verify DMG and signed appcast preparation
+        timeout-minutes: 6
+        run: |
+          make verify
+          version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Config/Info.plist)
+          printf '%s\n' 'CI signature validation only; this build is not published.' > "$RUNNER_TEMP/update-notes.md"
+          python3 scripts/prepare_update.py --tag "v$version" \
+            --notes "$RUNNER_TEMP/update-notes.md" --dmg "dist/Pasteory-$version-arm64.dmg" \
+            --tools "$PASTEORY_CI_SPARKLE_TOOLS"
+      - name: Capture isolated native UI
+        timeout-minutes: 5
+        run: ./scripts/capture_update_ui.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: native-ui-qa
+          path: dist/ui-qa
+          if-no-files-found: ignore

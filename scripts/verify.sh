@@ -19,6 +19,12 @@ DMG_PATH="$PROJECT_DIR/dist/Pasteory-$EXPECTED_VERSION-arm64.dmg"
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST")" == "$EXPECTED_BUILD" ]]
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$PLIST")" == "14.0" ]]
 [[ "$(lipo -archs "$BINARY")" == "arm64" ]]
+[[ -d "$APP_DIR/Contents/Frameworks/Sparkle.framework" ]]
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :SUScheduledCheckInterval' "$PLIST")" == "86400" ]]
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :SUAutomaticallyUpdate' "$PLIST")" == "false" ]]
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :SURequireSignedFeed' "$PLIST")" == "true" ]]
+[[ -n "$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$PLIST")" ]]
+otool -l "$BINARY" | grep -Fq '@executable_path/../Frameworks'
 [[ -f "$APP_DIR/Contents/Resources/MenuBarIcon.png" ]]
 [[ -f "$APP_DIR/Contents/Resources/MenuBarIcon@2x.png" ]]
 [[ "$(sips -g pixelWidth "$APP_DIR/Contents/Resources/MenuBarIcon.png" | awk '/pixelWidth/{print $2}')" == "18" ]]

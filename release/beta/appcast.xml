@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Bootstrap feed. The first signed release replaces this file using scripts/prepare_update.py. -->
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>Pasteory Beta</title>
+    <link>https://github.com/houskii/Pasteory/releases</link>
+    <description>Pasteory for macOS 14 and later, Apple Silicon.</description>
+    <language>zh-cn</language>
+  </channel>
+</rss>

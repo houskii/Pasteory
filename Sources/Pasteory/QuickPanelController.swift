@@ -34,10 +34,12 @@ final class QuickPanelController: NSObject {
 
     init(
         state: AppState,
+        updateService: UpdateService,
         pasteCoordinator: PasteCoordinator,
         targetProvider: @escaping () -> NSRunningApplication?,
         onOpenLibrary: @escaping () -> Void,
         onOpenSettings: @escaping () -> Void,
+        onOpenUpdate: @escaping () -> Void,
         onCreateTextClip: @escaping () -> Void
     ) {
         self.state = state; self.pasteCoordinator = pasteCoordinator; self.targetProvider = targetProvider
@@ -96,9 +98,11 @@ final class QuickPanelController: NSObject {
         panel.isMovableByWindowBackground = true
         let view = QuickPanelView(
             state: state,
+            updateService: updateService,
             onCopy: { [weak self] clip, plain, paste in self?.perform(clip, plainText: plain, paste: paste) },
             onOpenLibrary: { [weak self] in self?.close(restoreTargetApplication: false); onOpenLibrary() },
             onOpenSettings: { [weak self] in self?.close(restoreTargetApplication: false); onOpenSettings() },
+            onOpenUpdate: { [weak self] in self?.close(restoreTargetApplication: false); onOpenUpdate() },
             onCreateTextClip: { [weak self] in self?.close(restoreTargetApplication: false); onCreateTextClip() }
         )
         panel.contentViewController = NSHostingController(rootView: view)

@@ -92,7 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 settings: settings,
                 linkResolutionService: linkResolutionService
             )
-            let coordinator = AppCoordinator(state: state, settings: settings, attachments: attachments)
+            let coordinator = AppCoordinator(state: state, settings: settings, attachments: attachments, defaults: settingsDefaults)
             self.coordinator = coordinator
             coordinator.start()
         } catch {

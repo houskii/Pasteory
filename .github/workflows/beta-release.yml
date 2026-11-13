@@ -47,12 +47,38 @@ jobs:
           dmg="Pasteory-$version-arm64.dmg"
           [[ "$(find release/beta -maxdepth 1 -name '*.dmg' -print)" == "release/beta/$dmg" ]]
           (cd release/beta && sha256sum "$dmg") > "$RUNNER_TEMP/$dmg.sha256"
+          appcast="release/beta/appcast-$version.xml"
+          extra_assets=()
+          if [[ -f "$appcast" ]]; then extra_assets+=("$appcast"); fi
           if gh release view "$tag" --json assets > "$RUNNER_TEMP/assets.json"; then
             mkdir "$RUNNER_TEMP/existing"
             gh release download "$tag" --pattern "$dmg" --pattern "$dmg.sha256" --dir "$RUNNER_TEMP/existing"
             cmp "release/beta/$dmg" "$RUNNER_TEMP/existing/$dmg"
             cmp "$RUNNER_TEMP/$dmg.sha256" "$RUNNER_TEMP/existing/$dmg.sha256"
+            if [[ -f "$appcast" ]]; then
+              gh release download "$tag" --pattern "appcast-$version.xml" --dir "$RUNNER_TEMP/existing"
+              cmp "$appcast" "$RUNNER_TEMP/existing/appcast-$version.xml"
+            fi
           else
-            gh release create "$tag" "release/beta/$dmg" "$RUNNER_TEMP/$dmg.sha256" \
+            gh release create "$tag" "release/beta/$dmg" "$RUNNER_TEMP/$dmg.sha256" "${extra_assets[@]}" \
               --verify-tag --notes-from-tag --title "Pasteory $version Beta" --prerelease
+          fi
+          if [[ -f "$appcast" ]]; then
+            # Only advertise the update after all immutable release assets are available.
+            # An older recovery run must never replace a newer release's feed.
+            cp "$appcast" "$RUNNER_TEMP/signed-appcast.xml"
+            git fetch origin main
+            git switch -C publish-update-feed origin/main
+            if [[ "$(version_from_plist)" != "$version" ]]; then
+              echo "A newer source version is present; keeping its update feed."
+              exit 0
+            fi
+            if ! cmp -s "$RUNNER_TEMP/signed-appcast.xml" release/beta/appcast.xml; then
+              cp "$RUNNER_TEMP/signed-appcast.xml" release/beta/appcast.xml
+              git add release/beta/appcast.xml
+              git -c user.name='github-actions[bot]' \
+                -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+                commit -m "Publish signed update feed for $version"
+              git -c 'credential.helper=!gh auth git-credential' push origin HEAD:main
+            fi
           fi

@@ -5,57 +5,7 @@ import ServiceManagement
 import SwiftUI
 
 struct SettingsView: View {
-    private enum Destination: String, CaseIterable, Identifiable {
-        case general
-        case privacy
-        case shortcuts
-        case openBehavior
-        case linkResolution
-        case storage
-        case advanced
-        case about
-
-        var id: String { rawValue }
-
-        var title: String {
-            switch self {
-            case .general: "通用"
-            case .privacy: "采集与隐私"
-            case .shortcuts: "快捷键"
-            case .openBehavior: "打开方式"
-            case .linkResolution: "链接解析"
-            case .storage: "存储与清理"
-            case .advanced: "高级诊断"
-            case .about: "关于"
-            }
-        }
-
-        var subtitle: String {
-            switch self {
-            case .general: "外观、启动和应用状态"
-            case .privacy: "剪贴板检测、来源详情和排除应用"
-            case .shortcuts: "快捷面板和内容操作"
-            case .openBehavior: "浏览器、编辑器和文件规则"
-            case .linkResolution: "网页标题、登录规则和兜底规则"
-            case .storage: "统计、占用、归档和备份"
-            case .advanced: "权限、插件连接和搜索索引"
-            case .about: "版本和产品信息"
-            }
-        }
-
-        var symbol: String {
-            switch self {
-            case .general: "gearshape"
-            case .privacy: "hand.raised"
-            case .shortcuts: "command"
-            case .openBehavior: "arrow.up.forward.app"
-            case .linkResolution: "link"
-            case .storage: "externaldrive"
-            case .advanced: "stethoscope"
-            case .about: "info.circle"
-            }
-        }
-    }
+    private typealias Destination = SettingsDestination
 
     private struct DestinationGroup: Identifiable {
         let title: String
@@ -65,11 +15,17 @@ struct SettingsView: View {
 
     @ObservedObject var state: AppState
     @ObservedObject var settings: AppSettings
+    @ObservedObject var navigation: SettingsNavigation
+    @ObservedObject var updateService: UpdateService
+    let onPaste: (Clip, Bool, Bool) -> Void
     let pasteCoordinator: PasteCoordinator
     let onShortcutChange: () -> Void
     let onExport: () -> Void
     let onImport: () -> Void
-    @State private var selectedDestination: Destination = .general
+    private var selectedDestination: Destination {
+        get { navigation.destination }
+        nonmutating set { navigation.destination = newValue }
+    }
     @State private var knownApplications = [ApplicationReference]()
     @State private var showingExcludedApplicationPicker = false
     @State private var loginEnabled = SMAppService.mainApp.status == .enabled
@@ -84,93 +40,99 @@ struct SettingsView: View {
                 Rectangle()
                     .fill(Color(nsColor: .separatorColor).opacity(0.55))
                     .frame(width: 1, height: geometry.size.height)
-                VStack(spacing: 0) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(selectedDestination.title)
-                                .font(.system(size: 22, weight: .bold))
-                            Text(selectedDestination.subtitle)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
+                Group {
+                    if selectedDestination == .library {
+                        LibraryView(state: state, onPaste: onPaste, embedded: true)
+                    } else {
+                        settingsContent
                     }
-                    .padding(.horizontal, 22)
-                    .padding(.vertical, 16)
-
-                    Rectangle()
-                        .fill(Color(nsColor: .separatorColor).opacity(0.55))
-                        .frame(height: 1)
-
-                    destinationContent
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                        .clipped()
                 }
-                .frame(width: geometry.size.width - 225, height: geometry.size.height, alignment: .top)
+                .frame(width: max(0, geometry.size.width - 225), height: geometry.size.height, alignment: .top)
                 .clipped()
             }
         }
-        .frame(width: 940, height: debugSettingsHeight)
+        .frame(minWidth: 980, maxWidth: .infinity, minHeight: 620, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
         .pasteoryTheme(settings.themeColor)
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             settings.reloadSourceCapturePreferences()
         }
 #if DEBUG
-        .onAppear {
-            if ProcessInfo.processInfo.arguments.contains("--debug-settings-privacy") { selectedDestination = .privacy }
-            if ProcessInfo.processInfo.arguments.contains("--debug-settings-open") { selectedDestination = .openBehavior }
-            if ProcessInfo.processInfo.arguments.contains("--debug-settings-file-rules"),
-               settings.fileOpenRules.isEmpty {
-                settings.addCustomFileOpenRule()
-                if let customRule = settings.fileOpenRules.last {
-                    settings.updateFileOpenRuleExtension(id: customRule.id, fileExtension: "hap")
-                }
-                settings.addFileOpenRule()
-                if let applicationRule = settings.fileOpenRules.last,
-                   let pdf = FileIconResolver.fileExtension("pdf") {
-                    settings.updateFileOpenRuleCatalogExtension(id: applicationRule.id, descriptor: pdf)
-                    var applicationRule = settings.fileOpenRules.last!
-                    applicationRule.bundleIdentifier = "com.apple.Preview"
-                    settings.updateFileOpenRule(applicationRule)
-                }
-                settings.addFileOpenRule()
-                if let commandRule = settings.fileOpenRules.last,
-                   let swift = FileIconResolver.fileExtension("swift") {
-                    settings.updateFileOpenRuleCatalogExtension(id: commandRule.id, descriptor: swift)
-                    var commandRule = settings.fileOpenRules.last!
-                    commandRule.action = .command
-                    commandRule.command = "wc -l \"$file\""
-                    settings.updateFileOpenRule(commandRule)
-                }
-            }
-            if ProcessInfo.processInfo.arguments.contains("--debug-settings-file-rules"),
-               settings.recentFileCommandExecution(for: "extension:swift") == nil,
-               let (execution, handle) = settings.beginFileCommandLog(fileType: "extension:swift", shell: .zsh) {
-                try? handle.write(contentsOf: Data("8 Sources/Pasteory/AppState.swift\n".utf8))
-                try? handle.close()
-                settings.finishFileCommandLog(execution: execution, exitCode: 0)
-            }
-            if ProcessInfo.processInfo.arguments.contains("--debug-settings-links") { selectedDestination = .linkResolution }
-            if ProcessInfo.processInfo.arguments.contains("--debug-settings-shortcuts") { selectedDestination = .shortcuts }
-            if ProcessInfo.processInfo.arguments.contains("--debug-settings-storage") { selectedDestination = .storage }
-            if ProcessInfo.processInfo.arguments.contains("--debug-settings-storage-thirty-days") {
-                selectedDestination = .storage
-                storageAnalyticsPeriod = .thirtyDays
-            }
-            if ProcessInfo.processInfo.arguments.contains("--debug-settings-advanced") { selectedDestination = .advanced }
-            if ProcessInfo.processInfo.arguments.contains("--debug-settings-about") { selectedDestination = .about }
-        }
+        .onAppear(perform: configureDebugSettings)
 #endif
     }
 
-    private var debugSettingsHeight: CGFloat {
-#if DEBUG
-        ProcessInfo.processInfo.arguments.contains("--debug-settings-file-rules") ? 900 : 660
-#else
-        660
-#endif
+    private var settingsContent: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(selectedDestination.title)
+                        .font(.system(size: 22, weight: .bold))
+                    Text(selectedDestination.subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 22)
+            .padding(.vertical, 16)
+
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor).opacity(0.55))
+                .frame(height: 1)
+
+            destinationContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .clipped()
+        }
     }
+
+#if DEBUG
+    private func configureDebugSettings() {
+        if ProcessInfo.processInfo.arguments.contains("--debug-settings-privacy") { selectedDestination = .privacy }
+        if ProcessInfo.processInfo.arguments.contains("--debug-settings-open") { selectedDestination = .openBehavior }
+        if ProcessInfo.processInfo.arguments.contains("--debug-settings-file-rules"),
+           settings.fileOpenRules.isEmpty {
+            settings.addCustomFileOpenRule()
+            if let customRule = settings.fileOpenRules.last {
+                settings.updateFileOpenRuleExtension(id: customRule.id, fileExtension: "hap")
+            }
+            settings.addFileOpenRule()
+            if let applicationRule = settings.fileOpenRules.last,
+               let pdf = FileIconResolver.fileExtension("pdf") {
+                settings.updateFileOpenRuleCatalogExtension(id: applicationRule.id, descriptor: pdf)
+                var applicationRule = settings.fileOpenRules.last!
+                applicationRule.bundleIdentifier = "com.apple.Preview"
+                settings.updateFileOpenRule(applicationRule)
+            }
+            settings.addFileOpenRule()
+            if let commandRule = settings.fileOpenRules.last,
+               let swift = FileIconResolver.fileExtension("swift") {
+                settings.updateFileOpenRuleCatalogExtension(id: commandRule.id, descriptor: swift)
+                var commandRule = settings.fileOpenRules.last!
+                commandRule.action = .command
+                commandRule.command = "wc -l \"$file\""
+                settings.updateFileOpenRule(commandRule)
+            }
+        }
+        if ProcessInfo.processInfo.arguments.contains("--debug-settings-file-rules"),
+           settings.recentFileCommandExecution(for: "extension:swift") == nil,
+           let (execution, handle) = settings.beginFileCommandLog(fileType: "extension:swift", shell: .zsh) {
+            try? handle.write(contentsOf: Data("8 Sources/Pasteory/AppState.swift\n".utf8))
+            try? handle.close()
+            settings.finishFileCommandLog(execution: execution, exitCode: 0)
+        }
+        if ProcessInfo.processInfo.arguments.contains("--debug-settings-links") { selectedDestination = .linkResolution }
+        if ProcessInfo.processInfo.arguments.contains("--debug-settings-shortcuts") { selectedDestination = .shortcuts }
+        if ProcessInfo.processInfo.arguments.contains("--debug-settings-storage") { selectedDestination = .storage }
+        if ProcessInfo.processInfo.arguments.contains("--debug-settings-storage-thirty-days") {
+            selectedDestination = .storage
+            storageAnalyticsPeriod = .thirtyDays
+        }
+        if ProcessInfo.processInfo.arguments.contains("--debug-settings-advanced") { selectedDestination = .advanced }
+        if ProcessInfo.processInfo.arguments.contains("--debug-settings-about") { selectedDestination = .about }
+    }
+#endif
 
     private var settingsSidebar: some View {
         VStack(spacing: 0) {
@@ -233,6 +195,7 @@ struct SettingsView: View {
     @ViewBuilder
     private var destinationContent: some View {
         switch selectedDestination {
+        case .library: EmptyView()
         case .general: general
         case .privacy: privacy
         case .shortcuts: shortcuts
@@ -246,6 +209,7 @@ struct SettingsView: View {
 
     private var destinationGroups: [DestinationGroup] {
         [
+            DestinationGroup(title: "内容", destinations: [.library]),
             DestinationGroup(title: "基础设置", destinations: [.general, .privacy]),
             DestinationGroup(title: "交互与内容", destinations: [.shortcuts, .openBehavior, .linkResolution]),
             DestinationGroup(title: "数据与支持", destinations: [.storage, .advanced, .about])
@@ -902,8 +866,43 @@ struct SettingsView: View {
             Text(versionLabel)
             Text(PasteoryBrand.tagline).foregroundStyle(.secondary)
             Text(PasteoryBrand.taglineChinese).foregroundStyle(.secondary)
-            Text("Pasteory v0.1 不包含网络、AI 分析或云同步功能。").font(.caption).foregroundStyle(.secondary)
-        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            Text("本地保存剪贴板内容，不上传资料；更新检查仅获取版本信息和安装包。")
+                .font(.caption).foregroundStyle(.secondary)
+            Divider().padding(.vertical, 4)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(updateService.availableUpdate.map { "发现新版本 \($0.version)" } ?? "软件更新")
+                            .font(.headline)
+                        if let date = updateService.lastCheckedAt {
+                            Text("上次检查：\(date.formatted(date: .abbreviated, time: .shortened))")
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else { Text("尚未检查更新").font(.caption).foregroundStyle(.secondary) }
+                    }
+                    Spacer()
+                    Button("检查更新…") { updateService.checkForUpdates() }
+                        .buttonStyle(.link)
+                        .disabled(updateService.isBusy)
+                }
+                SettingsSwitchRow(isOn: Binding(
+                    get: { updateService.automaticChecksEnabled },
+                    set: { updateService.setAutomaticChecksEnabled($0) }
+                )) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("每天自动检查更新")
+                        Text("每 24 小时检查一次，确认后才下载和安装。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .disabled(updateService.configurationMessage != nil)
+                if let message = updateService.configurationMessage ?? updateService.lastError {
+                    Text(message).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: 560)
+            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
+        }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var versionLabel: String {
