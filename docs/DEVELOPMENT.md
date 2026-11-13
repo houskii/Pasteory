@@ -31,6 +31,14 @@ PASTEORY_SIGN_IDENTITY="Apple Development: …" make install
 
 从 ad-hoc 签名首次切换到 `Pasteory Local Build` 后，需要在“系统设置 → 隐私与安全性 → 辅助功能”中重新授权一次。保留签名目录有助于后续更新继续使用同一身份。
 
+## First-launch helper in the DMG
+
+Newly built DMGs include `Allow Pasteory.command` with executable permissions and a bilingual `Read Me First.txt`. The optional helper verifies the installed production app's bundle ID, version, build, designated signing requirement, and code hash against the exact packaged copy. After the user types `OPEN`, it removes only `com.apple.quarantine` from `/Applications/Pasteory.app` and opens it. It uses the current user's permissions, acts on symbolic links themselves, and does not request administrator privileges or change global Gatekeeper settings.
+
+The helper may itself be blocked by macOS. The included instructions describe running it explicitly with `/bin/bash -p` from Terminal, as well as the native System Settings → Privacy & Security → Open Anyway option. A helper script is not Apple notarization. Packaging checks run its read-only `--check-bundle` mode against the mounted DMG. Native tests exercise quarantine removal on a temporary signed copy and confirm an unrelated file keeps its quarantine attribute.
+
+Changing these source files does not replace a previously published DMG. Existing release tags, packages, and checksums stay immutable until a new version is intentionally published.
+
 ## Localization
 
 The first-launch language is English. Settings → General switches between English and Simplified Chinese immediately and saves the choice for later launches. UI labels use `L10n.tr` with the original Chinese template as their key and translations in `Sources/PasteoryCore/Resources/en.json`. Interpolated values are kept separate so user content is never translated. Persistent identifiers, user text, and URL matching tokens must remain unchanged.

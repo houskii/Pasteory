@@ -1,0 +1,72 @@
+#!/bin/bash -p
+set -euo pipefail
+
+# Filled from the verified app when the DMG is assembled.
+TARGET_APP=@@TARGET_APP@@
+EXPECTED_VERSION=@@EXPECTED_VERSION@@
+EXPECTED_BUILD=@@EXPECTED_BUILD@@
+EXPECTED_CDHASH=@@EXPECTED_CDHASH@@
+EXPECTED_REQUIREMENT=@@EXPECTED_REQUIREMENT@@
+CODESIGN=@@CODESIGN@@
+PLIST_BUDDY=@@PLIST_BUDDY@@
+XATTR=@@XATTR@@
+OPEN=@@OPEN@@
+
+fail() {
+  printf '\n%s\n' "$1" >&2
+  printf '%s\n' 'Use System Settings → Privacy & Security → Open Anyway if needed.' >&2
+  printf '%s\n' '也可使用“系统设置 → 隐私与安全性 → 仍要打开”。' >&2
+  exit 1
+}
+
+verify_app() {
+  local app=$1
+  [[ -d "$app" && ! -L "$app" && ! -L "$app/Contents" && ! -L "$app/Contents/Info.plist" ]] \
+    || fail 'Install the app from this DMG into Applications first. 请先将本安装包中的应用拖入“应用程序”。'
+  [[ "$("$PLIST_BUDDY" -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" == 'app.pasteory.Pasteory' ]] \
+    || fail 'This is not the expected Pasteory app. 应用标识不匹配。'
+  [[ "$("$PLIST_BUDDY" -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" == "$EXPECTED_VERSION" \
+     && "$("$PLIST_BUDDY" -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")" == "$EXPECTED_BUILD" ]] \
+    || fail 'The installed version differs from this DMG. 已安装版本与此安装包不一致，请先替换应用。'
+  "$CODESIGN" --verify --deep --strict --test-requirement "=$EXPECTED_REQUIREMENT" "$app" \
+    || fail 'App signature verification failed. 应用签名校验失败，未做任何豁免。'
+  local details
+  details=$("$CODESIGN" -d --verbose=4 "$app" 2>&1) \
+    || fail 'Cannot read the app signature. 无法读取应用签名。'
+  [[ $'\n'"$details"$'\n' == *$'\nCDHash='"$EXPECTED_CDHASH"$'\n'* ]] \
+    || fail 'The app does not match the copy in this DMG. 应用内容与此安装包不一致。'
+}
+
+# Verification mode reads a bundle only; it never removes attributes or launches apps.
+if [[ $# -gt 0 ]]; then
+  [[ $# -eq 2 && "$1" == '--check-bundle' ]] \
+    || fail 'Usage: run manually, or use --check-bundle /path/to/Pasteory.app for verification only.'
+  verify_app "$2"
+  printf '%s\n' 'Pasteory bundle matches this first-launch helper.'
+  exit 0
+fi
+
+verify_app "$TARGET_APP"
+[[ -t 0 ]] || fail 'Run this helper manually in Terminal. 请在终端中手动运行此脚本。'
+printf '\n%s\n' 'Allow this installed copy of Pasteory to open / 允许打开此 Pasteory 副本'
+printf '%s\n' "App / 应用：$TARGET_APP"
+printf '%s\n' "Version / 版本：$EXPECTED_VERSION (Build $EXPECTED_BUILD)"
+printf '%s\n' 'This Beta has a local development signature and is not Apple-notarized.'
+printf '%s\n' '此 Beta 使用本地开发签名，尚未经过 Apple 公证。'
+printf '%s\n' 'After confirmation, only this app’s downloaded-file quarantine flag will be removed.'
+printf '%s\n' '确认后，仅移除此应用副本的下载隔离标记；这不等于 Apple 公证。'
+printf '\n%s' 'Type OPEN to continue; anything else cancels / 输入 OPEN 继续，其他输入取消：'
+answer=''
+IFS= read -r answer || exit 0
+if [[ "$answer" != 'OPEN' ]]; then
+  printf '%s\n' 'Cancelled. No changes made. 已取消，未作更改。'
+  exit 0
+fi
+
+# Recheck after user interaction; recursive attribute removal acts on symlinks themselves.
+verify_app "$TARGET_APP"
+"$XATTR" -drs com.apple.quarantine "$TARGET_APP" \
+  || fail 'Cannot remove this app’s quarantine flag with your account. 当前账户无法移除隔离标记，请使用系统设置。'
+verify_app "$TARGET_APP"
+"$OPEN" "$TARGET_APP"
+printf '%s\n' 'Pasteory opened. 已打开 Pasteory。'

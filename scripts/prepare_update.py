@@ -88,7 +88,7 @@ def prepare(args):
     notes = args.notes.read_text(encoding="utf-8").strip()
     if not notes:
         raise ValueError("更新说明不能为空")
-    previous = root / "release/beta/appcast.xml"
+    previous = args.previous_appcast or root / "release/beta/appcast.xml"
     if previous.exists():
         previous_items = ET.fromstring(previous.read_bytes()).findall("./channel/item/enclosure")
         builds = [int(e.attrib[f"{{{SPARKLE}}}version"]) for e in previous_items]
@@ -125,4 +125,6 @@ if __name__ == "__main__":
     parser.add_argument("--tag", required=True)
     parser.add_argument("--tools", type=Path, default=root / ".build/artifacts/sparkle/Sparkle/bin")
     parser.add_argument("--output", type=Path, default=root / "dist/update")
+    parser.add_argument("--previous-appcast", type=Path,
+                        help="Previous published appcast; verification may use an isolated baseline")
     prepare(parser.parse_args())

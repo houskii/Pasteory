@@ -39,6 +39,8 @@ Pasteory 是一个本地优先的 macOS 剪贴板管理工具。文字、图片�
 
 此 Beta 使用本地开发代码签名，尚未经过 Apple 公证。如果 macOS 阻止首次启动，可在“系统设置 → 隐私与安全性”中核对应用后选择“仍要打开”。
 
+如果 DMG 中附有 `Allow Pasteory.command`，也可按包内 `Read Me First.txt` 的说明运行辅助脚本。它会先核对已安装应用，经你确认后，仅移除此 Pasteory 副本的下载隔离标记。
+
 首次启动为英文界面。在 **Settings → General → Interface Language** 选择 **简体中文**，即可切换中文；之后也可在“设置 → 通用 → 界面语言”中切换。
 
 ## 隐私默认留在本机
