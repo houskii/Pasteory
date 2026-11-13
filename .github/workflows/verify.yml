@@ -25,6 +25,17 @@ jobs:
         run: swift build -c release
       - name: Select OpenSSL 3 for local signing tools
         run: echo "$(brew --prefix openssl@3)/bin" >> "$GITHUB_PATH"
+      - name: Prepare isolated CI update signing key
+        run: |
+          ./scripts/ensure_local_signing_identity.sh >/dev/null
+          tools=.build/artifacts/sparkle/Sparkle/bin
+          account=app.pasteory.Pasteory.updates
+          if ! "$tools/generate_keys" --account "$account" -p >/dev/null 2>&1; then
+            "$tools/generate_keys" --account "$account" >/dev/null
+          fi
+          ci_update_public_key=$("$tools/generate_keys" --account "$account" -p)
+          # CI never uses or needs the publisher's private key, even after its public key is pinned.
+          printf 'PASTEORY_UPDATE_PUBLIC_KEY=%s\n' "$ci_update_public_key" >> "$GITHUB_ENV"
       - name: Verify packaged app and QA identities
         timeout-minutes: 6
         run: make qa-verify
