@@ -66,6 +66,22 @@ private func aiGrouping(_ clips: [Clip], group: UUID = UUID()) -> AIChangeSet {
     #expect(context[0].source.isEmpty && context[0].note.isEmpty)
 }
 
+@Test func explicitHumanUseProtectsOldClipsFromHistoryCleanup() async throws {
+    let dirs = try aiDirectories(); defer { try? FileManager.default.removeItem(at: dirs.root) }
+    let repo = try SQLiteClipRepository(databaseURL: dirs.databaseFile)
+    let now = Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970))
+    let clip = aiClip("A document opened again", at: now.addingTimeInterval(-90 * 86_400))
+    try await repo.save(clip)
+    let cutoff = now.addingTimeInterval(-30 * 86_400)
+    #expect(try await repo.previewHistoryCleanup(olderThan: cutoff, largerThan: 0).entries.map(\.id) == [clip.id])
+    try await repo.recordHumanActivity(id: clip.id, event: .open, at: now)
+    #expect(try await repo.previewHistoryCleanup(olderThan: cutoff, largerThan: 0).entries.isEmpty)
+    #expect(try await repo.clip(id: clip.id)?.lastUsedAt == now)
+    try await repo.recordHumanActivity(id: clip.id, event: .copy, at: now.addingTimeInterval(1))
+    let copied = try #require(await repo.clip(id: clip.id))
+    #expect(copied.lastCopiedAt == now.addingTimeInterval(1) && copied.copyCount == clip.copyCount + 1)
+}
+
 @Test func legacyBackupMembershipsRestoreWithoutForeignKeyFailures() async throws {
     let source = try aiDirectories(), destination = try aiDirectories()
     defer { for root in [source.root, destination.root] { try? FileManager.default.removeItem(at: root) } }

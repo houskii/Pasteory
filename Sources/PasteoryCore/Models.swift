@@ -493,7 +493,9 @@ public struct Clip: Codable, Hashable, Identifiable, Sendable {
     }
 
     public var recordedPasteCount: Int { pasteCount ?? 0 }
-    public var lastUsedAt: Date { max(lastCopiedAt, lastPastedAt ?? lastCopiedAt) }
+    public var lastUsedAt: Date {
+        max(max(lastCopiedAt, lastPastedAt ?? lastCopiedAt), intelligenceActivity?.lastUsedAt ?? .distantPast)
+    }
     public var deduplicationKey: String { identityKey ?? "legacy:\(contentHash)" }
     public var effectiveFileMetadata: FileClipMetadata? {
         if let fileMetadata { return fileMetadata }

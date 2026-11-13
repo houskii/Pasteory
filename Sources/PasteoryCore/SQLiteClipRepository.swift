@@ -1731,6 +1731,8 @@ extension SQLiteClipRepository {
         guard var clip = try clip(id: id), clip.deletedAt == nil else { return }
         var activity = clip.activity; activity.record(event, at: date)
         clip.intelligenceActivity = activity; clip.lifecycleEvaluation = nil
+        if event == .copy { clip.lastCopiedAt = max(clip.lastCopiedAt, date); clip.copyCount += 1 }
+        clip.updatedAt = max(clip.updatedAt, date)
         try updateExisting(clip)
     }
 

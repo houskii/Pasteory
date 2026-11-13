@@ -170,6 +170,7 @@ final class AppState: ObservableObject {
         do {
             try await repository.recordHumanActivity(id: clip.id, event: event, at: Date())
             if let updated = try await repository.clip(id: clip.id) { replaceLocal(updated); intelligence.synchronize(updated) }
+            if event == .copy { intelligence.contentChanged(clip.id) }
         } catch { show(error) }
     }
 
