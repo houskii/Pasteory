@@ -1,0 +1,44 @@
+Pasteory — Install and first launch
+
+1. Quit Pasteory before upgrading. Drag Pasteory.app to Applications.
+2. Open Pasteory from Applications.
+3. If macOS says Apple cannot verify the app, choose System Settings → Privacy & Security → Open Anyway.
+
+Optional Terminal helper
+
+This Beta uses a local development code signature and is not Apple-notarized.
+“Allow Pasteory.command” verifies that /Applications/Pasteory.app matches this DMG.
+After you type OPEN, it removes only that app copy’s downloaded-file quarantine flag and opens it.
+The script does not change global Gatekeeper settings, request administrator access, or run automatically.
+
+You can double-click the helper. macOS may also block the helper itself: in that case open Terminal,
+type /bin/bash -p followed by a space, drag “Allow Pasteory.command” from this DMG into Terminal,
+and press Return. Read its explanation, then type OPEN if you choose to proceed.
+A script alone being executable does not provide Apple notarization or approval.
+
+If the helper reports a version or signature mismatch, reinstall the app from this DMG.
+If your account cannot change the app’s quarantine flag, use the System Settings option above.
+
+来源 / Source: https://github.com/houskii/Pasteory/releases
+
+────────────────────────────────────────
+
+Pasteory — 安装与首次打开
+
+1. 升级前先退出 Pasteory，再将 Pasteory.app 拖入“应用程序”。
+2. 从“应用程序”打开 Pasteory。
+3. 如果提示 Apple 无法验证应用，可前往“系统设置 → 隐私与安全性 → 仍要打开”。
+
+可选的终端辅助脚本
+
+此 Beta 使用本地开发代码签名，尚未经过 Apple 公证。
+“Allow Pasteory.command” 会先核对 /Applications/Pasteory.app 的版本、签名及其与本安装包的一致性。
+用户输入 OPEN 确认后，才会仅移除此应用副本的下载隔离标记并打开应用。
+脚本不修改系统全局 Gatekeeper 设置、不请求管理员权限，也不会自动运行。
+
+可以双击脚本。如果 macOS 同样拦截脚本，请打开“终端”，输入 /bin/bash -p 和一个空格，
+把本 DMG 中的“Allow Pasteory.command”拖入终端，再按 Return。
+阅读说明，确认愿意继续时输入 OPEN。脚本带执行权限不代表获得了 Apple 公证或认可。
+
+若提示版本或签名不匹配，请先从本 DMG 替换安装应用。
+若当前账户无法修改应用的隔离标记，请使用上面的系统设置方式。

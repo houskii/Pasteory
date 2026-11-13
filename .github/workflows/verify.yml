@@ -66,9 +66,12 @@ jobs:
           make verify
           version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Config/Info.plist)
           printf '%s\n' 'CI signature validation only; this build is not published.' > "$RUNNER_TEMP/update-notes.md"
+          # An isolated baseline permits verification of an already published source version.
+          printf '%s\n' '<rss version="2.0"><channel/></rss>' > "$RUNNER_TEMP/ci-previous-appcast.xml"
           python3 scripts/prepare_update.py --tag "v$version" \
             --notes "$RUNNER_TEMP/update-notes.md" --dmg "dist/Pasteory-$version-arm64.dmg" \
-            --tools "$PASTEORY_CI_SPARKLE_TOOLS"
+            --tools "$PASTEORY_CI_SPARKLE_TOOLS" \
+            --previous-appcast "$RUNNER_TEMP/ci-previous-appcast.xml"
       - name: Capture isolated native UI
         timeout-minutes: 5
         run: ./scripts/capture_update_ui.sh

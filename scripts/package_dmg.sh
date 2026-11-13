@@ -13,6 +13,7 @@ STAGING_DIR=$(mktemp -d)
 trap 'rm -rf "$STAGING_DIR"' EXIT
 ditto "$APP_DIR" "$STAGING_DIR/Pasteory.app"
 ln -s /Applications "$STAGING_DIR/Applications"
+python3 "$SCRIPT_DIR/prepare_first_launch.py" --app "$APP_DIR" --destination "$STAGING_DIR"
 rm -f "$DMG_PATH"
 hdiutil create -volname "Pasteory $VERSION" -srcfolder "$STAGING_DIR" -ov -format UDZO "$DMG_PATH"
 echo "$DMG_PATH"

@@ -39,6 +39,8 @@ Use **⌥Return** to paste as plain text. **Space** opens the selected item; cho
 
 This Beta uses a local development code signature and is not Apple-notarized. If macOS blocks the first launch, review the app in System Settings → Privacy & Security and choose Open Anyway.
 
+If your DMG includes `Allow Pasteory.command`, the optional helper can verify the installed copy and remove only its download quarantine flag after you confirm. See `Read Me First.txt` in that DMG for Terminal instructions.
+
 Change the interface language anytime in **Settings → General → Interface Language**. To switch to Chinese, choose **简体中文**.
 
 ## Privacy, by default

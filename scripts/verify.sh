@@ -57,5 +57,8 @@ cmp "$PLIST" "$PACKAGED_APP/Contents/Info.plist"
 cmp "$BINARY" "$PACKAGED_APP/Contents/MacOS/Pasteory"
 cmp "$APP_DIR/Contents/_CodeSignature/CodeResources" "$PACKAGED_APP/Contents/_CodeSignature/CodeResources"
 "$SCRIPT_DIR/verify_signing.sh" "$PACKAGED_APP"
+[[ -x "$DMG_MOUNT/Allow Pasteory.command" ]]
+[[ -s "$DMG_MOUNT/Read Me First.txt" ]]
+"$DMG_MOUNT/Allow Pasteory.command" --check-bundle "$PACKAGED_APP"
 file "$BINARY"
 echo "Pasteory.app 与 DMG 验证通过"
