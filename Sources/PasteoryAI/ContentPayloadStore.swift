@@ -234,6 +234,48 @@ public actor ContentPayloadStore {
         var next = manifest; next.references.removeValue(forKey: ownerID); try persist(next)
     }
 
+    /// Reconcile against the application's live logical owners. Callers serialize
+    /// this with imports/compression. Newly published references are retained if a
+    /// stale snapshot would otherwise discard them. Leases protect in-flight reads.
+    @discardableResult
+    public func reconcile(_ desired: [PayloadReference], snapshotAt: Date, purgeUnreferenced: Bool = false, forceRawOwners: Set<String> = []) throws -> Int {
+        var next = manifest
+        var owners = [String: PayloadReference]()
+        for requested in desired {
+            guard var record = next.records[requested.contentID] else { continue }
+            var ref = requested
+            if let existing = manifest.references[ref.ownerID], existing.contentID == ref.contentID, !forceRawOwners.contains(ref.ownerID) {
+                ref = existing
+            }
+            if ref.mode == .raw {
+                let raw = rawDirectory.appendingPathComponent(record.rawFilename)
+                if !FileManager.default.fileExists(atPath: raw.path) { try Self.durableWrite(readVerified(record), to: raw) }
+                record.rawPresent = true; next.records[record.contentID] = record
+            } else if !record.verified { throw AIError.invalid("An unverified payload cannot have compressed owners") }
+            owners[ref.ownerID] = ref
+        }
+        for (id, ref) in manifest.references where ref.changedAt >= snapshotAt && owners[id] == nil { owners[id] = ref }
+        next.references = owners
+        var removed = [PayloadRecord]()
+        if purgeUnreferenced {
+            let reachable = Set(owners.values.map(\.contentID))
+            for record in next.records.values where !reachable.contains(record.contentID) && (leases[record.contentID]?.isEmpty ?? true) {
+                removed.append(record); next.records.removeValue(forKey: record.contentID)
+            }
+        }
+        try persist(next)
+        var bytes = 0
+        for record in removed {
+            for file in [rawDirectory.appendingPathComponent(record.rawFilename), packedDirectory.appendingPathComponent(record.packedFilename)] {
+                if FileManager.default.fileExists(atPath: file.path) {
+                    let size = (try file.resourceValues(forKeys: [.fileSizeKey])).fileSize ?? 0
+                    try FileManager.default.removeItem(at: file); bytes += size
+                }
+            }
+        }
+        return bytes
+    }
+
     public func exportArchive(to destination: URL) throws {
         let fm = FileManager.default
         try fm.createDirectory(at: destination, withIntermediateDirectories: true)

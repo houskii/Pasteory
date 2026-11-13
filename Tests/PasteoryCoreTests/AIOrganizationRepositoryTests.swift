@@ -1,0 +1,131 @@
+import Foundation
+import PasteoryAI
+import Testing
+@testable import PasteoryCore
+
+private func aiDirectories() throws -> AppDirectories {
+    try AppDirectories(root: FileManager.default.temporaryDirectory.appendingPathComponent("PasteoryAI-" + UUID().uuidString))
+}
+private func aiClip(_ text: String, at date: Date = Date()) -> Clip {
+    ClipClassifier.makeClip(from: PasteboardCapture(
+        items: [CapturedItem(order: 0, representations: [CapturedRepresentation(uti: "public.utf8-plain-text", data: Data(text.utf8))])],
+        source: ClipSource(appName: "AI Test", bundleIdentifier: "test.ai", processIdentifier: 1, confidence: .high), capturedAt: date))!
+}
+private func aiGrouping(_ clips: [Clip], group: UUID = UUID()) -> AIChangeSet {
+    var change = AIChangeSet()
+    change.clipRevisions = Dictionary(uniqueKeysWithValues: clips.map { ($0.id, $0.aiRevision) })
+    change.commands = [AICommand(kind: .createGroup, targetID: group, name: "Project", definition: "Project source materials"),
+                       AICommand(kind: .addItems, targetID: group, clipIDs: clips.map(\.id))]
+    return change
+}
+
+@Test func aiApplyIsAtomicIdempotentAndUndoPreservesLaterHumanNotes() async throws {
+    let dirs = try aiDirectories(); defer { try? FileManager.default.removeItem(at: dirs.root) }
+    let repo = try SQLiteClipRepository(databaseURL: dirs.databaseFile)
+    var original = aiClip("Project implementation notes")
+    original.note = "A user-authored note"; original.isFavorite = true
+    try await repo.save(original)
+    let draft = aiGrouping([original]), group = draft.commands[0].targetID
+    try await repo.applyAIChangeSet(draft)
+    try await repo.applyAIChangeSet(draft)
+    var saved = try #require(await repo.clip(id: original.id))
+    #expect(saved.collectionIDs == [group])
+    #expect(saved.note == original.note && saved.isFavorite && saved.items == original.items)
+    #expect(saved.activity == original.activity)
+    #expect(try await repo.list(filter: .collection(group), query: "", limit: 10).map(\.id) == [original.id])
+    saved.note = "Edited after AI organization"; try await repo.updateExisting(saved)
+    try await repo.undoAIChangeSet(draft.id)
+    let undone = try #require(await repo.clip(id: original.id))
+    #expect(undone.collectionIDs.isEmpty && undone.note == saved.note && undone.isFavorite)
+    #expect(try await repo.collections().isEmpty)
+}
+
+@Test func aiInvalidSecondCommandRollsBackNewGroupAndMemberships() async throws {
+    let dirs = try aiDirectories(); defer { try? FileManager.default.removeItem(at: dirs.root) }
+    let repo = try SQLiteClipRepository(databaseURL: dirs.databaseFile), clip = aiClip("Atomic transaction")
+    try await repo.save(clip)
+    var draft = aiGrouping([clip])
+    draft.commands[1].clipIDs = [UUID()]
+    await #expect(throws: (any Error).self) { try await repo.applyAIChangeSet(draft) }
+    #expect(try await repo.collections().isEmpty)
+    #expect(try await repo.clip(id: clip.id)?.collectionIDs.isEmpty == true)
+    #expect(try await repo.aiState().changes.isEmpty)
+}
+
+@Test func aiDefinitionAndMembershipConflictsProtectHumanEdits() async throws {
+    let dirs = try aiDirectories(); defer { try? FileManager.default.removeItem(at: dirs.root) }
+    let repo = try SQLiteClipRepository(databaseURL: dirs.databaseFile), clip = aiClip("Project references")
+    try await repo.save(clip)
+    let draft = aiGrouping([clip]), group = draft.commands[0].targetID
+    try await repo.applyAIChangeSet(draft)
+    let profile = try #require(await repo.aiState().groups[group])
+    var followup = AIChangeSet(); followup.groupRevisions[group] = profile.revision
+    followup.clipRevisions[clip.id] = try #require(await repo.clip(id: clip.id)).aiRevision
+    followup.commands = [AICommand(kind: .removeItems, targetID: group, clipIDs: [clip.id])]
+    try await repo.updateAIGroupDefinition(id: group, name: "My project", definition: "My explicit scope", retained: true, expectedVersion: profile.definitionVersion)
+    await #expect(throws: (any Error).self) { try await repo.applyAIChangeSet(followup) }
+    await #expect(throws: (any Error).self) { try await repo.undoAIChangeSet(draft.id) }
+    await #expect(throws: (any Error).self) {
+        try await repo.updateAIGroupDefinition(id: group, name: "Stale edit", definition: "Old", retained: false, expectedVersion: profile.definitionVersion)
+    }
+    var member = try #require(await repo.clip(id: clip.id)); member.collectionIDs.remove(group)
+    try await repo.updateExisting(member)
+    let excluded = try #require(await repo.aiState().groups[group])
+    #expect(excluded.excludedClipIDs.contains(clip.id) && !excluded.memberIDs.contains(clip.id))
+    var add = AIChangeSet(); add.groupRevisions[group] = excluded.revision
+    add.clipRevisions[clip.id] = member.aiRevision
+    add.commands = [AICommand(kind: .addItems, targetID: group, clipIDs: [clip.id])]
+    await #expect(throws: (any Error).self) { try await repo.applyAIChangeSet(add) }
+}
+
+@Test func aiAggregationSummaryIsCitedAndFreshAfterGrouping() async throws {
+    let dirs = try aiDirectories(); defer { try? FileManager.default.removeItem(at: dirs.root) }
+    let repo = try SQLiteClipRepository(databaseURL: dirs.databaseFile)
+    let a = aiClip("The launch is scheduled for Monday."), b = aiClip("The owner is Alice.")
+    try await repo.saveBatch([a, b])
+    var draft = aiGrouping([a, b]); let bundle = UUID()
+    draft.commands += [AICommand(kind: .createAggregation, targetID: bundle, clipIDs: [a.id, b.id], name: "Launch brief"),
+                       AICommand(kind: .setSummary, targetID: bundle, claims: [AIClaim(kind: .fact, text: "Launch: Monday", evidence: [AIEvidence(clipID: a.id, quote: "scheduled for Monday")])])]
+    try await repo.applyAIChangeSet(draft)
+    let summary = try #require(await repo.aiState().summaries[bundle])
+    #expect(summary.sourceRevisions[a.id] == a.aiContentRevision)
+    #expect(try await repo.aggregation(id: bundle)?.memberClipIDs.count == 2)
+    var changed = try #require(await repo.clip(id: a.id)); changed.note = "New context"
+    try await repo.updateExisting(changed)
+    #expect(summary.sourceRevisions[a.id] != changed.aiContentRevision)
+    try await repo.removePermanently(id: a.id)
+    #expect(try await repo.aiState().summaries[bundle] == nil)
+}
+
+@Test func partialCompressionSurvivesBackupAndReclaimsRawOnlyWhenAllOwnersPacked() async throws {
+    let dirs = try aiDirectories(), restored = try aiDirectories()
+    defer { for root in [dirs.root, restored.root] { try? FileManager.default.removeItem(at: root) } }
+    let repo = try SQLiteClipRepository(databaseURL: dirs.databaseFile)
+    let a = ClipCollection(name: "A", kind: .normal, sortOrder: 0), b = ClipCollection(name: "B", kind: .normal, sortOrder: 1)
+    try await repo.saveCollection(a); try await repo.saveCollection(b)
+    let bytes = String(repeating: "Lossless project evidence. ", count: 4000)
+    var clip = aiClip(bytes, at: Date().addingTimeInterval(-20 * 86_400)); clip.collectionIDs = [a.id, b.id]
+    clip = try await repo.saveCaptured(clip)
+    let oldRepresentation = try #require(clip.items.first?.representations.first)
+    _ = try await repo.compressAIGroup(id: a.id, policy: LifecyclePolicy(), now: Date())
+    let partial = try #require(await repo.clip(id: clip.id))
+    guard case .attachment(let raw, _, _) = partial.items[0].representations[0].storage else { Issue.record("B still needs raw content"); return }
+    #expect(FileManager.default.fileExists(atPath: dirs.attachments.appendingPathComponent(raw).path))
+    let backup = dirs.backups.appendingPathComponent("partial.pasteorybackup")
+    try await BackupService(repository: repo, directories: dirs).export(to: backup)
+    let target = try SQLiteClipRepository(databaseURL: restored.databaseFile)
+    #expect(try await BackupService(repository: target, directories: restored).importBackup(from: backup) == 1)
+    #expect(try await target.collections().count == 2)
+    let freed = try await target.compressAIGroup(id: b.id, policy: LifecyclePolicy(), now: Date())
+    #expect(freed > 0)
+    let complete = try #require(await target.clip(id: clip.id))
+    guard case .archived = complete.items[0].representations[0].storage else { Issue.record("All owners are packed"); return }
+    let attachments = AttachmentStore(directories: restored)
+    #expect(try await attachments.data(for: complete.items[0].representations[0]) == Data(bytes.utf8))
+    // A reader holding the representation from before GC can still recover it.
+    #expect(try await attachments.data(for: oldRepresentation) == Data(bytes.utf8))
+    #expect(!FileManager.default.fileExists(atPath: restored.attachments.appendingPathComponent(raw).path))
+    try await target.removePermanently(id: clip.id)
+    let manifest = try JSONDecoder().decode(PayloadManifest.self, from: Data(contentsOf: restored.root.appendingPathComponent("AIContent/manifest.json")))
+    #expect(manifest.records.isEmpty)
+}

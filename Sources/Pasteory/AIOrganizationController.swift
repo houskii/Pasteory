@@ -90,6 +90,7 @@ final class AIOrganizationController: ObservableObject {
         let config = settings.aiConfiguration
         if !running && Date().timeIntervalSince(lastLifecycleRefresh) >= 300 {
             do {
+                _ = try await repository.purgeTrash(olderThan: Date().addingTimeInterval(-30 * 86_400))
                 try await reload(); lastLifecycleRefresh = Date()
                 if config.lifecycleEnabled && config.automaticCompression && !storageBusy {
                     await compress(groupID: nil)
@@ -134,7 +135,7 @@ final class AIOrganizationController: ObservableObject {
     }
 
     func analyze(all: Bool = false, resume: Bool = false, groupID: UUID? = nil, trigger: String = "manual") {
-        guard !running else { return }
+        guard !running, !storageBusy else { return }
         guard settings.aiConfiguration.enabled else { error = L10n.tr("请先在 AI 整理设置中启用模型连接"); return }
         if pending != nil { showingReview = true; return }
         running = true; error = nil; status = L10n.tr("正在准备分析范围")

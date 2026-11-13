@@ -73,3 +73,29 @@ private func payloadRoot() -> URL { FileManager.default.temporaryDirectory.appen
         #expect(try await store.read(contentID: record.contentID) == bytes)
     }
 }
+
+@Test func reconciliationPreservesLiveOwnersAndLeasesDuringExplicitCleanup() async throws {
+    let root = payloadRoot(); defer { try? FileManager.default.removeItem(at: root) }
+    let store = try ContentPayloadStore(root: root)
+    let bytes = Data("Shared lifecycle material".utf8)
+    let record = try await store.register(bytes, ownerIDs: ["A", "B"])
+    _ = try await store.pack(ownerIDs: ["A"])
+    _ = try await store.reconcile([PayloadReference(ownerID: "B", contentID: record.contentID)], snapshotAt: Date(), purgeUnreferenced: true)
+    #expect(await store.referenceCounts(for: record.contentID).raw == 1)
+    #expect(try await store.read(contentID: record.contentID) == bytes)
+    let lease = try await store.acquireRawLease(contentID: record.contentID)
+    _ = try await store.reconcile([], snapshotAt: Date(), purgeUnreferenced: true)
+    #expect(await store.snapshot().records.count == 1)
+    await store.releaseRawLease(contentID: record.contentID, lease: lease)
+    #expect(try await store.reconcile([], snapshotAt: Date(), purgeUnreferenced: true) > 0)
+    #expect(await store.snapshot().records.isEmpty)
+}
+
+@Test func staleReconciliationCannotDiscardNewlyPublishedOwners() async throws {
+    let root = payloadRoot(); defer { try? FileManager.default.removeItem(at: root) }
+    let store = try ContentPayloadStore(root: root), snapshot = Date()
+    let record = try await store.register(Data("New capture".utf8), ownerIDs: ["new-owner"])
+    _ = try await store.reconcile([], snapshotAt: snapshot, purgeUnreferenced: true)
+    #expect(await store.referenceCounts(for: record.contentID).raw == 1)
+    #expect(await store.snapshot().records.count == 1)
+}

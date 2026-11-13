@@ -83,8 +83,14 @@ public actor OpenAICompatibleClient: AIChatTransport {
         guard let models = root["data"].array else { throw AIError.invalid("The server did not return a model list") }
         return models.compactMap { value in
             guard let id = value["id"].string, !id.isEmpty else { return nil }
-            return AIModelDescriptor(id: id, reasoningLevels: value["reasoning_levels"].array?.compactMap(\.string) ?? [],
-                                     contextWindow: value["context_window"].number.map(Int.init), maxOutputTokens: value["max_output_tokens"].number.map(Int.init))
+            let levels = value["reasoning_levels"].array?.compactMap(\.string)
+                ?? value["supported_reasoning_levels"].array?.compactMap { $0["effort"].string } ?? []
+            func boundedInt(_ key: String) -> Int? {
+                guard let number = value[key].number, number.isFinite, (1...100_000_000).contains(number) else { return nil }
+                return Int(number)
+            }
+            return AIModelDescriptor(id: id, reasoningLevels: Array(Set(levels)).sorted(),
+                                     contextWindow: boundedInt("context_window"), maxOutputTokens: boundedInt("max_output_tokens"))
         }.sorted { $0.id < $1.id }
     }
     private func request(path: String, body: Data?, configuration: AIConfiguration, credential: String) async throws -> Data {
@@ -93,6 +99,7 @@ public actor OpenAICompatibleClient: AIChatTransport {
         request.httpMethod = body == nil ? "GET" : "POST"; request.httpBody = body
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Pasteory/AIOrganization", forHTTPHeaderField: "User-Agent")
         if !credential.isEmpty { request.setValue("Bearer " + credential, forHTTPHeaderField: "Authorization") }
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw AIError.invalid("Non-HTTP model response") }

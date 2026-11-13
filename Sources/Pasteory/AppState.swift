@@ -158,9 +158,19 @@ final class AppState: ObservableObject {
     var selectedAggregation: ClipAggregation? { aggregations.first { $0.id == selectedAggregationID } }
     var quickSelectedAggregation: ClipAggregation? { aggregations.first { $0.id == quickSelectedAggregationID } }
     var quickTabs: [QuickTab] {
-        [QuickTab(scope: .all, title: L10n.tr("全部"), symbol: "clock")] + collections.map {
+        [QuickTab(scope: .all, title: L10n.tr("全部"), symbol: "clock")] + collections.filter {
+            guard settings.aiConfiguration.lifecycleEnabled, let profile = intelligence.state.groups[$0.id] else { return true }
+            return profile.retained || intelligence.groupActivity(profile).stage != .archived
+        }.map {
             QuickTab(scope: .collection($0.id), title: $0.name, symbol: $0.kind == .smart ? "sparkles" : "folder")
         }
+    }
+
+    func recordHumanUse(_ clip: Clip, event: ContentActivity.Event) async {
+        do {
+            try await repository.recordHumanActivity(id: clip.id, event: event, at: Date())
+            try await intelligence.reload()
+        } catch { show(error) }
     }
 
     func bootstrap(processExistingClips: Bool = true) async {

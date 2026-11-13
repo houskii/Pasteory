@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import PasteoryAI
 import UniformTypeIdentifiers
 
 public actor AttachmentStore {
@@ -34,16 +35,30 @@ public actor AttachmentStore {
     }
 
     public func data(for representation: ClipRepresentation) throws -> Data {
+        try Self.loadData(for: representation, storageRoot: directories.root)
+    }
+
+    static func loadData(for representation: ClipRepresentation, storageRoot: URL) throws -> Data {
         switch representation.storage {
         case .inline(let data): return data
-        case .attachment(let relativePath, let checksum, _):
-            let data = try Data(contentsOf: directories.attachments.appendingPathComponent(relativePath))
-            guard digest(data) == checksum else { throw StorageError.checksumMismatch }
+        case .attachment(let relativePath, let checksum, let size):
+            let raw = storageRoot.appendingPathComponent("Attachments/" + relativePath)
+            let data: Data
+            if FileManager.default.fileExists(atPath: raw.path) { data = try Data(contentsOf: raw) }
+            else {
+                // An already-open UI may still hold the old representation after
+                // its raw cache was reclaimed. Read the same immutable bytes.
+                guard checksum.count == 64, checksum.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
+                      (0...536_870_912).contains(size) else { throw StorageError.invalidArchive }
+                let packed = storageRoot.appendingPathComponent("Archives/AIContent/Packed/" + checksum + ".packed")
+                data = try LZFSE.decompress(Data(contentsOf: packed), expectedSize: size)
+            }
+            guard AIHash.digest(data) == checksum else { throw StorageError.checksumMismatch }
             return data
         case .archived(let relativePath, let checksum, let size):
-            let compressed = try Data(contentsOf: directories.archives.appendingPathComponent(relativePath))
+            let compressed = try Data(contentsOf: storageRoot.appendingPathComponent("Archives/" + relativePath))
             let data = try LZFSE.decompress(compressed, expectedSize: size)
-            guard digest(data) == checksum else { throw StorageError.checksumMismatch }
+            guard AIHash.digest(data) == checksum else { throw StorageError.checksumMismatch }
             return data
         }
     }

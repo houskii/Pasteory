@@ -790,6 +790,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
         Task {
             do {
                 let result = try await pasteCoordinator.perform(clip, plainText: plainText, paste: paste, target: target)
+                if result != .pasted { await state.recordHumanUse(clip, event: .copy) }
                 switch result {
                 case .pasted:
                     if await state.recordPaste(clip) { state.presentStatus(L10n.tr("已粘贴")) }

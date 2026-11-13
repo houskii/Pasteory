@@ -5,7 +5,7 @@ import PasteoryCore
 
 @MainActor
 final class PasteCoordinator {
-    enum Result { case pasted, copied, copiedFallback, copiedPermissionRequired }
+    enum Result: Equatable { case pasted, copied, copiedFallback, copiedPermissionRequired }
 
     private let attachments: AttachmentStore
     weak var monitor: ClipboardMonitor?

@@ -1200,6 +1200,7 @@ struct CollectionNameEditor: View {
     @State private var name: String
     @State private var definition: String
     @State private var retained: Bool
+    private let definitionVersion: Int?
     @State private var error: String?
 
     init(state: AppState, existing: ClipCollection?) {
@@ -1207,6 +1208,7 @@ struct CollectionNameEditor: View {
         self.existing = existing
         _name = State(initialValue: existing?.name ?? "")
         let profile = existing.flatMap { state.intelligence.state.groups[$0.id] }
+        definitionVersion = profile?.definitionVersion
         _definition = State(initialValue: profile?.definition ?? "")
         _retained = State(initialValue: profile?.retained ?? false)
     }
@@ -1247,9 +1249,9 @@ struct CollectionNameEditor: View {
         if let message = state.collectionNameValidationMessage(name, excluding: existing?.id) { error = message; return }
         Task {
             let succeeded: Bool
-            if let existing, let profile = state.intelligence.state.groups[existing.id] {
+            if let existing, let expectedVersion = definitionVersion {
                 succeeded = await state.intelligence.saveGroup(id: existing.id, name: name, definition: definition,
-                                                              retained: retained, expectedVersion: profile.definitionVersion)
+                                                              retained: retained, expectedVersion: expectedVersion)
                 if succeeded && recheck { state.intelligence.analyze(groupID: existing.id) }
             } else if var existing {
                 existing.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1258,7 +1260,7 @@ struct CollectionNameEditor: View {
                 succeeded = await state.addCollection(name: name, smart: false) != nil
             }
             if succeeded { dismiss() }
-            else { error = state.statusMessage }
+            else { error = state.intelligence.error ?? state.statusMessage }
         }
     }
 }

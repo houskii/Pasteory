@@ -236,6 +236,7 @@ final class QuickPanelController: NSObject {
         Task {
             do {
                 let result = try await pasteCoordinator.perform(clip, plainText: plainText, paste: paste, target: target)
+                if result != .pasted { await state.recordHumanUse(clip, event: .copy) }
                 switch result {
                 case .pasted:
                     if await state.recordPaste(clip) { state.presentStatus(L10n.tr("已粘贴")) }
@@ -453,6 +454,7 @@ final class QuickPanelController: NSObject {
             Task {
                 do {
                     try await clipOpenCoordinator.open(clip)
+                    await state.recordHumanUse(clip, event: .open)
                     close(restoreTargetApplication: false)
                 } catch {
                     state.presentStatus(error.localizedDescription, kind: .warning, dismissAfter: 5)

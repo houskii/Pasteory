@@ -3,7 +3,9 @@ import PasteoryAI
 
 public extension Clip {
     var activity: ContentActivity {
-        var value = intelligenceActivity ?? ContentActivity(lastUsedAt: lastUsedAt)
+        var historical = [ContentActivity.Sample(.copy, at: lastCopiedAt)]
+        if let lastPastedAt { historical.append(ContentActivity.Sample(.paste, at: lastPastedAt)) }
+        var value = intelligenceActivity ?? ContentActivity(lastUsedAt: lastUsedAt, samples: historical)
         value.lastUsedAt = max(value.lastUsedAt, lastUsedAt)
         return value
     }
@@ -13,7 +15,8 @@ public extension Clip {
                             aiAnalysisExcluded == true ? "excluded" : "allowed", deletedAt == nil ? "present" : "deleted"])
     }
     var aiContentRevision: String {
-        AIHash.fingerprint([id.uuidString, contentHash, title, automaticTitle ?? "", note, primaryKind.rawValue, previewText])
+        AIHash.fingerprint([id.uuidString, contentHash, title, automaticTitle ?? "", note, primaryKind.rawValue, previewText,
+                            deletedAt == nil ? "present" : "deleted"])
     }
     func aiDocument(includeNotes: Bool, includeSource: Bool, body: String? = nil) -> AIClipDocument {
         var text = body ?? previewText

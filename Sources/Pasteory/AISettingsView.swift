@@ -209,9 +209,7 @@ struct AISettingsView: View {
                 HStack { Spacer(); Button(L10n.tr("压缩符合条件的资料")) { if save() { Task { await controller.compress(groupID: nil) } } }.disabled(controller.storageBusy || controller.running) }
             }
         }
-        .onChange(of: draft.lifecycle.deprioritizeDays) { _, _ in markCustom() }
-        .onChange(of: draft.lifecycle.compressionDays) { _, _ in markCustom() }
-        .onChange(of: draft.lifecycle.archiveDays) { _, _ in markCustom() }
+        .onChange(of: draft.lifecycle) { _, _ in markCustom() }
     }
 
     private var usage: some View {

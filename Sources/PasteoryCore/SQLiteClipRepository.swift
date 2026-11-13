@@ -10,6 +10,7 @@ public actor SQLiteClipRepository: ClipRepository {
     private let storageRoot: URL
     private let intelligencePayloads: ContentPayloadStore
     private var applyingIntelligence = false
+    private var intelligenceMaintenance = false
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
     private struct LinkGroupAccumulator {
@@ -18,6 +19,13 @@ public actor SQLiteClipRepository: ClipRepository {
     }
 
     public init(databaseURL: URL, normalizeExistingData: Bool = true) throws {
+        let storageRoot = databaseURL.deletingLastPathComponent().deletingLastPathComponent()
+        let payloads = try ContentPayloadStore(
+            root: storageRoot.appendingPathComponent("AIContent"),
+            rawDirectory: storageRoot.appendingPathComponent("Attachments/AIContentRaw"),
+            packedDirectory: storageRoot.appendingPathComponent("Archives/AIContent/Packed"),
+            codec: AIPayloadLZFSECodec()
+        )
         var pointer: OpaquePointer?
         let flags = SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX
         guard sqlite3_open_v2(databaseURL.path, &pointer, flags, nil) == SQLITE_OK, let pointer else {
@@ -26,13 +34,8 @@ public actor SQLiteClipRepository: ClipRepository {
         self.database = pointer
         self.encoder = JSONEncoder()
         self.decoder = JSONDecoder()
-        self.storageRoot = databaseURL.deletingLastPathComponent().deletingLastPathComponent()
-        self.intelligencePayloads = try ContentPayloadStore(
-            root: self.storageRoot.appendingPathComponent("AIContent"),
-            rawDirectory: self.storageRoot.appendingPathComponent("Attachments/AIContentRaw"),
-            packedDirectory: self.storageRoot.appendingPathComponent("Archives/AIContent/Packed"),
-            codec: AIPayloadLZFSECodec()
-        )
+        self.storageRoot = storageRoot
+        self.intelligencePayloads = payloads
         self.encoder.dateEncodingStrategy = .millisecondsSince1970
         self.decoder.dateDecodingStrategy = .millisecondsSince1970
         do {
@@ -293,14 +296,19 @@ public actor SQLiteClipRepository: ClipRepository {
         return clips
     }
 
-    public func removePermanently(id: UUID) throws {
+    public func removePermanently(id: UUID) async throws {
+        guard !intelligenceMaintenance else { throw AIError.conflict("Storage maintenance is in progress; retry shortly") }
+        intelligenceMaintenance = true; defer { intelligenceMaintenance = false }
         try transaction {
             try deleteClipRows(id: id)
+            try Self.execute(database, "DELETE FROM clip_merge_backups WHERE canonical_id=?;", bindings: [id.uuidString])
             try removeUnusedClipMetadata()
         }
+        _ = try await reconcileAIPayloads(purge: true)
     }
 
     private func deleteClipRows(id: UUID) throws {
+        try pruneAIContent(id: id)
         try Self.execute(database, "DELETE FROM clip_fts WHERE id=?;", bindings: [id.uuidString])
         try Self.execute(database, "DELETE FROM clips WHERE id=?;", bindings: [id.uuidString])
     }
@@ -384,8 +392,10 @@ public actor SQLiteClipRepository: ClipRepository {
         )
     }
 
-    public func cleanHistory(_ preview: HistoryCleanupPreview) throws -> HistoryCleanupResult {
+    public func cleanHistory(_ preview: HistoryCleanupPreview) async throws -> HistoryCleanupResult {
         guard !preview.entries.isEmpty else { return HistoryCleanupResult(deletedCount: 0, freedBytes: 0, failedFileCount: 0) }
+        guard !intelligenceMaintenance else { throw AIError.conflict("Storage maintenance is in progress; retry shortly") }
+        intelligenceMaintenance = true; defer { intelligenceMaintenance = false }
         try transaction {
             guard try previewHistoryCleanup(olderThan: preview.cutoff, largerThan: preview.minimumBytes) == preview else {
                 throw HistoryCleanupError.previewChanged
@@ -399,15 +409,17 @@ public actor SQLiteClipRepository: ClipRepository {
         var freedBytes: Int64 = 0
         var failedFileCount = 0
         for (file, size) in preview.files {
+            if file.relativePath.hasPrefix("AIContentRaw/") || file.relativePath.hasPrefix("AIContent/Packed/") { continue }
             if file.remove(in: storageRoot, expectedSize: size) { freedBytes += size.allocated }
             else { failedFileCount += 1 }
         }
+        freedBytes += Int64(try await reconcileAIPayloads(purge: true))
         return HistoryCleanupResult(deletedCount: preview.entries.count, freedBytes: freedBytes, failedFileCount: failedFileCount)
     }
 
-    public func purgeTrash(olderThan date: Date) throws -> Int {
+    public func purgeTrash(olderThan date: Date) async throws -> Int {
         let ids = try idsForSQL("SELECT id FROM clips WHERE deleted_at IS NOT NULL AND deleted_at < ?;", double: date.timeIntervalSince1970)
-        for id in ids { try removePermanently(id: id) }
+        for id in ids { try await removePermanently(id: id) }
         return ids.count
     }
 
@@ -505,10 +517,19 @@ public actor SQLiteClipRepository: ClipRepository {
     }
 
     public func removeCollection(id: UUID) throws {
-        let statement = try prepare("DELETE FROM collections WHERE id=?;")
-        defer { sqlite3_finalize(statement) }
-        bind(id.uuidString, at: 1, to: statement); try stepDone(statement)
-        try rebuildSearchIndex()
+        func work() throws {
+            let oldApplying = applyingIntelligence; applyingIntelligence = true
+            defer { applyingIntelligence = oldApplying }
+            for var clip in try allClips() where clip.collectionIDs.contains(id) {
+                clip.collectionIDs.remove(id); try save(clip)
+            }
+            if !oldApplying { try updateAIState { state in state.groups.removeValue(forKey: id) } }
+            let statement = try prepare("DELETE FROM collections WHERE id=?;")
+            defer { sqlite3_finalize(statement) }
+            bind(id.uuidString, at: 1, to: statement); try stepDone(statement)
+            try rebuildSearchIndex()
+        }
+        if sqlite3_get_autocommit(database) == 0 { try work() } else { try transaction(work) }
     }
 
     public func allClips() throws -> [Clip] {
@@ -1173,24 +1194,7 @@ public actor SQLiteClipRepository: ClipRepository {
     }
 
     private func loadRepresentationData(_ representation: ClipRepresentation) throws -> Data {
-        let data: Data
-        let expectedChecksum: String?
-        switch representation.storage {
-        case .inline(let inline):
-            return inline
-        case .attachment(let relativePath, let checksum, _):
-            data = try Data(contentsOf: storageRoot.appendingPathComponent("Attachments").appendingPathComponent(relativePath))
-            expectedChecksum = checksum
-        case .archived(let relativePath, let checksum, let size):
-            let compressed = try Data(contentsOf: storageRoot.appendingPathComponent("Archives").appendingPathComponent(relativePath))
-            data = try LZFSE.decompress(compressed, expectedSize: size)
-            expectedChecksum = checksum
-        }
-        if let expectedChecksum {
-            let actual = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-            guard actual == expectedChecksum else { throw StorageError.checksumMismatch }
-        }
-        return data
+        try AttachmentStore.loadData(for: representation, storageRoot: storageRoot)
     }
 
     private func decode<T: Decodable>(_ type: T.Type, statement: OpaquePointer, column: Int32) throws -> T {
@@ -1864,6 +1868,9 @@ extension SQLiteClipRepository {
 
     public func compressAIGroup(id groupID: UUID?, policy: LifecyclePolicy, now: Date) async throws -> Int {
         try policy.validate()
+        guard !intelligenceMaintenance else { throw AIError.conflict("Storage maintenance is in progress; retry shortly") }
+        intelligenceMaintenance = true; defer { intelligenceMaintenance = false }
+        _ = try await reconcileAIPayloads()
         let initial = try allClips()
         let aggregations = try aggregations()
         let selected = initial.filter {
@@ -1903,6 +1910,7 @@ extension SQLiteClipRepository {
                 touched.insert(hash)
             }
         }
+        _ = try await reconcileAIPayloads()
         let manifest = await intelligencePayloads.snapshot()
         var modes = [String: PayloadReferenceMode]()
         for hash in touched { modes[hash] = await intelligencePayloads.referenceCounts(for: hash).raw == 0 ? .packed : .raw }
@@ -1933,7 +1941,20 @@ extension SQLiteClipRepository {
                 external.insert(payloadID(rep))
             }
         }
-        return try await intelligencePayloads.releaseUnreferencedRaw(excluding: external)
+        var released = try await intelligencePayloads.releaseUnreferencedRaw(excluding: external)
+        // Remove superseded legacy files only after the DB commit and a fresh
+        // reachability scan, including consolidation recovery records.
+        let heldFiles = Set(try (allClips() + mergeBackupClips()).flatMap { $0.historyStoredFiles })
+        for clip in initial {
+            for rep in clip.items.flatMap(\.representations) where touched.contains(payloadID(rep)) {
+                guard let file = HistoryStoredFile(storage: rep.storage),
+                      !file.relativePath.hasPrefix("AIContent"), !heldFiles.contains(file),
+                      let size = file.size(in: storageRoot),
+                      manifest.records[payloadID(rep)]?.verified == true else { continue }
+                if file.remove(in: storageRoot, expectedSize: size) { released += Int(size.logical) }
+            }
+        }
+        return released
     }
 
     private func payloadID(_ representation: ClipRepresentation) -> String {
@@ -1951,6 +1972,70 @@ extension SQLiteClipRepository {
         return owners
     }
 
-    public func exportAIContent(to destination: URL) async throws { try await intelligencePayloads.exportArchive(to: destination) }
-    public func importAIContent(from source: URL) async throws { try await intelligencePayloads.importArchive(from: source) }
+    private func mergeBackupClips() throws -> [Clip] {
+        let s = try prepare("SELECT payload_json FROM clip_merge_backups;"); defer { sqlite3_finalize(s) }
+        var values = [Clip]()
+        while sqlite3_step(s) == SQLITE_ROW { values.append(try decodeClip(s, column: 0)) }
+        return values
+    }
+
+    private func reconcileAIPayloads(purge: Bool = false) async throws -> Int {
+        let manifest = await intelligencePayloads.snapshot()
+        let snapshotAt = Date()
+        let bundles = try aggregations()
+        var desired = [PayloadReference](); var live = Set<String>(); var forceRaw = Set<String>()
+        for clip in try allClips() {
+            for rep in clip.items.flatMap(\.representations) {
+                let hash = payloadID(rep); guard manifest.records[hash] != nil else { continue }
+                live.insert(hash)
+                let mode: PayloadReferenceMode
+                if case .archived = rep.storage { mode = .packed } else { mode = .raw }
+                for owner in payloadOwners(clip: clip, representationID: rep.id, aggregations: bundles) {
+                    let protected = owner.hasPrefix("protected:")
+                    if protected { forceRaw.insert(owner) }
+                    desired.append(PayloadReference(ownerID: owner, contentID: hash, mode: protected ? .raw : mode))
+                }
+            }
+        }
+        for clip in try mergeBackupClips() {
+            for rep in clip.items.flatMap(\.representations) {
+                let hash = payloadID(rep); guard manifest.records[hash] != nil else { continue }
+                live.insert(hash)
+                let mode: PayloadReferenceMode
+                if case .archived = rep.storage { mode = .packed } else { mode = .raw }
+                desired.append(PayloadReference(ownerID: "recovery:" + clip.id.uuidString + ":" + rep.id.uuidString,
+                                                contentID: hash, mode: mode))
+            }
+        }
+        for hash in live {
+            desired.append(PayloadReference(ownerID: "canonical:" + hash, contentID: hash,
+                                            mode: manifest.records[hash]?.verified == true ? .packed : .raw))
+        }
+        return try await intelligencePayloads.reconcile(desired, snapshotAt: snapshotAt, purgeUnreferenced: purge, forceRawOwners: forceRaw)
+    }
+
+    private func pruneAIContent(id: UUID) throws {
+        var state = try aiState()
+        for (key, var group) in state.groups {
+            if group.memberIDs.remove(id) != nil { group.revision += 1 }
+            group.aiMemberIDs.remove(id); group.excludedClipIDs.remove(id); state.groups[key] = group
+        }
+        state.summaries = state.summaries.filter { $0.value.sourceRevisions[id] == nil }
+        let removed = state.changes.filter { $0.clipRevisions[id] != nil }.map(\.id)
+        state.changes.removeAll { $0.clipRevisions[id] != nil }
+        for change in removed { try Self.execute(database, "DELETE FROM intelligence_undo WHERE id=?;", bindings: [change.uuidString]) }
+        if state.checkpoint?.clipIDs.contains(id) == true || state.checkpoint?.draft.clipRevisions[id] != nil { state.checkpoint = nil }
+        try writeAIState(state)
+    }
+
+    public func exportAIContent(to destination: URL) async throws {
+        guard !intelligenceMaintenance else { throw AIError.conflict("Storage maintenance is in progress; retry shortly") }
+        intelligenceMaintenance = true; defer { intelligenceMaintenance = false }
+        try await intelligencePayloads.exportArchive(to: destination)
+    }
+    public func importAIContent(from source: URL) async throws {
+        guard !intelligenceMaintenance else { throw AIError.conflict("Storage maintenance is in progress; retry shortly") }
+        intelligenceMaintenance = true; defer { intelligenceMaintenance = false }
+        try await intelligencePayloads.importArchive(from: source)
+    }
 }
