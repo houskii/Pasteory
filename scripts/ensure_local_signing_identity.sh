@@ -132,7 +132,7 @@ fi
 chmod 600 "$PASSWORD_FILE" "$RECOVERY_IDENTITY" "$RECOVERY_CERTIFICATE" "$IDENTITY_HASH_FILE" "$BUILD_KEYCHAIN"
 if [[ ${GITHUB_ACTIONS:-false} == true ]]; then
   # Keep both the code-signing key and Sparkle's test key in this unlocked CI keychain.
-  security default-keychain -d user -s "$BUILD_KEYCHAIN"
-  security list-keychains -d user -s "$BUILD_KEYCHAIN"
+  security default-keychain -d user -s "$BUILD_KEYCHAIN" >/dev/null
+  security list-keychains -d user -s "$BUILD_KEYCHAIN" >/dev/null
 fi
 print -r -- "$IDENTITY_HASH"
