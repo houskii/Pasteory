@@ -117,6 +117,16 @@ struct LibraryView: View {
                     sidebarRow(L10n.tr("归档"), symbol: "archivebox", filter: .archived)
                     sidebarRow(L10n.tr("废纸篓"), symbol: "trash", filter: .trash)
 
+                    if !state.intelligence.state.groups.isEmpty {
+                        LibrarySectionLabel(title: L10n.tr("AI 分组")).padding(.top, 12)
+                        ForEach(aiCollections(archived: false)) { collection in collectionRow(collection) }
+                        if !aiCollections(archived: true).isEmpty {
+                            DisclosureGroup(L10n.tr("归档的 AI 分组")) {
+                                ForEach(aiCollections(archived: true)) { collection in collectionRow(collection) }
+                            }.font(.caption).padding(.horizontal, 8)
+                        }
+                    }
+
                     LibrarySectionLabel(title: L10n.tr("内容类型")).padding(.top, 12)
                     ForEach(ClipKind.allCases, id: \.self) { kind in sidebarRow(kind.displayName, symbol: kind.symbolName, filter: .kind(kind)) }
 
@@ -132,13 +142,6 @@ struct LibraryView: View {
                     }
                     addCollectionButton(L10n.tr("新建智能分组"), symbol: "sparkles") {
                         editingSmartCollection = ClipCollection(name: "", kind: .smart, sortOrder: state.collections.count, ruleSet: SmartRuleSet())
-                    }
-                    LibrarySectionLabel(title: L10n.tr("AI 分组")).padding(.top, 12)
-                    ForEach(aiCollections(archived: false)) { collection in collectionRow(collection) }
-                    if !aiCollections(archived: true).isEmpty {
-                        DisclosureGroup(L10n.tr("归档的 AI 分组")) {
-                            ForEach(aiCollections(archived: true)) { collection in collectionRow(collection) }
-                        }.font(.caption).padding(.horizontal, 8)
                     }
                 }
                 .padding(.horizontal, 10)
@@ -206,7 +209,7 @@ struct LibraryView: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 4)
-                if let group = state.intelligence.state.groups[collection.id] {
+                if state.settings.aiConfiguration.lifecycleEnabled, let group = state.intelligence.state.groups[collection.id] {
                     Text(L10n.text(state.intelligence.groupActivity(group).stage.title)).font(.system(size: 9)).foregroundStyle(.secondary)
                 }
                 Image(systemName: "line.3.horizontal")
@@ -252,8 +255,9 @@ struct LibraryView: View {
     private func aiCollections(archived: Bool) -> [ClipCollection] {
         state.collections.filter { collection in
             guard let group = state.intelligence.state.groups[collection.id] else { return false }
-            return (state.intelligence.groupActivity(group).stage == .archived && !group.retained) == archived
+            return (state.settings.aiConfiguration.lifecycleEnabled && state.intelligence.groupActivity(group).stage == .archived && !group.retained) == archived
         }.sorted { a, b in
+            if !state.settings.aiConfiguration.lifecycleEnabled { return a.sortOrder < b.sortOrder }
             guard let lhs = state.intelligence.state.groups[a.id], let rhs = state.intelligence.state.groups[b.id] else { return a.sortOrder < b.sortOrder }
             if lhs.retained != rhs.retained { return lhs.retained }
             let ls = state.intelligence.groupActivity(lhs).score, rs = state.intelligence.groupActivity(rhs).score

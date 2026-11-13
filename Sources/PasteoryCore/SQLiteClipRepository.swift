@@ -1839,7 +1839,7 @@ extension SQLiteClipRepository {
                     }) { targetMap[cmd.targetID] = existing.id; createdAggregations[cmd.targetID] = existing }
                     else {
                         let aggregation = ClipAggregation(id: cmd.targetID, title: cmd.name, memberClipIDs: cmd.clipIDs,
-                                                          membershipMode: .automatic, origin: .condition(summary: "AI"))
+                                                          membershipMode: .fixed, origin: .condition(summary: "AI"))
                         createdAggregations[cmd.targetID] = aggregation; undo.createdAggregations.append(aggregation)
                     }
                 case .setSummary:

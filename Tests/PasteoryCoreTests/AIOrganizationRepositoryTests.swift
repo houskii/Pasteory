@@ -123,6 +123,7 @@ private func aiGrouping(_ clips: [Clip], group: UUID = UUID()) -> AIChangeSet {
     let summary = try #require(await repo.aiState().summaries[bundle])
     #expect(summary.sourceRevisions[a.id] == a.aiContentRevision)
     #expect(try await repo.aggregation(id: bundle)?.memberClipIDs.count == 2)
+    #expect(try await repo.aggregation(id: bundle)?.membershipMode == .fixed)
     var changed = try #require(await repo.clip(id: a.id)); changed.note = "New context"
     try await repo.updateExisting(changed)
     #expect(summary.sourceRevisions[a.id] != changed.aiContentRevision)

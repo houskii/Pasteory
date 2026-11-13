@@ -14,7 +14,7 @@ public enum AggregationOrigin: Codable, Hashable, Sendable {
         switch self {
         case .manual: L10n.tr("手动创建")
         case .search(let query): L10n.tr("来自搜索：\(query)")
-        case .condition(let summary): L10n.tr("自动条件：\(summary)")
+        case .condition(let summary): summary == "AI" ? L10n.tr("AI 整理生成") : L10n.tr("自动条件：\(summary)")
         }
     }
 }

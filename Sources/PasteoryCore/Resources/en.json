@@ -1017,5 +1017,6 @@
   "标准": "Standard",
   "保守": "Conservative",
   "自定义": "Custom",
-  "模型连接测试通过": "Model connection verified"
+  "模型连接测试通过": "Model connection verified",
+  "AI 整理生成": "Created by AI"
 }
