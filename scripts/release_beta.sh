@@ -30,7 +30,7 @@ if [[ "$version" == "$old_version" ]]; then
   [[ "$build" == "$old_build" ]]
   previous_tag=$(git describe --tags --abbrev=0 --match 'v[0-9]*' origin/main 2>/dev/null || true)
   if [[ -n "$previous_tag" ]]; then
-    previous_plist=$(git show "$previous_tag:Config/Info.plist")
+    previous_plist=$(git show "${previous_tag}:Config/Info.plist")
     old_version=$(print -r -- "$previous_plist" | plutil -extract CFBundleShortVersionString raw -o - -)
     old_build=$(print -r -- "$previous_plist" | plutil -extract CFBundleVersion raw -o - -)
   else

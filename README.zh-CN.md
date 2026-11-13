@@ -12,7 +12,7 @@ Pasteory 是一个本地优先的 macOS 剪贴板管理工具。文字、图片�
 
 按 **⌘⇧V** 打开快捷面板，搜索历史、切换分组，把之前复制过的内容粘贴到当前应用。
 
-![Pasteory 中文快捷面板，展示保存的文字、链接、代码、图片和文件](docs/screenshots/quick-panel-zh.png)
+<img src="docs/screenshots/quick-panel-zh.png" width="380" alt="Pasteory 中文快捷面板，展示保存的文字、链接、代码和图片">
 
 - **随时找回。** 按内容、标题、备注、分组或来源应用搜索。
 - **留下有用的片段。** 收藏、置顶、分组，或把相关内容聚合在一起；智能分组按规则自动收集内容。

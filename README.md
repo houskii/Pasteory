@@ -12,7 +12,7 @@ A local-first clipboard manager for macOS. Keep text, images, links, code, color
 
 Press **⌘⇧V** to open the Quick Panel. Search your history, switch groups, and paste a previous copy into the app you’re using.
 
-![Pasteory Quick Panel in English, showing saved text, a link, code, an image, and a file](docs/screenshots/quick-panel-en.png)
+<img src="docs/screenshots/quick-panel-en.png" width="380" alt="Pasteory Quick Panel in English with saved text, a link, code, and an image">
 
 - **Find it again.** Search content, titles, notes, groups, or the source app.
 - **Keep useful things close.** Favorite, pin, group, or stack related clips. Smart groups collect matching items automatically.

@@ -141,7 +141,7 @@ import Testing
     #expect(bundled.fileMetadata?.fileNames == ["first.hap", "second.txt"])
     #expect(bundled.fileMetadata?.filePaths == [firstURL.path, secondURL.path])
     #expect(bundled.identityKey == separate.identityKey)
-    #expect(separate.fileMetadata?.namesSummary == "first.hap、second.txt")
+    #expect(separate.fileMetadata?.namesSummary == "first.hap, second.txt")
 
     var legacy = bundled
     legacy.fileMetadata = nil
