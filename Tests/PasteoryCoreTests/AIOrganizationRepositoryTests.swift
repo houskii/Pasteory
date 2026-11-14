@@ -1,4 +1,5 @@
 import Foundation
+import SQLite3
 import PasteoryAI
 import Testing
 @testable import PasteoryCore
@@ -17,6 +18,41 @@ private func aiGrouping(_ clips: [Clip], group: UUID = UUID()) -> AIChangeSet {
     change.commands = [AICommand(kind: .createGroup, targetID: group, name: "Project", definition: "Project source materials"),
                        AICommand(kind: .addItems, targetID: group, clipIDs: clips.map(\.id))]
     return change
+}
+
+private func persistedAITimestamps(_ url: URL) throws -> [String: [Double?]] {
+    var database: OpaquePointer?
+    try #require(sqlite3_open_v2(url.path, &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK)
+    defer { sqlite3_close(database) }
+    var statement: OpaquePointer?
+    let sql = "SELECT id,created_at,updated_at,last_copied_at,last_pasted_at,last_used_at FROM clips;"
+    try #require(sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK)
+    defer { sqlite3_finalize(statement) }
+    var result: [String: [Double?]] = [:]
+    while sqlite3_step(statement) == SQLITE_ROW {
+        let id = String(cString: try #require(sqlite3_column_text(statement, 0)))
+        result[id] = (1...5).map { column in
+            sqlite3_column_type(statement, Int32(column)) == SQLITE_NULL ? nil : sqlite3_column_double(statement, Int32(column))
+        }
+    }
+    return result
+}
+
+@Test func aiGroupingAndUndoPreserveExactPersistedTimestamps() async throws {
+    let dirs = try aiDirectories(); defer { try? FileManager.default.removeItem(at: dirs.root) }
+    let repo = try SQLiteClipRepository(databaseURL: dirs.databaseFile)
+    let clips = (0..<64).map { index in
+        aiClip("Timestamp precision sample \(index)", at: Date(timeIntervalSince1970: 1_700_000_000 + Double(index) / 10_000_000))
+    }
+    try await repo.saveBatch(clips)
+    let before = try persistedAITimestamps(dirs.databaseFile)
+    let draft = aiGrouping(clips)
+    try await repo.applyAIChangeSet(draft)
+    #expect(try persistedAITimestamps(dirs.databaseFile) == before)
+    try await repo.recordHumanActivity(id: clips[0].id, event: .open, at: Date(timeIntervalSince1970: 1_700_000_010))
+    let afterHumanUse = try persistedAITimestamps(dirs.databaseFile)
+    try await repo.undoAIChangeSet(draft.id)
+    #expect(try persistedAITimestamps(dirs.databaseFile) == afterHumanUse)
 }
 
 @Test func aiApplyIsAtomicIdempotentAndUndoPreservesLaterHumanNotes() async throws {

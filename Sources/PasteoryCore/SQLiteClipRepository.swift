@@ -111,8 +111,13 @@ public actor SQLiteClipRepository: ClipRepository {
     }
 
     public func save(_ clip: Clip) throws {
+        try save(clip, preservingTimestamps: false)
+    }
+
+    private func save(_ clip: Clip, preservingTimestamps: Bool) throws {
         let oldMemberships = applyingIntelligence ? nil : try self.clip(id: clip.id)?.collectionIDs
         let payload = try encoder.encode(clip)
+        let timestampSource = preservingTimestamps ? "clips" : "excluded"
         let sql = """
         INSERT INTO clips (
           id, created_at, updated_at, last_copied_at, last_pasted_at, last_used_at, kind, title, note, priority,
@@ -120,8 +125,8 @@ public actor SQLiteClipRepository: ClipRepository {
           preview_text, content_hash, identity_key, byte_size, copy_count, deleted_at, payload_json
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
-          updated_at=excluded.updated_at, last_copied_at=excluded.last_copied_at,
-          last_pasted_at=excluded.last_pasted_at, last_used_at=excluded.last_used_at,
+          updated_at=\(timestampSource).updated_at, last_copied_at=\(timestampSource).last_copied_at,
+          last_pasted_at=\(timestampSource).last_pasted_at, last_used_at=\(timestampSource).last_used_at,
           kind=excluded.kind, title=excluded.title, note=excluded.note,
           priority=excluded.priority, favorite=excluded.favorite, pinned=excluded.pinned,
           archived=excluded.archived, source_name=excluded.source_name,
@@ -1869,7 +1874,7 @@ extension SQLiteClipRepository {
             }
             for id in changedClips {
                 guard let clip = clipsByID[id] else { continue }
-                try save(clip); undo.afterMemberships[id] = clip.collectionIDs
+                try save(clip, preservingTimestamps: true); undo.afterMemberships[id] = clip.collectionIDs
             }
             for aggregation in undo.createdAggregations { _ = try saveAggregation(aggregation) }
             var applied = proposed; applied.isApplied = true
@@ -1904,7 +1909,7 @@ extension SQLiteClipRepository {
             defer { applyingIntelligence = oldApplying }
             for (clipID, memberships) in undo.beforeMemberships {
                 guard var current = try clip(id: clipID) else { throw AIError.conflict("Content was removed") }
-                current.collectionIDs = memberships; try save(current)
+                current.collectionIDs = memberships; try save(current, preservingTimestamps: true)
             }
             for groupID in undo.createdGroupIDs { try removeCollection(id: groupID); state.groups.removeValue(forKey: groupID) }
             for (groupID, profile) in undo.beforeGroups { state.groups[groupID] = profile }
