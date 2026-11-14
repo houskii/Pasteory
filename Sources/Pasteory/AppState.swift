@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import PasteoryCore
+import PasteoryAI
 
 enum QuickScope: Hashable {
     case all
@@ -87,6 +88,7 @@ final class AppState: ObservableObject {
     @Published var storageAnalyticsLoading = false
 
     let settings: AppSettings
+    let intelligence: AIOrganizationController
     let repository: any ClipRepository
     let attachments: AttachmentStore
     let quickTextActions: QuickTextActionCoordinator
@@ -105,6 +107,7 @@ final class AppState: ObservableObject {
     private var appliedLibraryFilter: ClipFilter = .all
     private var statusDismissTask: Task<Void, Never>?
     private var settingsObservation: AnyCancellable?
+    private var intelligenceObservation: AnyCancellable?
     private var storageAnalyticsRequest = UUID()
     private var storageAnalyticsRequestedPeriod: StorageAnalyticsPeriod?
     private let classificationPipeline = ClipClassificationPipeline()
@@ -125,6 +128,7 @@ final class AppState: ObservableObject {
         self.backup = backup
         self.storageAnalyticsService = storageAnalyticsService
         self.settings = settings
+        self.intelligence = AIOrganizationController(repository: repository, settings: settings)
         self.linkResolutionService = linkResolutionService
         let cache = WebCacheMaintenance(settings: settings, measure: {
             await storageAnalyticsService.webKitNetworkCacheBytes()
@@ -138,6 +142,15 @@ final class AppState: ObservableObject {
         self.settingsObservation = settings.objectWillChange.sink { [weak self] in
             Task { @MainActor in self?.objectWillChange.send() }
         }
+        self.intelligenceObservation = intelligence.objectWillChange.sink { [weak self] in
+            Task { @MainActor in self?.objectWillChange.send() }
+        }
+        intelligence.onApplied = { [weak self] in
+            Task { @MainActor in
+                await self?.refreshCollections(); await self?.refreshLibrary()
+                await self?.refreshQuick(); await self?.refreshAggregations()
+            }
+        }
     }
 
     var selectedClip: Clip? { clips.first(where: { $0.id == selectedClipID }) ?? quickClips.first(where: { $0.id == selectedClipID }) }
@@ -145,9 +158,20 @@ final class AppState: ObservableObject {
     var selectedAggregation: ClipAggregation? { aggregations.first { $0.id == selectedAggregationID } }
     var quickSelectedAggregation: ClipAggregation? { aggregations.first { $0.id == quickSelectedAggregationID } }
     var quickTabs: [QuickTab] {
-        [QuickTab(scope: .all, title: L10n.tr("全部"), symbol: "clock")] + collections.map {
+        [QuickTab(scope: .all, title: L10n.tr("全部"), symbol: "clock")] + collections.filter {
+            guard settings.aiConfiguration.lifecycleEnabled, let profile = intelligence.state.groups[$0.id] else { return true }
+            return profile.retained || intelligence.groupActivity(profile).stage != .archived
+        }.map {
             QuickTab(scope: .collection($0.id), title: $0.name, symbol: $0.kind == .smart ? "sparkles" : "folder")
         }
+    }
+
+    func recordHumanUse(_ clip: Clip, event: ContentActivity.Event) async {
+        do {
+            try await repository.recordHumanActivity(id: clip.id, event: event, at: Date())
+            if let updated = try await repository.clip(id: clip.id) { replaceLocal(updated); intelligence.synchronize(updated) }
+            if event == .copy { intelligence.contentChanged(clip.id) }
+        } catch { show(error) }
     }
 
     func bootstrap(processExistingClips: Bool = true) async {
@@ -164,7 +188,10 @@ final class AppState: ObservableObject {
         await refreshQuickStats()
         await refreshLinkResolutionData()
         guard processExistingClips else { return }
-        Task.detached(priority: .utility) { [archive] in _ = try? await archive.run() }
+        await intelligence.bootstrap()
+        if !settings.aiConfiguration.lifecycleEnabled {
+            Task.detached(priority: .utility) { [archive] in _ = try? await archive.run() }
+        }
         Task { [weak self] in
             await self?.prepareExistingLinkFallbacks()
             await self?.refreshRecentLinkCaches()
@@ -210,6 +237,8 @@ final class AppState: ObservableObject {
               !clip.previewText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         do {
             let stored = try await repository.saveCaptured(clip, context: capture.sourceContext)
+            intelligence.synchronize(stored)
+            intelligence.contentChanged(stored.id)
             replaceLocal(stored)
             quickClips.removeAll { $0.id == stored.id }
             quickClips.insert(stored, at: 0)
@@ -217,7 +246,7 @@ final class AppState: ObservableObject {
             quickClips = SearchRanker.rank(quickClips, query: quickQuery)
             await refreshLibrary()
             await refreshQuickStats()
-            if try await repository.activeClipCount() > RetentionPolicy.default.maximumHotClips {
+            if !settings.aiConfiguration.lifecycleEnabled, try await repository.activeClipCount() > RetentionPolicy.default.maximumHotClips {
                 Task.detached(priority: .utility) { [archive] in _ = try? await archive.run() }
             }
             Task { [weak self, linkResolutionService] in
@@ -727,9 +756,16 @@ final class AppState: ObservableObject {
     }
 
     func update(_ clip: Clip) {
-        replaceLocal(clip)
+        var changed = clip
+        if let previous = clips.first(where: { $0.id == clip.id }) ?? quickClips.first(where: { $0.id == clip.id }),
+           previous.title != clip.title || previous.note != clip.note || previous.previewText != clip.previewText {
+            var activity = previous.activity; activity.record(.edit)
+            changed.intelligenceActivity = activity; changed.lifecycleEvaluation = nil
+        }
+        let value = changed
+        replaceLocal(value)
         Task {
-            do { try await repository.updateExisting(clip) }
+            do { try await repository.updateExisting(value); intelligence.synchronize(value); intelligence.contentChanged(value.id) }
             catch { show(error) }
         }
     }
@@ -741,6 +777,7 @@ final class AppState: ObservableObject {
                 return false
             }
             replaceLocal(updated)
+            intelligence.synchronize(updated)
             await refreshLibrary()
             await refreshQuick()
             await refreshAggregations()
@@ -957,9 +994,15 @@ final class AppState: ObservableObject {
         catch { show(error); return [] }
     }
 
-    func runArchive() async {
+    func runArchive(automatic: Bool = false) async {
         guard !isBusy else { return }
         isBusy = true; defer { isBusy = false }
+        if settings.aiConfiguration.lifecycleEnabled {
+            if !automatic || settings.aiConfiguration.automaticCompression { await intelligence.compress(groupID: nil) }
+            do { _ = try await repository.purgeTrash(olderThan: Date().addingTimeInterval(-30 * 86_400)) }
+            catch { show(error) }
+            return
+        }
         do { let count = try await archive.run(); presentStatus(count > 0 ? L10n.tr("已归档 \(count) 条内容") : L10n.tr("当前没有需要归档的内容")); await refreshLibrary(); await refreshQuick(); await refreshQuickStats() }
         catch { show(error) }
     }

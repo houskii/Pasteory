@@ -51,6 +51,12 @@ capture update-cyan-dark --debug-show-quick-window --debug-update-available --de
 capture settings-library-wide --debug-open-library --debug-settings-wide
 capture settings-library-narrow --debug-open-library --debug-settings-narrow
 capture settings-about --debug-open-settings --debug-settings-about
+capture settings-ai-zh --debug-language=zh-Hans --debug-open-settings --debug-settings-ai
+capture settings-ai-en --debug-language=en --debug-open-settings --debug-settings-ai
+capture settings-ai-lifecycle-zh --debug-language=zh-Hans --debug-open-settings --debug-settings-ai --debug-ai-lifecycle
+capture settings-ai-analysis-zh --debug-language=zh-Hans --debug-open-settings --debug-settings-ai --debug-ai-analysis
+capture settings-ai-usage-zh --debug-language=zh-Hans --debug-open-settings --debug-settings-ai --debug-ai-usage --debug-ai-seed
+capture library-ai-zh --debug-language=zh-Hans --debug-open-library --debug-settings-wide --debug-ai-seed
 capture update-confirmation-zh --debug-language=zh-Hans --debug-update-available --debug-open-update
 capture update-confirmation --debug-update-available --debug-open-update
 

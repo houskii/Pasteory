@@ -1,4 +1,5 @@
 import Foundation
+import PasteoryAI
 
 public enum ClipKind: String, Codable, CaseIterable, Hashable, Sendable {
     case text, image, link, color, code, file, mixed
@@ -418,6 +419,9 @@ public struct Clip: Codable, Hashable, Identifiable, Sendable {
     public var fileMetadata: FileClipMetadata?
     public var automaticTitle: String?
     public var quickTextTransformations: [QuickTextTransformation]?
+    public var intelligenceActivity: ContentActivity?
+    public var aiAnalysisExcluded: Bool?
+    public var lifecycleEvaluation: ActivityEvaluation?
 
     public init(
         id: UUID = UUID(),
@@ -476,6 +480,9 @@ public struct Clip: Codable, Hashable, Identifiable, Sendable {
         self.codeMetadata = codeMetadata
         self.fileMetadata = fileMetadata
         self.automaticTitle = automaticTitle
+        self.intelligenceActivity = nil
+        self.aiAnalysisExcluded = nil
+        self.lifecycleEvaluation = nil
         self.quickTextTransformations = quickTextTransformations
     }
 
@@ -486,7 +493,9 @@ public struct Clip: Codable, Hashable, Identifiable, Sendable {
     }
 
     public var recordedPasteCount: Int { pasteCount ?? 0 }
-    public var lastUsedAt: Date { max(lastCopiedAt, lastPastedAt ?? lastCopiedAt) }
+    public var lastUsedAt: Date {
+        max(max(lastCopiedAt, lastPastedAt ?? lastCopiedAt), intelligenceActivity?.lastUsedAt ?? .distantPast)
+    }
     public var deduplicationKey: String { identityKey ?? "legacy:\(contentHash)" }
     public var effectiveFileMetadata: FileClipMetadata? {
         if let fileMetadata { return fileMetadata }

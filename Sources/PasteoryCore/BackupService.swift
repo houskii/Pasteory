@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import PasteoryAI
 
 public struct BackupManifest: Codable, Sendable {
     public var formatVersion: Int
@@ -9,6 +10,7 @@ public struct BackupManifest: Codable, Sendable {
     public var captureEventCount: Int?
     public var fallbackRuleCount: Int?
     public var aggregationCount: Int?
+    public var collectionCount: Int?
     public var fileChecksums: [String: String]
 }
 
@@ -34,6 +36,7 @@ public actor BackupService {
         let captureEvents = try await repository.allCaptureEvents()
         let fallbackRules = try await repository.userFallbackRules()
         let aggregations = try await repository.aggregations()
+        let collections = try await repository.collections()
         let clipsURL = destination.appendingPathComponent("clips.jsonl")
         var lines = Data()
         for clip in clips {
@@ -62,6 +65,19 @@ public actor BackupService {
         }
         try aggregationLines.write(to: aggregationsURL, options: .atomic)
         checksums["aggregations.jsonl"] = digest(aggregationLines)
+        let collectionBytes = try encoder.encode(collections)
+        try collectionBytes.write(to: destination.appendingPathComponent("collections.json"), options: .atomic)
+        checksums["collections.json"] = digest(collectionBytes)
+        var aiState = try await repository.aiState()
+        // Undo snapshots are tied to a particular database. Restored organization
+        // is retained without offering an undo whose transaction was not backed up.
+        aiState.changes = []; aiState.checkpoint = nil
+        let aiBytes = try encoder.encode(aiState)
+        try aiBytes.write(to: destination.appendingPathComponent("ai-state.json"), options: .atomic)
+        checksums["ai-state.json"] = digest(aiBytes)
+        let aiFolder = destination.appendingPathComponent("ai-content", isDirectory: true)
+        try await repository.exportAIContent(to: aiFolder)
+        checksums.merge(try archiveChecksums(in: aiFolder, relativeTo: destination)) { _, new in new }
         let dataFolder = destination.appendingPathComponent("data", isDirectory: true)
         for clip in clips {
             for item in clip.items {
@@ -72,22 +88,29 @@ public actor BackupService {
                     case .attachment(let relative, _, _): pair = (directories.attachments.appendingPathComponent(relative), "Attachments/\(relative)")
                     case .archived(let relative, _, _): pair = (directories.archives.appendingPathComponent(relative), "Archives/\(relative)")
                     }
-                    guard let (source, relative) = pair, fileManager.fileExists(atPath: source.path) else { continue }
+                    guard let (source, relative) = pair else { continue }
+                    guard safePath(relative, under: dataFolder) != nil else { throw StorageError.invalidArchive }
                     let target = dataFolder.appendingPathComponent(relative)
                     try fileManager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
-                    if !fileManager.fileExists(atPath: target.path) { try fileManager.copyItem(at: source, to: target) }
-                    checksums["data/\(relative)"] = digest(try Data(contentsOf: source))
+                    if !fileManager.fileExists(atPath: target.path) {
+                        if fileManager.fileExists(atPath: source.path) { try fileManager.copyItem(at: source, to: target) }
+                        else if case .attachment = representation.storage {
+                            try AttachmentStore.loadData(for: representation, storageRoot: directories.root).write(to: target, options: .atomic)
+                        } else { throw StorageError.invalidArchive }
+                    }
+                    checksums["data/\(relative)"] = digest(try Data(contentsOf: target))
                 }
             }
         }
         let manifest = BackupManifest(
-            formatVersion: 4,
+            formatVersion: 5,
             appVersion: "0.1.6",
             exportedAt: Date(),
             clipCount: clips.count,
             captureEventCount: captureEvents.count,
             fallbackRuleCount: fallbackRules.count,
             aggregationCount: aggregations.count,
+            collectionCount: collections.count,
             fileChecksums: checksums
         )
         try encoder.encode(manifest).write(to: destination.appendingPathComponent("manifest.json"), options: .atomic)
@@ -96,9 +119,10 @@ public actor BackupService {
     @discardableResult
     public func importBackup(from source: URL) async throws -> Int {
         let manifest = try decoder.decode(BackupManifest.self, from: Data(contentsOf: source.appendingPathComponent("manifest.json")))
-        guard (1...4).contains(manifest.formatVersion) else { throw StorageError.invalidArchive }
+        guard (1...5).contains(manifest.formatVersion) else { throw StorageError.invalidArchive }
         for (relative, expected) in manifest.fileChecksums {
-            let data = try Data(contentsOf: source.appendingPathComponent(relative))
+            guard let path = safePath(relative, under: source) else { throw StorageError.invalidArchive }
+            let data = try Data(contentsOf: path)
             guard digest(data) == expected else { throw StorageError.checksumMismatch }
         }
         let clipsData = try Data(contentsOf: source.appendingPathComponent("clips.jsonl"))
@@ -116,11 +140,33 @@ public actor BackupService {
                     case .archived(let relative, _, _): pair = ("Archives/\(relative)", directories.archives.appendingPathComponent(relative))
                     }
                     guard let (relative, target) = pair else { continue }
-                    let origin = dataFolder.appendingPathComponent(relative)
+                    guard let origin = safePath(relative, under: dataFolder),
+                          safePath(relative, under: directories.root) != nil,
+                          manifest.fileChecksums["data/" + relative] != nil else { throw StorageError.invalidArchive }
                     guard fileManager.fileExists(atPath: origin.path) else { throw StorageError.invalidArchive }
                     try fileManager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
                     if !fileManager.fileExists(atPath: target.path) { try fileManager.copyItem(at: origin, to: target) }
+                    else if digest(try Data(contentsOf: target)) != digest(try Data(contentsOf: origin)) { throw StorageError.checksumMismatch }
                 }
+            }
+        }
+        if manifest.formatVersion >= 5 {
+            let collections = try decoder.decode([ClipCollection].self, from: Data(contentsOf: source.appendingPathComponent("collections.json")))
+            var existing = try await repository.collections()
+            for var collection in collections where !existing.contains(where: { $0.id == collection.id }) {
+                let base = String(collection.name.prefix(25)); var suffix = 1
+                while existing.contains(where: { $0.name.caseInsensitiveCompare(collection.name) == .orderedSame }) {
+                    collection.name = "\(base) (\(suffix))"; suffix += 1
+                }
+                try await repository.saveCollection(collection); existing.append(collection)
+            }
+        } else {
+            // Older formats stored memberships without exporting collection rows.
+            // Recover their identities before inserting clips with foreign keys.
+            let existing = Set(try await repository.collections().map(\.id))
+            let missing = Set(clips.flatMap(\.collectionIDs)).subtracting(existing)
+            for id in missing.sorted(by: { $0.uuidString < $1.uuidString }) {
+                try await repository.saveCollection(ClipCollection(id: id, name: "Recovered " + id.uuidString, kind: .normal, sortOrder: 0))
             }
         }
         try await repository.saveBatch(clips)
@@ -149,8 +195,56 @@ public actor BackupService {
             }
             for aggregation in aggregations { _ = try await repository.saveAggregation(aggregation) }
         }
+        if manifest.formatVersion >= 5 {
+            // Publish the owner manifest after the logical clips exist. Background
+            // garbage collection must never see newly imported payloads as orphans.
+            let aiFolder = source.appendingPathComponent("ai-content")
+            if fileManager.fileExists(atPath: aiFolder.appendingPathComponent("manifest.json").path) {
+                try await repository.importAIContent(from: aiFolder)
+            }
+            let imported = try decoder.decode(AIOrganizationState.self, from: Data(contentsOf: source.appendingPathComponent("ai-state.json")))
+            let restoredClips = try await repository.allClips()
+            let restoredCollections = try await repository.collections()
+            let restoredAggregations = Set(try await repository.aggregations().map(\.id))
+            let clipIndex = Dictionary(uniqueKeysWithValues: restoredClips.map { ($0.id, $0) })
+            try await repository.updateAIState { state in
+                for (id, var group) in imported.groups where state.groups[id] == nil {
+                    guard let collection = restoredCollections.first(where: { $0.id == id }) else { continue }
+                    group.name = collection.name
+                    group.memberIDs = Set(restoredClips.filter { $0.collectionIDs.contains(id) }.map(\.id))
+                    group.aiMemberIDs.formIntersection(group.memberIDs)
+                    state.groups[id] = group
+                }
+                for (id, summary) in imported.summaries where state.summaries[id] == nil && restoredAggregations.contains(id) {
+                    if summary.sourceRevisions.allSatisfy({ clipIndex[$0.key]?.aiContentRevision == $0.value }) { state.summaries[id] = summary }
+                }
+                let known = Set(state.usage.map(\.id)); state.usage += imported.usage.filter { !known.contains($0.id) }
+            }
+        }
         return clips.count
     }
 
     private func digest(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
+
+    private func archiveChecksums(in folder: URL, relativeTo root: URL) throws -> [String: String] {
+        var result = [String: String]()
+        let prefix = root.resolvingSymlinksInPath().path + "/"
+        if let files = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isRegularFileKey]) {
+            for case let file as URL in files where (try file.resourceValues(forKeys: [.isRegularFileKey])).isRegularFile == true {
+                let path = file.resolvingSymlinksInPath().path
+                guard path.hasPrefix(prefix) else { throw StorageError.invalidArchive }
+                result[String(path.dropFirst(prefix.count))] = digest(try Data(contentsOf: file))
+            }
+        }
+        return result
+    }
+
+    private func safePath(_ relative: String, under root: URL) -> URL? {
+        let components = relative.components(separatedBy: "/")
+        guard !relative.hasPrefix("/"), components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." && !$0.contains("\\") }) else { return nil }
+        let result = root.appendingPathComponent(relative)
+        let prefix = root.resolvingSymlinksInPath().path + "/"
+        guard result.resolvingSymlinksInPath().path.hasPrefix(prefix) else { return nil }
+        return result
+    }
 }
