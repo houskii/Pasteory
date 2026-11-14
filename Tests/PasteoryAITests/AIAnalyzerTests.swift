@@ -15,6 +15,18 @@ private actor UsageCollector {
     func append(_ record: AIUsageRecord) { records.append(record) }
 }
 
+@Test func recentAnalysisAcceptsOneThousandClipsAndKeepsBatchesBounded() throws {
+    var configuration = AIConfiguration()
+    configuration.model = "test-model"
+    configuration.topN = 1000
+    try configuration.validate()
+    #expect(configuration.batchSize == 50)
+    let restored = try JSONDecoder().decode(AIConfiguration.self, from: JSONEncoder().encode(configuration))
+    #expect(restored.topN == 1000)
+    configuration.topN = 1001
+    #expect(throws: AIError.self) { try configuration.validate() }
+}
+
 @Test func analyzerRunsAtomicToolsAndRecordsProviderTokenSubsets() async throws {
     let doc = aiTestDoc(), groupID = UUID()
     let transport = ScriptedTransport { _, index in

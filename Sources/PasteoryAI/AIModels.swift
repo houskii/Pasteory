@@ -61,7 +61,7 @@ public struct AIConfiguration: Codable, Equatable, Sendable {
     public func validate() throws {
         _ = try validatedEndpoint()
         guard !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, model.count <= 256,
-              prompt.utf8.count <= 16_384, (1...500).contains(topN), (1...100).contains(batchSize),
+              prompt.utf8.count <= 16_384, (1...1000).contains(topN), (1...100).contains(batchSize),
               (1...1440).contains(intervalMinutes), dailyTokenLimit >= 1000,
               (1...1000).contains(dailyAutomaticRuns), (1000...128_000).contains(maxInputTokens),
               (256...16_384).contains(maxOutputTokens), (1...12).contains(maxToolRounds) else {

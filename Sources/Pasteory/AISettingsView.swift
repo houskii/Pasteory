@@ -131,7 +131,7 @@ struct AISettingsView: View {
     private var analysis: some View {
         VStack(alignment: .leading, spacing: 16) {
             AISettingsCard(title: L10n.tr("分析范围与触发")) {
-                Stepper(value: $draft.topN, in: 1...500, step: 10) { Text(L10n.tr("最近内容 Top N：\(draft.topN)")) }
+                Stepper(value: $draft.topN, in: 1...1000, step: 10) { Text(L10n.tr("最近内容 Top N：\(draft.topN)")) }
                 Stepper(value: $draft.batchSize, in: 1...100, step: 5) { Text(L10n.tr("每批最多：\(draft.batchSize) 条")) }
                 Text(L10n.tr("按最近复制时间取不同内容。全库任务也按批次处理，保存进度；不会一次发送整个资料库。"))
                     .font(.caption).foregroundStyle(.secondary)
