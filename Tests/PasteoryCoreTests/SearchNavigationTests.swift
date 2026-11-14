@@ -1,5 +1,6 @@
 import Foundation
 import PasteoryCore
+import PasteoryAI
 import Testing
 @testable import Pasteory
 
@@ -35,6 +36,29 @@ private func searchClip(_ text: String, timestamp: TimeInterval) throws -> Clip 
         source: ClipSource(appName: "Search Tests", bundleIdentifier: "test.search", confidence: .high),
         capturedAt: Date(timeIntervalSince1970: timestamp)
     )))
+}
+
+@Test @MainActor func startupWithoutMaintenanceLoadsPersistedAIGroups() async throws {
+    try await withSearchState { state, repository in
+        let clip = try searchClip("Saved AI topic member", timestamp: 200)
+        try await repository.saveBatch([clip])
+        let groupID = UUID()
+        var draft = AIChangeSet()
+        draft.clipRevisions = [clip.id: clip.aiRevision]
+        draft.commands = [
+            AICommand(kind: .createGroup, targetID: groupID, name: "Saved topic", definition: "A persisted topic"),
+            AICommand(kind: .addItems, targetID: groupID, clipIDs: [clip.id])
+        ]
+        try await repository.applyAIChangeSet(draft)
+
+        await state.bootstrap(processExistingClips: false)
+
+        #expect(state.intelligence.state.groups[groupID]?.memberIDs == [clip.id])
+        #expect(state.intelligence.clipIndex[clip.id]?.collectionIDs == [groupID])
+        #expect(state.intelligence.state.usage.isEmpty)
+        #expect(!state.intelligence.running)
+        #expect(try await repository.clip(id: clip.id)?.isArchived == false)
+    }
 }
 
 @Test @MainActor func quickSearchSelectsFirstVisibleResultWhenPreviousSelectionStillMatches() async throws {

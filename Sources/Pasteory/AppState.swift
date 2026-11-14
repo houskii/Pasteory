@@ -187,7 +187,11 @@ final class AppState: ObservableObject {
         await refreshAggregations()
         await refreshQuickStats()
         await refreshLinkResolutionData()
-        guard processExistingClips else { return }
+        guard processExistingClips else {
+            do { try await intelligence.reload() }
+            catch { show(error) }
+            return
+        }
         await intelligence.bootstrap()
         if !settings.aiConfiguration.lifecycleEnabled {
             Task.detached(priority: .utility) { [archive] in _ = try? await archive.run() }

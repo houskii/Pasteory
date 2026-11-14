@@ -162,10 +162,11 @@ private func aiGrouping(_ clips: [Clip], group: UUID = UUID()) -> AIChangeSet {
     let draft = aiGrouping([first]), id = draft.commands[0].targetID
     try await repo.applyAIChangeSet(draft)
     second.collectionIDs = [id]; try await repo.updateExisting(second)
+    let persistedActivity = try #require(await repo.clip(id: second.id)).activity.lastUsedAt
     #expect(try await repo.consolidateDuplicateClips() == 1)
     let merged = try #require(await repo.clip(id: first.id))
     #expect(merged.aiAnalysisExcluded == true)
-    #expect(merged.activity.lastUsedAt >= second.lastUsedAt)
+    #expect(merged.activity.lastUsedAt >= persistedActivity)
     let profile = try #require(await repo.aiState().groups[id])
     #expect(profile.memberIDs == [first.id] && profile.aiMemberIDs.isEmpty)
 }
