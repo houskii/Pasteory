@@ -1613,7 +1613,7 @@ private struct QuickMetadataEditor: View {
         VStack(alignment: .leading, spacing: 5) {
             HStack { Text(L10n.tr("备注")); Spacer(); Text("\(note.count)/4000").foregroundStyle(.tertiary) }
                 .font(.caption)
-            TextEditor(text: Binding(get: { note }, set: { note = String($0.prefix(4_000)) }))
+            TextEditor(text: Binding(get: { note }, set: { note = String($0.prefix(64_000)) }))
                 .frame(height: 90)
                 .padding(6)
                 .focused($focusedField, equals: .note)

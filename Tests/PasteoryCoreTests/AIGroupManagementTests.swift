@@ -15,7 +15,10 @@ private func addManagementGroup(_ clips: [Clip], name: String, repo: SQLiteClipR
     let id = UUID(); var draft = AIChangeSet()
     let current = try await repo.clips(ids: clips.map(\.id))
     draft.clipRevisions = Dictionary(uniqueKeysWithValues: current.map { ($0.id, $0.aiRevision) })
-    draft.commands = [.init(kind: .createGroup, targetID: id, name: name, definition: name + " definition"), .init(kind: .addItems, targetID: id, clipIDs: clips.map(\.id))]
+    draft.commands = [.init(kind: .createGroup, targetID: id, name: name, definition: name + " definition")]
+    for offset in stride(from: 0, to: clips.count, by: 100) {
+        draft.commands.append(.init(kind: .addItems, targetID: id, clipIDs: clips[offset..<min(offset + 100, clips.count)].map(\.id)))
+    }
     try await repo.applyAIChangeSet(draft); return id
 }
 
@@ -130,7 +133,9 @@ private actor RegroupTransport: AIChatTransport {
                 var themes = try existing.map { theme -> JSONValue in
                     .object(["group_id": .string(try #require(theme["group_id"].string)), "name": .string(try #require(theme["name"].string)), "definition": .string(try #require(theme["definition"].string)), "support_ids": .array([])])
                 }
-                for (name, start) in [("主题一", 0), ("主题二", 3)] {
+                let labels = ["主题一", "主题二", "主题三", "主题四", "主题五", "主题六"]
+                for (index, name) in labels.prefix(examples.count >= 18 ? 6 : 2).enumerated() {
+                    let start = index * 3
                     themes.append(.object(["group_id": .null, "name": .string(name), "definition": .string(name + " synthetic"), "support_ids": .array(try examples[start..<start+3].map { .string(try #require($0["id"].string)) })]))
                 }
                 if invalidPlanningAttempts > 0 { invalidPlanningAttempts -= 1; themes = [] }
@@ -283,4 +288,58 @@ private actor RegroupTransport: AIChatTransport {
     await controller.undo()
     #expect(controller.state.groups == original)
     #expect(try await repo.clip(id: clips.last!.id)?.collectionIDs.isEmpty == true)
+}
+
+@Test @MainActor func recentRegroupUsesTopNIncludingUngroupedItemsAndCachesMetadataAcrossReloads() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("AIRegroupRecent-" + UUID().uuidString)
+    let dirs = try AppDirectories(root: root); defer { try? FileManager.default.removeItem(at: root) }
+    let suite = "AIRegroupRecent." + UUID().uuidString, defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let repo = try SQLiteClipRepository(databaseURL: dirs.databaseFile), settings = AppSettings(defaults: defaults)
+    settings.aiConfiguration.enabled = true; settings.aiConfiguration.model = "synthetic-model"
+    settings.aiConfiguration.topN = 6
+    let clips = try (0..<9).map { try managementClip("Recent synthetic \($0)", timestamp: 1_700_000_000 + Double($0)) }
+    try await repo.saveBatch(clips)
+    let oldID = try await addManagementGroup(Array(clips.prefix(4)), name: "Old topic", repo: repo)
+    let transport = RegroupTransport(), controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic" })
+    try await controller.reload(); let original = controller.state.groups
+    #expect(controller.groupedContentCount == 4 && controller.recentRegroupIDs.count == 6)
+    #expect(controller.regroupLibrary(recentOnly: true)); await controller.waitUntilIdle()
+    #expect(controller.error == nil)
+    #expect(Set(await transport.batches.flatMap { $0 }) == Set(clips.suffix(6).map(\.id)))
+    let draft = try #require(controller.pending)
+    #expect(draft.inputCount == 6 && draft.userSelectedGroupIDs == [oldID])
+    #expect(controller.state.groups == original)
+    for _ in 0..<3 { try await controller.reload() }
+    #expect(await repo.metadataCacheBuildCount() == 1)
+    await controller.apply(draft, selectedIDs: Set(draft.commands.map(\.id)))
+    #expect(controller.error == nil && controller.state.groups[oldID] == nil)
+    #expect(try await repo.clip(id: clips[0].id)?.collectionIDs.isEmpty == true)
+    await controller.undo()
+    #expect(controller.state.groups == original)
+    #expect(await repo.metadataCacheBuildCount() == 1)
+}
+
+@Test @MainActor func topOneThousandRegroupCheckpointIsNotLimitedTo321ExistingMembers() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("AIRegroup1000-" + UUID().uuidString)
+    let dirs = try AppDirectories(root: root); defer { try? FileManager.default.removeItem(at: root) }
+    let suite = "AIRegroup1000." + UUID().uuidString, defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let repo = try SQLiteClipRepository(databaseURL: dirs.databaseFile), settings = AppSettings(defaults: defaults)
+    settings.aiConfiguration.enabled = true; settings.aiConfiguration.model = "synthetic-model"; settings.aiConfiguration.topN = 1000
+    let clips = try (0..<1005).map { try managementClip("Top 1000 synthetic \($0)", timestamp: 1_700_000_000 + Double($0)) }
+    try await repo.saveBatch(clips)
+    _ = try await addManagementGroup(Array(clips.prefix(321)), name: "Existing 321", repo: repo)
+    let transport = RegroupTransport(delayAfterFirstBatch: true)
+    let controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic" })
+    try await controller.reload(); let groups = controller.state.groups
+    #expect(controller.groupedContentCount == 321)
+    #expect(controller.regroupLibrary(recentOnly: true))
+    for _ in 0..<300 { if await transport.batches.count >= 2 { break }; try await Task.sleep(for: .milliseconds(10)) }
+    controller.pause(); await controller.waitUntilIdle()
+    let checkpoint = try #require(controller.state.checkpoint)
+    #expect(checkpoint.clipIDs.count == 1000 && Set(checkpoint.clipIDs) == Set(clips.suffix(1000).map(\.id)))
+    #expect(checkpoint.cursor == 20 && checkpoint.organization?.trigger == "manual-regroup-recent")
+    #expect(controller.state.groups == groups)
+    #expect(await repo.metadataCacheBuildCount() == 1)
 }

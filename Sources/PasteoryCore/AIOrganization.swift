@@ -12,13 +12,13 @@ public extension Clip {
     var aiRevision: String {
         AIHash.fingerprint([id.uuidString, contentHash, title, automaticTitle ?? "", note, primaryKind.rawValue,
                             previewText, source.appName, collectionIDs.map(\.uuidString).sorted().joined(separator: ","),
-                            aiAnalysisExcluded == true ? "excluded" : "allowed", deletedAt == nil ? "present" : "deleted"])
+                            aiAnalysisExcluded == true ? "excluded" : "allowed", deletedAt == nil ? "present" : "deleted"] + (recognizedImageText.isEmpty ? [] : [recognizedImageText]))
     }
     var aiContentRevision: String {
         AIHash.fingerprint([id.uuidString, contentHash, title, automaticTitle ?? "", note, primaryKind.rawValue, previewText,
-                            deletedAt == nil ? "present" : "deleted"])
+                            deletedAt == nil ? "present" : "deleted"] + (recognizedImageText.isEmpty ? [] : [recognizedImageText]))
     }
-    func aiDocument(includeNotes: Bool, includeSource: Bool, body: String? = nil) -> AIClipDocument {
+    func aiDocument(includeNotes: Bool, includeSource: Bool, includeImageText: Bool = false, body: String? = nil) -> AIClipDocument {
         var text = body ?? previewText
         var metadataOnly = false
         if primaryKind == .link, var url = URLComponents(string: text.trimmingCharacters(in: .whitespacesAndNewlines)), url.host != nil {
@@ -26,8 +26,12 @@ public extension Clip {
         }
         if primaryKind == .file { text = effectiveFileMetadata?.fileNames.joined(separator: "\n") ?? "File metadata only"; metadataOnly = true }
         if primaryKind == .image || primaryKind == .mixed { text = "Metadata only; source bytes were not provided."; metadataOnly = true }
+        if includeImageText, !recognizedImageText.isEmpty {
+            text = (metadataOnly ? "" : text + "\n") + "[Local image OCR]\n" + recognizedImageText
+            metadataOnly = false
+        }
         return AIClipDocument(id: id, revision: aiRevision, title: displayTitle, body: text,
-                              note: includeNotes ? note : "", source: includeSource ? source.appName : "",
+                              note: includeNotes ? (includeImageText ? note : noteWithoutAutomaticOCR) : "", source: includeSource ? source.appName : "",
                               kind: primaryKind.rawValue, copiedAt: lastCopiedAt,
                               groupIDs: collectionIDs.sorted { $0.uuidString < $1.uuidString },
                               truncated: metadataOnly || items.isEmpty || items.flatMap(\.representations).contains {
@@ -36,7 +40,7 @@ public extension Clip {
     }
     var mayParticipateInAI: Bool {
         guard deletedAt == nil, aiAnalysisExcluded != true else { return false }
-        return Self.isSafeAIText([displayTitle, previewText, note].joined(separator: "\n"))
+        return Self.isSafeAIText([displayTitle, previewText, noteWithoutAutomaticOCR].joined(separator: "\n"))
     }
     static func isSafeAIText(_ text: String) -> Bool {
         let patterns = [#"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"#,

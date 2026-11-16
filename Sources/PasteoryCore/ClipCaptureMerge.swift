@@ -14,7 +14,13 @@ public extension Clip {
         result.source = incoming.source
         result.isArchived = false; result.archivePath = nil
         result.previewText = incoming.previewText
+        let previousHash = result.contentHash
         result.contentHash = incoming.contentHash
+        // Deduplication can match the same pixels in a different pasteboard format.
+        // Keep the user's OCR edits and sharing marker with that semantic identity.
+        if deduplicationKey == incoming.deduplicationKey, result.localOCR?.contentHash == previousHash {
+            result.localOCR?.contentHash = incoming.contentHash
+        }
         result.identityKey = incoming.identityKey
         result.byteSize = incoming.byteSize
         result.items = incoming.items

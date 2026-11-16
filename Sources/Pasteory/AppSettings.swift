@@ -233,6 +233,8 @@ final class AppSettings: ObservableObject {
     }
     @Published var defaultDirectPaste: Bool { didSet { defaults.set(defaultDirectPaste, forKey: Key.defaultDirectPaste) } }
     @Published var linkResolutionEnabled: Bool { didSet { defaults.set(linkResolutionEnabled, forKey: Key.linkResolutionEnabled) } }
+    @Published var localImageOCREnabled: Bool { didSet { defaults.set(localImageOCREnabled, forKey: "localImageOCREnabled") } }
+    @Published var localOCRMethod: LocalOCRMethod { didSet { defaults.set(localOCRMethod.rawValue, forKey: "localOCRMethod") } }
     @Published var automaticWebCacheCleanup: Bool {
         didSet { defaults.set(automaticWebCacheCleanup, forKey: Key.automaticWebCacheCleanup) }
     }
@@ -317,6 +319,8 @@ final class AppSettings: ObservableObject {
         ) ?? .oneSecond
         defaultDirectPaste = defaults.object(forKey: Key.defaultDirectPaste) as? Bool ?? true
         linkResolutionEnabled = defaults.object(forKey: Key.linkResolutionEnabled) as? Bool ?? false
+        localImageOCREnabled = defaults.object(forKey: "localImageOCREnabled") as? Bool ?? false
+        localOCRMethod = defaults.string(forKey: "localOCRMethod").flatMap(LocalOCRMethod.init(rawValue:)) ?? .visionAccurate
         automaticWebCacheCleanup = defaults.object(forKey: Key.automaticWebCacheCleanup) as? Bool ?? true
         lastWebCacheCleanup = defaults.object(forKey: Key.lastWebCacheCleanup) as? Date
         let resolvedTabLayout = QuickTabLayout(rawValue: defaults.string(forKey: Key.quickTabLayout) ?? "") ?? .left

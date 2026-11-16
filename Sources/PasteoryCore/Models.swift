@@ -422,6 +422,8 @@ public struct Clip: Codable, Hashable, Identifiable, Sendable {
     public var intelligenceActivity: ContentActivity?
     public var aiAnalysisExcluded: Bool?
     public var lifecycleEvaluation: ActivityEvaluation?
+    public var localOCR: LocalOCRResult?
+    public var localOCRRequest: LocalOCRRequest?
 
     public init(
         id: UUID = UUID(),

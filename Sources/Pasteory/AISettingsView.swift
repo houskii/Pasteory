@@ -151,7 +151,8 @@ struct AISettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle(L10n.tr("分析用户备注"), isOn: $draft.includeNotes).toggleStyle(.switch)
                 Toggle(L10n.tr("分析来源应用名称"), isOn: $draft.includeSource).toggleStyle(.switch)
-                Text(L10n.tr("图片和文件仅发送元数据；逐条禁止 AI 的资料及已识别的密钥不参与分析。应用退出或休眠时不运行定时任务。"))
+                Toggle(L10n.tr("使用图片的本地 OCR 文字"), isOn: Binding(get: { draft.includeImageText == true }, set: { draft.includeImageText = $0 })).toggleStyle(.switch)
+                Text(L10n.tr("OCR 在本机后台运行并用于搜索。只有开启上项，识别文字才会发给当前模型；图片文件不发送。逐条禁止 AI 的资料及已识别的密钥不参与分析。应用退出或休眠时不运行定时任务。"))
                     .font(.caption).foregroundStyle(.secondary)
             }
             AISettingsCard(title: L10n.tr("结果应用方式")) {
@@ -168,7 +169,7 @@ struct AISettingsView: View {
                     Button(L10n.tr("沿用现有主题分析全库")) { if save() { controller.analyze(all: true) } }.disabled(controller.running)
                     Button(L10n.tr("分析最近内容")) { if save() { controller.analyze() } }.disabled(controller.running)
                 }
-                Text(L10n.tr("不满意现有主题时，请到资料库的 AI 整理菜单选择“重新整理全库…”，确认全库范围和 Prompt 后生成替换方案。"))
+                Text(L10n.tr("不满意现有主题时，请到资料库的 AI 整理菜单选择“重新整理最近内容…”，按 Top N 重新规划主题并分类，包含未分组内容；也可另选全库范围。"))
                     .font(.caption).foregroundStyle(.secondary)
             }
             AISettingsCard(title: L10n.tr("预算与调用上限")) {

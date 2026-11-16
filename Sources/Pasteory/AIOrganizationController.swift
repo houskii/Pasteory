@@ -14,7 +14,11 @@ final class AIOrganizationController: ObservableObject {
     @Published var showingReview = false
     @Published private(set) var clipIndex: [UUID: Clip] = [:]
     @Published private(set) var clipActivities: [UUID: ActivityEvaluation] = [:]
-    private(set) var eligibleClipIDs = Set<UUID>()
+    private var metadataEligibleIDs = Set<UUID>()
+    private var safeImageTextIDs = Set<UUID>()
+    var eligibleClipIDs: Set<UUID> {
+        settings.aiConfiguration.includeImageText == true ? metadataEligibleIDs.intersection(safeImageTextIDs) : metadataEligibleIDs
+    }
     @Published private(set) var storageBusy = false
     let repository: any ClipRepository
     let settings: AppSettings
@@ -38,6 +42,11 @@ final class AIOrganizationController: ObservableObject {
     private var configurationFingerprint = ""
     private var automaticPaused = false
     private var lastLifecycleRefresh = Date.distantPast
+    private var metadataRevision: Int64?
+    private var activityPolicyFingerprint = ""
+    private var indexMutation: UInt64 = 0
+    private var synchronizedAt: [UUID: UInt64] = [:]
+    private var reloadGeneration: UInt64 = 0
 
     init(repository: any ClipRepository, settings: AppSettings, transport: any AIChatTransport = OpenAICompatibleClient(),
          credentialProvider: @escaping () throws -> String = { try AICredentialStore.load() }) {
@@ -73,6 +82,11 @@ final class AIOrganizationController: ObservableObject {
     var groupedContentCount: Int {
         Set(state.groups.values.flatMap(\.memberIDs)).filter { clipIndex[$0]?.deletedAt == nil && clipIndex[$0] != nil }.count
     }
+    var recentRegroupIDs: [UUID] {
+        Array(clipIndex.values.filter { $0.deletedAt == nil && !$0.isArchived }.sorted {
+            $0.lastCopiedAt == $1.lastCopiedAt ? $0.id.uuidString < $1.id.uuidString : $0.lastCopiedAt > $1.lastCopiedAt
+        }.prefix(settings.aiConfiguration.topN).map(\.id))
+    }
 
     func bootstrap(deferMaintenance: Bool = false) async {
         if deferMaintenance { lastLifecycleRefresh = clock() }
@@ -88,7 +102,11 @@ final class AIOrganizationController: ObservableObject {
     }
 
     func reload() async throws {
-        state = try await repository.aiState()
+        reloadGeneration += 1
+        let generation = reloadGeneration
+        let loadedState = try await repository.aiState()
+        guard generation == reloadGeneration else { return }
+        if state != loadedState { state = loadedState }
         if !running, error == nil, let failure = state.checkpoint?.failureMessage { error = failure }
         // Establish a baseline for an existing library once, so upgrading does
         // not label historical material as new. Later additions stay unread.
@@ -97,20 +115,52 @@ final class AIOrganizationController: ObservableObject {
             state.automation.viewedGroupMembers = baseline
             try await repository.updateAIState { if $0.automation.viewedGroupMembers == nil { $0.automation.viewedGroupMembers = baseline } }
         }
-        let clips = try await repository.aiClipMetadata()
+        let startedAt = indexMutation
+        let changes = try await repository.clipMetadataChanges(since: metadataRevision)
         let policy = settings.aiConfiguration.lifecycle
+        let clips = changes.upserts
         let prepared = await Task.detached(priority: .utility) {
             (Dictionary(uniqueKeysWithValues: clips.map { ($0.id, $0) }),
              Dictionary(uniqueKeysWithValues: clips.filter { $0.deletedAt == nil }.map { ($0.id, policy.evaluate($0.activity)) }),
-             Set(clips.filter(\.mayParticipateInAI).map(\.id)))
+             Set(clips.filter(\.mayParticipateInAI).map(\.id)),
+             Set(clips.filter { Clip.isSafeAIText($0.recognizedImageText) }.map(\.id)))
         }.value
-        eligibleClipIDs = prepared.2
-        if clipIndex != prepared.0 { clipIndex = prepared.0 }
-        if clipActivities != prepared.1 { clipActivities = prepared.1 }
+        guard generation == reloadGeneration else { return }
+        if changes.resetsIndex {
+            let local = clipIndex.filter { (synchronizedAt[$0.key] ?? 0) > startedAt }
+            clipIndex = prepared.0.merging(local) { _, local in local }
+            clipActivities = prepared.1
+            metadataEligibleIDs = prepared.2; safeImageTextIDs = prepared.3
+            for clip in local.values { synchronize(clip) }
+        } else {
+            for id in changes.removedIDs where (synchronizedAt[id] ?? 0) <= startedAt {
+                clipIndex.removeValue(forKey: id); clipActivities.removeValue(forKey: id); metadataEligibleIDs.remove(id); safeImageTextIDs.remove(id)
+            }
+            for (id, clip) in prepared.0 where (synchronizedAt[id] ?? 0) <= startedAt {
+                if clipIndex[id] != clip { clipIndex[id] = clip }
+                if clipActivities[id] != prepared.1[id] { clipActivities[id] = prepared.1[id] }
+                if prepared.2.contains(id) { metadataEligibleIDs.insert(id) } else { metadataEligibleIDs.remove(id) }
+                if prepared.3.contains(id) { safeImageTextIDs.insert(id) } else { safeImageTextIDs.remove(id) }
+            }
+        }
+        metadataRevision = changes.revision
+        let fingerprint = AIHash.fingerprint(policy)
+        if activityPolicyFingerprint != fingerprint {
+            if !changes.resetsIndex { await refreshActivities() }
+            activityPolicyFingerprint = fingerprint
+        }
+    }
+
+    private func refreshActivities() async {
+        let clips = Array(clipIndex.values), policy = settings.aiConfiguration.lifecycle
+        let next = await Task.detached(priority: .utility) {
+            Dictionary(uniqueKeysWithValues: clips.filter { $0.deletedAt == nil }.map { ($0.id, policy.evaluate($0.activity)) })
+        }.value
+        if clipActivities != next { clipActivities = next }
     }
 
     func contentChanged(_ id: UUID) {
-        guard let clip = clipIndex[id], clip.mayParticipateInAI else { return }
+        guard let clip = clipIndex[id], eligibleClipIDs.contains(id) else { return }
         let revision = clip.aiContentRevision, now = clock()
         state.automation.enqueue(id: id, revision: revision, at: now)
         let previous = queueWrite, repository = repository
@@ -175,9 +225,11 @@ final class AIOrganizationController: ObservableObject {
     }
 
     func synchronize(_ clip: Clip) {
-        if clip.mayParticipateInAI { eligibleClipIDs.insert(clip.id) } else { eligibleClipIDs.remove(clip.id) }
+        indexMutation += 1; synchronizedAt[clip.id] = indexMutation
+        if clip.mayParticipateInAI { metadataEligibleIDs.insert(clip.id) } else { metadataEligibleIDs.remove(clip.id) }
+        if Clip.isSafeAIText(clip.recognizedImageText) { safeImageTextIDs.insert(clip.id) } else { safeImageTextIDs.remove(clip.id) }
         var metadata = clip; metadata.items = []
-        clipIndex[clip.id] = metadata
+        if clipIndex[clip.id] != metadata { clipIndex[clip.id] = metadata }
         if clip.deletedAt == nil { clipActivities[clip.id] = settings.aiConfiguration.lifecycle.evaluate(clip.activity) }
         else { clipActivities.removeValue(forKey: clip.id) }
     }
@@ -196,6 +248,7 @@ final class AIOrganizationController: ObservableObject {
             do {
                 _ = try await repository.purgeTrash(olderThan: now.addingTimeInterval(-30 * 86_400))
                 try await reload(); lastLifecycleRefresh = now
+                await refreshActivities()
                 if config.lifecycleEnabled && config.automaticCompression && !storageBusy { await compress(groupID: nil) }
             } catch { self.error = error.localizedDescription }
         }
@@ -332,7 +385,7 @@ final class AIOrganizationController: ObservableObject {
         } catch { self.error = error.localizedDescription; return false }
     }
 
-    func regroupLibrary() -> Bool {
+    func regroupLibrary(recentOnly: Bool = false) -> Bool {
         guard !running, !storageBusy else { return false }
         guard pending == nil, state.checkpoint == nil else { error = L10n.tr("请先处理整理建议或继续、放弃已保存的任务"); return false }
         guard settings.aiConfiguration.enabled else { error = L10n.tr("请先在 AI 整理设置中启用模型连接"); return false }
@@ -340,7 +393,7 @@ final class AIOrganizationController: ObservableObject {
             try settings.aiConfiguration.validate()
             guard !eligibleClipIDs.isEmpty else { error = L10n.tr("没有需要整理的内容"); return false }
             let selection = state.groups.isEmpty ? nil : AIGroupSelection(groups: Array(state.groups.values))
-            analyze(all: true, trigger: "manual-regroup-all", groupSelection: selection)
+            analyze(all: !recentOnly, trigger: recentOnly ? "manual-regroup-recent" : "manual-regroup-all", groupSelection: selection)
             return running
         } catch { self.error = error.localizedDescription; return false }
     }
@@ -407,12 +460,14 @@ final class AIOrganizationController: ObservableObject {
         let replacedIDs = selection?.groupIDs ?? []
         let catalogGroups = Array(state.groups.values.filter { !replacedIDs.contains($0.id) })
         let protected = selection == nil ? protectedGroups : Set(catalogGroups.map(\.id))
-        let eligible = clipIndex.values.filter { eligibleClipIDs.contains($0.id) }.sorted {
+        let allowedIDs = eligibleClipIDs
+        let eligible = clipIndex.values.filter { allowedIDs.contains($0.id) }.sorted {
             $0.lastCopiedAt == $1.lastCopiedAt ? $0.id.uuidString < $1.id.uuidString : $0.lastCopiedAt > $1.lastCopiedAt
         }
         let catalog = AIThemeCatalog.fingerprint(Array(state.groups.values)), prompt = AIHash.fingerprint(config.prompt)
         let focus: [Clip]
         if trigger == "manual-regroup-all" { focus = eligible }
+        else if trigger == "manual-regroup-recent" { let ids = Set(recentRegroupIDs); focus = eligible.filter { ids.contains($0.id) } }
         else if let selection { focus = eligible.filter { selection.memberIDs.contains($0.id) } }
         else if let ids = contentIDs { let selected = Set(ids); focus = eligible.filter { selected.contains($0.id) } }
         else if review {
@@ -455,7 +510,7 @@ final class AIOrganizationController: ObservableObject {
             job.organization = AIJobOrganization(trigger: trigger, revisions: Dictionary(uniqueKeysWithValues: focus.map { ($0.id, $0.aiContentRevision) }), protectedGroupIDs: protected, review: review)
             job.organization?.semanticFingerprint = AIThemeCatalog.configurationFingerprint(config)
             job.organization?.requiresThemePlan = review || (trigger.hasPrefix("manual") && state.groups.isEmpty && focus.count >= 18)
-            if trigger == "manual-regroup-all", focus.count >= policy.minimumThemeMembers { job.organization?.requiresThemePlan = true }
+            if ["manual-regroup-all", "manual-regroup-recent"].contains(trigger), focus.count >= policy.minimumThemeMembers { job.organization?.requiresThemePlan = true }
             if let selection {
                 job.organization?.groupSelection = selection
                 job.organization?.groupCleanup = try AIGroupManagement.cleanup(selection, state: state, clips: Array(clipIndex.values))
@@ -464,7 +519,7 @@ final class AIOrganizationController: ObservableObject {
         }
         let scope = Set(job.clipIDs)
         let documents = eligible.filter { scope.contains($0.id) }.map { clip -> AIClipDocument in
-            var document = clip.aiDocument(includeNotes: config.includeNotes, includeSource: config.includeSource)
+            var document = clip.aiDocument(includeNotes: config.includeNotes, includeSource: config.includeSource, includeImageText: config.includeImageText == true)
             document.groupIDs.removeAll { replacedIDs.contains($0) }; return document
         }
         var rules = AIAnalysisRules(); rules.protectedGroupIDs = job.organization?.protectedGroupIDs ?? protected
@@ -525,7 +580,7 @@ final class AIOrganizationController: ObservableObject {
                 end = boundary
             }
             let ids = Array(job.clipIDs[job.cursor..<end])
-            let fullDocuments = try await repository.aiContext(ids: ids, includeNotes: config.includeNotes, includeSource: config.includeSource).map { original -> AIClipDocument in
+            let fullDocuments = try await repository.aiContext(ids: ids, includeNotes: config.includeNotes, includeSource: config.includeSource, includeImageText: config.includeImageText == true).map { original -> AIClipDocument in
                 var document = original; document.groupIDs.removeAll { replacedIDs.contains($0) }; return document
             }
             let fullByID = Dictionary(uniqueKeysWithValues: fullDocuments.map { ($0.id, $0) })

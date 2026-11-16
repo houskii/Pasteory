@@ -16,7 +16,7 @@ public enum SearchRanker {
     }
 
     private static func score(_ clip: Clip, needle: String) -> Double {
-        let fields = [clip.displayTitle, clip.previewText, clip.note, clip.source.appName].map(normalize)
+        let fields = [clip.displayTitle, clip.previewText + "\n" + clip.recognizedImageText, clip.note, clip.source.appName].map(normalize)
         var score = 0.0
         for (index, field) in fields.enumerated() {
             let weight = [8.0, 5.0, 4.0, 2.0][index]

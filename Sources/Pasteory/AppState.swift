@@ -150,6 +150,13 @@ final class AppState: ObservableObject {
     private var storageAnalyticsRequest = UUID()
     private var storageAnalyticsRequestedPeriod: StorageAnalyticsPeriod?
     private let classificationPipeline = ClipClassificationPipeline()
+    private let imageOCR: LocalImageOCRService
+    private var imageOCRTask: Task<Void, Never>?
+    private var imageOCRQueue = [UUID]()
+    private var imageOCRQueued = Set<UUID>()
+    @Published private(set) var localOCRRunning = false
+    @Published private(set) var localOCRCompleted = 0
+    @Published private(set) var localOCRError: String?
 
     init(
         repository: any ClipRepository,
@@ -158,12 +165,14 @@ final class AppState: ObservableObject {
         backup: BackupService,
         storageAnalyticsService: StorageAnalyticsService,
         settings: AppSettings,
-        linkResolutionService: LinkResolutionService
+        linkResolutionService: LinkResolutionService,
+        imageTextRecognizer: any ImageTextRecognizing = VisionImageTextRecognizer()
     ) {
         self.repository = repository
         self.quickListLoader = ClipListLoader(repository: repository)
         self.libraryListLoader = ClipListLoader(repository: repository)
         self.attachments = attachments
+        self.imageOCR = LocalImageOCRService(repository: repository, attachments: attachments, recognizer: imageTextRecognizer)
         self.quickTextActions = QuickTextActionCoordinator(repository: repository, attachments: attachments)
         self.archive = archive
         self.backup = backup
@@ -299,6 +308,7 @@ final class AppState: ObservableObject {
         await refreshAggregations()
         await refreshQuickStats()
         await refreshLinkResolutionData()
+        defer { resumePendingLocalOCR() }
         guard processExistingClips else {
             await intelligence.bootstrap(deferMaintenance: true)
             return
@@ -311,6 +321,71 @@ final class AppState: ObservableObject {
             await self?.prepareExistingLinkFallbacks()
             await self?.refreshRecentLinkCaches()
         }
+    }
+
+    func resumePendingLocalOCR() {
+        guard settings.localImageOCREnabled else { return }
+#if DEBUG
+        guard !ProcessInfo.processInfo.arguments.contains("--debug-disable-ocr") else { return }
+#endif
+        Task(priority: .utility) { [weak self] in
+            guard let self else { return }
+            do {
+                let metadata = try await repository.aiClipMetadata()
+                let ids = await Task.detached(priority: .utility) {
+                    metadata.filter { $0.deletedAt == nil && $0.hasImageContent && !$0.hasCurrentOCR && $0.localOCRRequest?.contentHash == $0.contentHash }
+                        .sorted { $0.lastCopiedAt > $1.lastCopiedAt }.map(\.id)
+                }.value
+                for id in ids { enqueueLocalOCR(id) }
+            } catch { localOCRError = error.localizedDescription }
+        }
+    }
+
+    func stopLocalOCR() {
+        imageOCRQueue = []; imageOCRQueued = []; imageOCRTask?.cancel()
+    }
+    func waitForLocalOCR() async { await imageOCRTask?.value }
+
+    private func enqueueLocalOCR(_ id: UUID) {
+        guard settings.localImageOCREnabled, imageOCRQueued.insert(id).inserted else { return }
+        imageOCRQueue.append(id)
+        startLocalOCRWorker()
+    }
+
+    private func startLocalOCRWorker() {
+        guard imageOCRTask == nil else { return }
+        localOCRRunning = true; localOCRError = nil
+        imageOCRTask = Task(priority: .utility) { [weak self] in
+            guard let self else { return }
+            defer {
+                imageOCRTask = nil; localOCRRunning = false
+                if !imageOCRQueue.isEmpty { startLocalOCRWorker() }
+            }
+            var updated = [Clip](), completed = 0
+            while !imageOCRQueue.isEmpty, !Task.isCancelled {
+                let id = imageOCRQueue.removeFirst()
+                defer { imageOCRQueued.remove(id) }
+                do {
+                    if let clip = try await imageOCR.recognize(id: id) { updated.append(clip); completed += 1 }
+                } catch is CancellationError { break }
+                catch { localOCRError = error.localizedDescription }
+                if updated.count >= 10 { await publishOCRUpdates(updated); updated = []; localOCRCompleted += completed; completed = 0 }
+                do { try await Task.sleep(for: .milliseconds(100)) } catch { break }
+            }
+            if !updated.isEmpty { await publishOCRUpdates(updated) }
+            localOCRCompleted += completed
+        }
+    }
+
+    private func publishOCRUpdates(_ updated: [Clip]) async {
+        // Read current rows so an edit made while Vision was running cannot be replaced by an older result.
+        if let current = try? await repository.clips(ids: updated.map(\.id)) {
+            for clip in current { replaceLocal(clip) }
+        }
+        try? await intelligence.reload()
+        if settings.aiConfiguration.includeImageText == true { for clip in updated { intelligence.contentChanged(clip.id) } }
+        if !quickQuery.isEmpty { await refreshQuick() }
+        if !libraryQuery.isEmpty { await refreshLibrary() }
     }
 
     func performQuickTextAction(_ action: QuickTextAction, input: String, sourceClip: Clip?) async throws -> QuickTextActionCoordinator.Result {
@@ -348,8 +423,11 @@ final class AppState: ObservableObject {
     }
 
     func accept(_ capture: PasteboardCapture) async {
-        guard let clip = await classificationPipeline.makeClip(from: capture),
+        guard var clip = await classificationPipeline.makeClip(from: capture),
               !clip.previewText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        if settings.localImageOCREnabled, clip.hasImageContent {
+            clip.localOCRRequest = LocalOCRRequest(contentHash: clip.contentHash, method: settings.localOCRMethod)
+        }
         let existing = quickClips.first { $0.primaryKind == clip.primaryKind && $0.deduplicationKey == clip.deduplicationKey }
             ?? intelligence.clipIndex.values.first { $0.deletedAt == nil && $0.primaryKind == clip.primaryKind && $0.deduplicationKey == clip.deduplicationKey }
         let display = existing?.mergingCapture(clip) ?? clip
@@ -386,6 +464,7 @@ final class AppState: ObservableObject {
                 if quickSelectionID == display.id { quickSelectionID = stored.id }
             }
             intelligence.synchronize(stored)
+            if stored.id == clip.id, stored.localOCRRequest != nil, !stored.hasCurrentOCR { enqueueLocalOCR(stored.id) }
             intelligence.contentChanged(stored.id)
             if !quickClips.contains(where: { $0.id == stored.id && ($0.lastCopiedAt > stored.lastCopiedAt || $0.updatedAt > stored.updatedAt) }) {
                 replaceLocal(stored)
@@ -1096,7 +1175,7 @@ final class AppState: ObservableObject {
         let editableCollectionIDs = Set(collections.filter { $0.kind == .normal }.map(\.id))
         mutate(clip) { value in
             value.title = String(title.prefix(120))
-            value.note = String(note.prefix(4_000))
+            value.note = String(note.prefix(64_000))
             if let collectionIDs {
                 value.collectionIDs.subtract(editableCollectionIDs)
                 value.collectionIDs.formUnion(collectionIDs.intersection(editableCollectionIDs))

@@ -11,6 +11,9 @@ public actor SQLiteClipRepository: ClipRepository {
     private let intelligencePayloads: ContentPayloadStore
     private var applyingIntelligence = false
     private var intelligenceMaintenance = false
+    private var metadataCache: [UUID: Clip]?
+    private var metadataCacheRevision: Int64 = 0
+    private var metadataCacheBuilds = 0
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
     private struct LinkGroupAccumulator {
@@ -88,8 +91,24 @@ public actor SQLiteClipRepository: ClipRepository {
         try save(clip, preservingTimestamps: false)
     }
 
-    private func save(_ clip: Clip, preservingTimestamps: Bool) throws {
-        let oldMemberships = applyingIntelligence ? nil : try self.clip(id: clip.id)?.collectionIDs
+    private func save(_ incoming: Clip, preservingTimestamps: Bool) throws {
+        let existing = try self.clip(id: incoming.id)
+        var clip = incoming
+        // A UI edit may have started before the background OCR result arrived.
+        if clip.localOCR == nil, existing?.contentHash == clip.contentHash {
+            clip.localOCR = existing?.localOCR
+            if let block = clip.localOCR?.appendedNote, !block.isEmpty, !clip.note.contains(block) {
+                clip.note = clip.note.isEmpty ? block : clip.note + "\n\n" + block
+            }
+        }
+        if clip.localOCRRequest == nil, !clip.hasCurrentOCR, existing?.contentHash == clip.contentHash { clip.localOCRRequest = existing?.localOCRRequest }
+        if clip.localOCR?.appendedNote != nil {
+            // The note is editable. Keep the user's edited OCR text as the search/AI source.
+            let block = clip.taggedOCRNote
+            clip.localOCR?.text = block?.text ?? ""
+            clip.localOCR?.appendedNote = block.map { String(clip.note[$0.range]) } ?? ""
+        }
+        let oldMemberships = applyingIntelligence ? nil : existing?.collectionIDs
         let payload = try encoder.encode(clip)
         let timestampSource = preservingTimestamps ? "clips" : "excluded"
         let sql = """
@@ -164,6 +183,26 @@ public actor SQLiteClipRepository: ClipRepository {
             default: throw sqliteError()
             }
         }
+    }
+
+    public func saveLocalOCR(_ result: LocalOCRResult, clipID: UUID) throws -> Clip? {
+        var saved: Clip?
+        try transaction {
+            guard var latest = try clip(id: clipID), latest.contentHash == result.contentHash, latest.deletedAt == nil else { return }
+            var result = result
+            let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let original = latest.noteWithoutAutomaticOCR
+            latest.note = original
+            if !text.isEmpty {
+                let block = "[OCR:" + text + "]"
+                latest.note = original.isEmpty ? block : original + "\n\n" + block
+                result.appendedNote = block
+            }
+            latest.localOCR = result; latest.localOCRRequest = nil
+            try save(latest, preservingTimestamps: true)
+            saved = latest
+        }
+        return saved
     }
 
     public func saveArchived(_ clip: Clip, replacing original: Clip) throws -> Bool {
@@ -277,14 +316,15 @@ public actor SQLiteClipRepository: ClipRepository {
                 clauses.append("c.id IN (SELECT id FROM clip_fts WHERE clip_fts MATCH ?)")
                 bindings.append(ftsQuery(trimmed))
             } else {
-                clauses.append("(c.title LIKE ? ESCAPE '\\' OR c.note LIKE ? ESCAPE '\\' OR c.preview_text LIKE ? ESCAPE '\\' OR c.source_name LIKE ? ESCAPE '\\')")
+                clauses.append("(c.title LIKE ? ESCAPE '\\' OR c.note LIKE ? ESCAPE '\\' OR c.preview_text LIKE ? ESCAPE '\\' OR c.source_name LIKE ? ESCAPE '\\' OR (json_extract(c.payload_json,'$.localOCR.contentHash')=c.content_hash AND json_extract(c.payload_json,'$.localOCR.text') LIKE ? ESCAPE '\\'))")
                 let like = "%\(escapeLike(trimmed))%"
-                bindings += [like, like, like, like]
+                bindings += [like, like, like, like, like]
             }
         }
         let whereSQL = clauses.isEmpty ? "1" : clauses.joined(separator: " AND ")
         let ordering = "c.pinned DESC, c.last_used_at DESC, c.id ASC"
-        let payload = metadataOnly ? "json_set(c.payload_json, '$.items', json_array())" : "c.payload_json"
+        if metadataOnly { try refreshMetadataCache() }
+        let payload = metadataOnly ? "c.id" : "c.payload_json"
         let sql = "SELECT \(payload) FROM clips c \(join) WHERE \(whereSQL) ORDER BY \(ordering) LIMIT ? OFFSET ?;"
         let statement = try prepare(sql)
         defer { sqlite3_finalize(statement) }
@@ -292,7 +332,11 @@ public actor SQLiteClipRepository: ClipRepository {
         sqlite3_bind_int(statement, Int32(bindings.count + 1), Int32(max(1, min(limit, 100_000))))
         sqlite3_bind_int64(statement, Int32(bindings.count + 2), Int64(max(0, offset)))
         var clips = [Clip]()
-        while sqlite3_step(statement) == SQLITE_ROW { clips.append(try decodeClip(statement, column: 0)) }
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if metadataOnly {
+                if let raw = sqlite3_column_text(statement, 0), let id = UUID(uuidString: String(cString: raw)), let clip = metadataCache?[id] { clips.append(clip) }
+            } else { clips.append(try decodeClip(statement, column: 0)) }
+        }
         return clips
     }
 
@@ -504,7 +548,7 @@ public actor SQLiteClipRepository: ClipRepository {
         _ = data.withUnsafeBytes { sqlite3_bind_blob(statement, 5, $0.baseAddress, Int32(data.count), Self.transient) }
         try stepDone(statement)
         if !applyingIntelligence {
-            try rebuildSearchIndex()
+            if oldName != collection.name { try refreshCollectionSearchIndex(collection.id) }
             if let oldName, oldName != collection.name {
                 try updateAIState { state in
                     if var group = state.groups[collection.id] {
@@ -520,16 +564,33 @@ public actor SQLiteClipRepository: ClipRepository {
         func work() throws {
             let oldApplying = applyingIntelligence; applyingIntelligence = true
             defer { applyingIntelligence = oldApplying }
-            for var clip in try allClips() where clip.collectionIDs.contains(id) {
+            for var clip in try clips(ids: collectionMemberIDs(id)) {
                 clip.collectionIDs.remove(id); try save(clip, preservingTimestamps: true)
             }
             if !oldApplying { try updateAIState { state in state.groups.removeValue(forKey: id) } }
             let statement = try prepare("DELETE FROM collections WHERE id=?;")
             defer { sqlite3_finalize(statement) }
             bind(id.uuidString, at: 1, to: statement); try stepDone(statement)
-            try rebuildSearchIndex()
         }
         if sqlite3_get_autocommit(database) == 0 { try work() } else { try transaction(work) }
+    }
+
+    private func collectionMemberIDs(_ id: UUID) throws -> [UUID] {
+        let statement = try prepare("SELECT clip_id FROM clip_collections WHERE collection_id=?;")
+        defer { sqlite3_finalize(statement) }
+        bind(id.uuidString, at: 1, to: statement)
+        var ids = [UUID]()
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let raw = sqlite3_column_text(statement, 0), let value = UUID(uuidString: String(cString: raw)) { ids.append(value) }
+        }
+        return ids
+    }
+
+    private func refreshCollectionSearchIndex(_ id: UUID) throws {
+        try refreshMetadataCache()
+        for id in try collectionMemberIDs(id) {
+            if let clip = metadataCache?[id] { try updateFTS(for: clip) }
+        }
     }
 
     public func allClips() throws -> [Clip] {
@@ -543,12 +604,58 @@ public actor SQLiteClipRepository: ClipRepository {
     /// AI needs revisions, previews, activity and membership, never every
     /// inline representation in memory. Full context is loaded per batch.
     public func aiClipMetadata() throws -> [Clip] {
-        let statement = try prepare("SELECT json_set(payload_json, '$.items', json_array()) FROM clips ORDER BY created_at;")
-        defer { sqlite3_finalize(statement) }
-        var result = [Clip]()
-        while sqlite3_step(statement) == SQLITE_ROW { result.append(try decodeClip(statement, column: 0)) }
-        return result
+        try refreshMetadataCache()
+        return Array(metadataCache?.values ?? [:].values).sorted { $0.createdAt < $1.createdAt }
     }
+
+    public func clipMetadataChanges(since revision: Int64?) throws -> ClipMetadataChanges {
+        try refreshMetadataCache()
+        guard let revision, revision <= metadataCacheRevision else {
+            return ClipMetadataChanges(revision: metadataCacheRevision, resetsIndex: true, upserts: Array(metadataCache?.values ?? [:].values), removedIDs: [])
+        }
+        guard revision < metadataCacheRevision else {
+            return ClipMetadataChanges(revision: metadataCacheRevision, resetsIndex: false, upserts: [], removedIDs: [])
+        }
+        let ids = try changedMetadataIDs(since: revision)
+        return ClipMetadataChanges(revision: metadataCacheRevision, resetsIndex: false,
+                                   upserts: ids.compactMap { metadataCache?[$0] }, removedIDs: Set(ids.filter { metadataCache?[$0] == nil }))
+    }
+
+    private func changedMetadataIDs(since revision: Int64) throws -> [UUID] {
+        let statement = try prepare("SELECT id FROM clip_metadata_versions WHERE revision>?;")
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_int64(statement, 1, revision)
+        var ids = [UUID]()
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let raw = sqlite3_column_text(statement, 0), let id = UUID(uuidString: String(cString: raw)) { ids.append(id) }
+        }
+        return ids
+    }
+
+    private func refreshMetadataCache() throws {
+        let revision = Int64(try scalarInt("SELECT revision FROM repository_revision WHERE id=1;"))
+        if metadataCache != nil {
+            guard metadataCacheRevision != revision else { return }
+            for id in try changedMetadataIDs(since: metadataCacheRevision) {
+                // Decode only changed records, with representations removed by SQLite.
+                let statement = try prepare("SELECT json_set(payload_json, '$.items', json_array()) FROM clips WHERE id=?;")
+                defer { sqlite3_finalize(statement) }
+                bind(id.uuidString, at: 1, to: statement)
+                if sqlite3_step(statement) == SQLITE_ROW { metadataCache?[id] = try decodeClip(statement, column: 0) }
+                else { metadataCache?.removeValue(forKey: id) }
+            }
+            metadataCacheRevision = revision
+            return
+        }
+        let statement = try prepare("SELECT json_set(payload_json, '$.items', json_array()) FROM clips;")
+        defer { sqlite3_finalize(statement) }
+        var result = [UUID: Clip]()
+        while sqlite3_step(statement) == SQLITE_ROW { let clip = try decodeClip(statement, column: 0); result[clip.id] = clip }
+        metadataCache = result; metadataCacheRevision = revision; metadataCacheBuilds += 1
+    }
+
+    // Internal diagnostics used by lifecycle/performance regression tests.
+    public func metadataCacheBuildCount() -> Int { metadataCacheBuilds }
 
     public func aggregations() throws -> [ClipAggregation] {
         let statement = try prepare("SELECT payload_json FROM aggregations ORDER BY pinned DESC,updated_at DESC;")
@@ -934,7 +1041,7 @@ public actor SQLiteClipRepository: ClipRepository {
 
     public func rebuildSearchIndex() throws {
         try Self.execute(database, "DELETE FROM clip_fts;")
-        for clip in try allClips() { try updateFTS(for: clip) }
+        for clip in try aiClipMetadata() { try updateFTS(for: clip) }
     }
 
     private func saveLinkResource(_ resource: LinkResource) throws {
@@ -1212,7 +1319,7 @@ public actor SQLiteClipRepository: ClipRepository {
         let groups = try groupNames(for: clip.id).joined(separator: " ")
         let insert = try prepare("INSERT INTO clip_fts(id,title,body,note,groups,source) VALUES(?,?,?,?,?,?);")
         bind(clip.id.uuidString, at: 1, to: insert); bind(clip.displayTitle, at: 2, to: insert)
-        bind(clip.previewText, at: 3, to: insert); bind(clip.note, at: 4, to: insert)
+        bind(clip.previewText + "\n" + clip.recognizedImageText, at: 3, to: insert); bind(clip.note, at: 4, to: insert)
         bind(groups, at: 5, to: insert); bind(clip.source.appName, at: 6, to: insert)
         try stepDone(insert); sqlite3_finalize(insert)
     }
@@ -1304,13 +1411,14 @@ public actor SQLiteClipRepository: ClipRepository {
             catch {
                 try? Self.execute(database, "ROLLBACK TO SAVEPOINT " + name + ";")
                 try? Self.execute(database, "RELEASE SAVEPOINT " + name + ";")
+                metadataCache = nil
                 throw error
             }
             return
         }
         try Self.execute(database, "BEGIN IMMEDIATE;")
         do { try work(); try Self.execute(database, "COMMIT;") }
-        catch { try? Self.execute(database, "ROLLBACK;"); throw error }
+        catch { try? Self.execute(database, "ROLLBACK;"); metadataCache = nil; throw error }
     }
 
     private func scalarInt(_ sql: String) throws -> Int {
@@ -1377,6 +1485,34 @@ public actor SQLiteClipRepository: ClipRepository {
         CREATE TABLE IF NOT EXISTS collections(
           id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, sort_order INTEGER NOT NULL, payload_json BLOB NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS repository_revision(id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL);
+        INSERT OR IGNORE INTO repository_revision(id,revision) VALUES(1,0);
+        CREATE TABLE IF NOT EXISTS clip_metadata_versions(id TEXT PRIMARY KEY, revision INTEGER NOT NULL);
+        CREATE INDEX IF NOT EXISTS idx_metadata_revision ON clip_metadata_versions(revision);
+        CREATE TRIGGER IF NOT EXISTS clips_metadata_insert AFTER INSERT ON clips BEGIN
+          UPDATE repository_revision SET revision=revision+1 WHERE id=1;
+          INSERT INTO clip_metadata_versions(id,revision) VALUES(NEW.id,(SELECT revision FROM repository_revision WHERE id=1))
+            ON CONFLICT(id) DO UPDATE SET revision=excluded.revision;
+        END;
+        CREATE TRIGGER IF NOT EXISTS clips_metadata_update AFTER UPDATE ON clips BEGIN
+          UPDATE repository_revision SET revision=revision+1 WHERE id=1;
+          INSERT INTO clip_metadata_versions(id,revision) VALUES(NEW.id,(SELECT revision FROM repository_revision WHERE id=1))
+            ON CONFLICT(id) DO UPDATE SET revision=excluded.revision;
+        END;
+        CREATE TRIGGER IF NOT EXISTS clips_metadata_delete AFTER DELETE ON clips BEGIN
+          UPDATE repository_revision SET revision=revision+1 WHERE id=1;
+          INSERT INTO clip_metadata_versions(id,revision) VALUES(OLD.id,(SELECT revision FROM repository_revision WHERE id=1))
+            ON CONFLICT(id) DO UPDATE SET revision=excluded.revision;
+        END;
+        CREATE TRIGGER IF NOT EXISTS collections_search_insert AFTER INSERT ON collections BEGIN
+          UPDATE repository_revision SET revision=revision+1 WHERE id=1;
+        END;
+        CREATE TRIGGER IF NOT EXISTS collections_search_update AFTER UPDATE ON collections BEGIN
+          UPDATE repository_revision SET revision=revision+1 WHERE id=1;
+        END;
+        CREATE TRIGGER IF NOT EXISTS collections_search_delete AFTER DELETE ON collections BEGIN
+          UPDATE repository_revision SET revision=revision+1 WHERE id=1;
+        END;
         CREATE TABLE IF NOT EXISTS clip_collections(
           clip_id TEXT NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
           collection_id TEXT NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
@@ -1682,7 +1818,7 @@ public actor SQLiteClipRepository: ClipRepository {
 }
 
 extension SQLiteClipRepository {
-    public func aiContext(ids: [UUID], includeNotes: Bool, includeSource: Bool) throws -> [AIClipDocument] {
+    public func aiContext(ids: [UUID], includeNotes: Bool, includeSource: Bool, includeImageText: Bool) throws -> [AIClipDocument] {
         guard ids.count <= 100 else { throw AIError.invalid("Context batch is too large") }
         return try clips(ids: ids).filter(\.mayParticipateInAI).compactMap { clip in
             var body = clip.previewText
@@ -1692,7 +1828,8 @@ extension SQLiteClipRepository {
                 }
             }
             guard Clip.isSafeAIText(body) else { return nil }
-            var doc = clip.aiDocument(includeNotes: includeNotes, includeSource: includeSource, body: String(body.prefix(60_000)))
+            if includeImageText, !Clip.isSafeAIText(clip.recognizedImageText) { return nil }
+            var doc = clip.aiDocument(includeNotes: includeNotes, includeSource: includeSource, includeImageText: includeImageText, body: String(body.prefix(60_000)))
             doc.truncated = doc.truncated || body.count > 60_000
             return doc
         }
@@ -1760,7 +1897,7 @@ extension SQLiteClipRepository {
             profile.name = name; profile.definition = definition; profile.definitionIsManual = true
             profile.definitionVersion += 1; profile.revision += 1; profile.retained = retained
             profile.overviewMemberFingerprint = ""
-            state.groups[id] = profile; try writeAIState(state); try rebuildSearchIndex()
+            state.groups[id] = profile; try writeAIState(state); try refreshCollectionSearchIndex(id)
         }
     }
 

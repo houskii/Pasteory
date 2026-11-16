@@ -41,6 +41,7 @@ public struct AIConfiguration: Codable, Equatable, Sendable {
     public var batchSize = 20
     public var includeNotes = true
     public var includeSource = true
+    public var includeImageText: Bool?
     public var analyzeNew = false
     public var timerEnabled = false
     public var intervalMinutes = 30

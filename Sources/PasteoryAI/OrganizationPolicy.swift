@@ -144,8 +144,10 @@ public struct AIAnalysisRules: Equatable, Sendable {
 
 public enum AIThemeCatalog {
     public static func configurationFingerprint(_ configuration: AIConfiguration) -> String {
-        AIHash.fingerprint([configuration.endpoint, configuration.model, configuration.reasoning, configuration.prompt,
-                            String(configuration.includeNotes), String(configuration.includeSource), String(configuration.organizationPolicy.targetGroupCount)])
+        var fields = [configuration.endpoint, configuration.model, configuration.reasoning, configuration.prompt,
+                      String(configuration.includeNotes), String(configuration.includeSource), String(configuration.organizationPolicy.targetGroupCount)]
+        if configuration.includeImageText == true { fields.append("include-local-image-text") }
+        return AIHash.fingerprint(fields)
     }
     public static func fingerprint(_ groups: [AIGroupProfile]) -> String {
         // Membership and overview edits do not invalidate unmatched results.

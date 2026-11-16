@@ -238,6 +238,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
     }
 
     func prepareToTerminate() async {
+        state.stopLocalOCR()
         await monitor.flushPendingCapture()
         monitor.stop()
         await state.waitForCapturedWrites()
@@ -354,11 +355,19 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
             "aiIndexRepresentationCount": state.intelligence.clipIndex.values.reduce(0) { $0 + $1.items.count },
             "aiEligibleCount": state.intelligence.eligibleClipIDs.count,
             "aiGroupedCount": state.intelligence.groupedContentCount,
+            "aiRecentScopeCount": state.intelligence.recentRegroupIDs.count,
+            "aiRecentEligibleCount": Set(state.intelligence.recentRegroupIDs).intersection(state.intelligence.eligibleClipIDs).count,
+            "localOCRRunning": state.localOCRRunning,
+            "localOCRCompleted": state.localOCRCompleted,
             "presentationMetrics": quickPanel.presentationMetrics,
             "sampleTitles": state.quickClips.map(\.title)
         ]
-        if let metadataData = try? JSONSerialization.data(withJSONObject: metadata, options: [.prettyPrinted, .sortedKeys]) {
-            try? metadataData.write(to: URL(fileURLWithPath: path + ".json"), options: .atomic)
+        Task {
+            var captured = metadata
+            if let repository = state.repository as? SQLiteClipRepository { captured["metadataCacheBuildCount"] = await repository.metadataCacheBuildCount() }
+            if let metadataData = try? JSONSerialization.data(withJSONObject: captured, options: [.prettyPrinted, .sortedKeys]) {
+                try? metadataData.write(to: URL(fileURLWithPath: path + ".json"), options: .atomic)
+            }
         }
         try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
     }

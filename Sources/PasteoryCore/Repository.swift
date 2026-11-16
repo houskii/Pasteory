@@ -3,7 +3,8 @@ import PasteoryAI
 
 public protocol ClipRepository: Sendable {
     func aiState() async throws -> AIOrganizationState
-    func aiContext(ids: [UUID], includeNotes: Bool, includeSource: Bool) async throws -> [AIClipDocument]
+    func aiContext(ids: [UUID], includeNotes: Bool, includeSource: Bool, includeImageText: Bool) async throws -> [AIClipDocument]
+    func saveLocalOCR(_ result: LocalOCRResult, clipID: UUID) async throws -> Clip?
     func updateAIState(_ mutation: @Sendable (inout AIOrganizationState) throws -> Void) async throws
     func applyAIChangeSet(_ changeSet: AIChangeSet) async throws
     func undoAIChangeSet(_ id: UUID) async throws
@@ -25,6 +26,7 @@ public protocol ClipRepository: Sendable {
     func list(filter: ClipFilter, query: String, limit: Int, offset: Int) async throws -> [Clip]
     func listMetadata(filter: ClipFilter, query: String, limit: Int, offset: Int) async throws -> [Clip]
     func aiClipMetadata() async throws -> [Clip]
+    func clipMetadataChanges(since revision: Int64?) async throws -> ClipMetadataChanges
     func removePermanently(id: UUID) async throws
     func purgeTrash(olderThan date: Date) async throws -> Int
     func previewHistoryCleanup(olderThan cutoff: Date, largerThan minimumBytes: Int64) async throws -> HistoryCleanupPreview
@@ -61,6 +63,9 @@ public protocol ClipRepository: Sendable {
 }
 
 public extension ClipRepository {
+    func aiContext(ids: [UUID], includeNotes: Bool, includeSource: Bool) async throws -> [AIClipDocument] {
+        try await aiContext(ids: ids, includeNotes: includeNotes, includeSource: includeSource, includeImageText: false)
+    }
     func saveCaptured(_ clip: Clip) async throws -> Clip {
         try await saveCaptured(clip, context: nil)
     }

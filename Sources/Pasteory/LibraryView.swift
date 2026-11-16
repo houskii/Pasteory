@@ -111,7 +111,7 @@ struct LibraryView: View {
         .onChange(of: state.requestedCollectionEditorID) { _, _ in openRequestedCollectionEditor() }
     }
 
-    private func openAIGroupManager(scope: AIGroupManagementView.Scope = .selectedGroups) {
+    private func openAIGroupManager(scope: AIGroupManagementView.Scope = .recent) {
         managedScope = scope
         if case .collection(let id) = state.libraryFilter, state.intelligence.state.groups[id] != nil { managedGroupIDs = [id] }
         else { managedGroupIDs = [] }
@@ -377,6 +377,7 @@ struct LibraryView: View {
                         Button(L10n.tr("检查整理建议")) { state.intelligence.showingReview = true }
                             .disabled(state.intelligence.pending == nil)
                         Button(L10n.tr("沿用现有主题分析全库")) { state.intelligence.analyze(all: true) }
+                        Button(L10n.tr("重新整理最近内容…")) { openAIGroupManager(scope: .recent) }
                         Button(L10n.tr("重新整理全库…")) { openAIGroupManager(scope: .library) }
                         Button(L10n.tr("复核主题与低活跃分组")) { state.intelligence.analyze(trigger: "manual-review") }
                         if state.intelligence.latestUndoable != nil {
@@ -605,6 +606,7 @@ struct LibraryView: View {
                                 .background(LibraryTheme.inputBackground, in: RoundedRectangle(cornerRadius: 10))
                         }
 
+
                         inspectorSection(L10n.tr("抓取来源")) {
                             captureSourceDetails(clip)
                         }
@@ -642,13 +644,20 @@ struct LibraryView: View {
                             inspectorFieldLabel(L10n.tr("备注")).padding(.top, 4)
                             TextEditor(text: Binding(
                                 get: { state.selectedClip?.note ?? "" },
-                                set: { value in state.mutateSelected { $0.note = String(value.prefix(4_000)) } }
+                                set: { value in state.mutateSelected { $0.note = String(value.prefix(64_000)) } }
                             ))
                             .font(.body)
                             .scrollContentBackground(.hidden)
                             .padding(7)
                             .frame(minHeight: 76)
                             .background(LibraryTheme.inputBackground, in: RoundedRectangle(cornerRadius: 8))
+                            if clip.localOCR != nil {
+                                Text(L10n.tr("可直接修改原备注和 [OCR:…] 中的识别文字，修改后同步用于搜索。"))
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            } else if clip.localOCRRequest != nil {
+                                Text(L10n.tr("等待后台 OCR，识别成功后会追加到备注末尾。"))
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
 
                             inspectorFieldLabel(L10n.tr("优先级")).padding(.top, 4)
                             Picker(L10n.tr("优先级"), selection: Binding(

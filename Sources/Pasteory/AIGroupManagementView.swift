@@ -22,7 +22,7 @@ struct AIGroupPromptCard: View {
 }
 
 struct AIGroupManagementView: View {
-    enum Scope: Hashable { case selectedGroups, library }
+    enum Scope: Hashable { case recent, selectedGroups, library }
     @ObservedObject var state: AppState
     @ObservedObject private var controller: AIOrganizationController
     @Environment(\.dismiss) private var dismiss
@@ -33,16 +33,23 @@ struct AIGroupManagementView: View {
     @State private var confirmingCleanup = false
     @State private var scope: Scope
 
-    init(state: AppState, preselected: Set<UUID> = [], scope: Scope = .selectedGroups) {
+    init(state: AppState, preselected: Set<UUID> = [], scope: Scope = .recent) {
         self.state = state; controller = state.intelligence
         _selected = State(initialValue: preselected)
         _scope = State(initialValue: scope)
     }
     private var groups: [ClipCollection] { state.orderedAICollections }
     private var groupIDs: Set<UUID> { Set(groups.map(\.id)) }
-    private var selection: AIGroupSelection { AIGroupSelection(groups: (scope == .library ? groupIDs : selected.intersection(groupIDs)).compactMap { controller.state.groups[$0] }) }
-    private var eligibleCount: Int { scope == .library ? controller.eligibleClipIDs.count : selection.memberIDs.intersection(controller.eligibleClipIDs).count }
-    private var scopeCount: Int { scope == .library ? controller.libraryContentCount : selection.memberIDs.count }
+    private var selection: AIGroupSelection { AIGroupSelection(groups: (scope != .selectedGroups ? groupIDs : selected.intersection(groupIDs)).compactMap { controller.state.groups[$0] }) }
+    private var scopeIDs: Set<UUID> {
+        switch scope {
+        case .recent: Set(controller.recentRegroupIDs)
+        case .selectedGroups: selection.memberIDs
+        case .library: Set(controller.clipIndex.values.filter { $0.deletedAt == nil }.map(\.id))
+        }
+    }
+    private var eligibleCount: Int { scopeIDs.intersection(controller.eligibleClipIDs).count }
+    private var scopeCount: Int { scopeIDs.count }
     private var busy: Bool { controller.running || controller.storageBusy }
     private var canOperate: Bool { !busy && controller.pending == nil && controller.state.checkpoint == nil }
 
@@ -59,20 +66,21 @@ struct AIGroupManagementView: View {
                 Text(L10n.tr("资料库共 \(controller.libraryContentCount) 条；已进入 AI 分组 \(controller.groupedContentCount) 条；未进入 AI 分组 \(max(0, controller.libraryContentCount - controller.groupedContentCount)) 条。"))
                     .font(.caption).foregroundStyle(.secondary)
                 Picker(L10n.tr("重新整理范围"), selection: $scope) {
+                    Text(L10n.tr("最近 \(state.settings.aiConfiguration.topN) 条（包含未分组）")).tag(Scope.recent)
                     Text(L10n.tr("仅重分所选组成员")).tag(Scope.selectedGroups)
                     Text(L10n.tr("整个资料库（包含未分组）")).tag(Scope.library)
                 }.pickerStyle(.segmented).disabled(busy)
-                Text(scope == .library
-                     ? L10n.tr("按全局整理偏好重新规划主题并分析全库，检查方案后替换旧 AI 分组。原文和手动文件夹保留。")
+                Text(scope != .selectedGroups
+                     ? L10n.tr("按全局整理偏好重新规划主题，分析所选范围，检查方案后替换旧 AI 分组。原文和手动文件夹保留。")
                      : L10n.tr("此范围只包含已在所选 AI 组中的成员，不包含尚未进入 AI 组的其余内容。"))
                     .font(.caption2).foregroundStyle(.secondary)
             }
             HStack {
-                Text(L10n.tr("已选 \(selection.groupIDs.count) / \(groups.count) 个组，包含 \(selection.memberIDs.count) 条不同内容")).font(.caption)
+                Text(scope == .selectedGroups ? L10n.tr("已选 \(selection.groupIDs.count) / \(groups.count) 个组，包含 \(selection.memberIDs.count) 条不同内容") : L10n.tr("将替换 \(selection.groupIDs.count) 个旧主题；本次分析 \(scopeCount) 条内容")).font(.caption)
                 Spacer()
-                Button(scope == .library ? L10n.tr("已包含全部分组") : selected == groupIDs && !groupIDs.isEmpty ? L10n.tr("取消全选") : L10n.tr("全选")) {
+                Button(scope != .selectedGroups ? L10n.tr("已包含全部分组") : selected == groupIDs && !groupIDs.isEmpty ? L10n.tr("取消全选") : L10n.tr("全选")) {
                     selected = selected == groupIDs ? [] : groupIDs
-                }.disabled(groups.isEmpty || busy || scope == .library)
+                }.disabled(groups.isEmpty || busy || scope != .selectedGroups)
             }
             ScrollView {
                 LazyVStack(spacing: 8) {
@@ -102,9 +110,9 @@ struct AIGroupManagementView: View {
                 Spacer()
                 Button(L10n.tr("清理所选分组…"), role: .destructive) {
                     cleanupSelection = selection; confirmingCleanup = true
-                }.disabled(!canOperate || selection.groupIDs.isEmpty)
+                }.disabled(!canOperate || selection.groupIDs.isEmpty || scope != .selectedGroups)
                 Button(scope == .library ? L10n.tr("生成全库重新分组方案") : L10n.tr("生成重新分组方案")) {
-                    let started = scope == .library ? controller.regroupLibrary() : controller.regroupGroups(selection)
+                    let started = scope == .selectedGroups ? controller.regroupGroups(selection) : controller.regroupLibrary(recentOnly: scope == .recent)
                     if started { dismiss() }
                 }.buttonStyle(.borderedProminent).disabled(!canOperate || eligibleCount == 0)
             }
@@ -133,9 +141,9 @@ struct AIGroupManagementView: View {
         if let group = controller.state.groups[collection.id] {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 9) {
-                Toggle("", isOn: Binding(get: { scope == .library || selected.contains(collection.id) }, set: { value in
+                Toggle("", isOn: Binding(get: { scope != .selectedGroups || selected.contains(collection.id) }, set: { value in
                     if value { selected.insert(collection.id) } else { selected.remove(collection.id) }
-                })).toggleStyle(.checkbox).labelsHidden().disabled(busy || scope == .library)
+                })).toggleStyle(.checkbox).labelsHidden().disabled(busy || scope != .selectedGroups)
                 GroupIdentityIcon(isAI: true)
                 Text(group.name).font(.callout.weight(.semibold))
                 if group.retained || group.definitionIsManual || group.nameIsManual { Text(L10n.tr("含手动设置")).font(.caption2).foregroundStyle(.secondary) }
@@ -172,11 +180,21 @@ struct AIGroupManagementView: View {
                     if scope == .library {
                         Text(L10n.tr("本次按全库范围分批处理，不受最近 Top N 限制；目标为 \(state.settings.aiConfiguration.organizationPolicy.targetGroupCount) 个主题。")).font(.caption2).foregroundStyle(.secondary)
                     }
+                    if scope == .recent {
+                        Text(L10n.tr("按最近复制时间取 Top \(state.settings.aiConfiguration.topN)，包含已分组与未分组内容；不按旧分组成员取样。目标为 \(state.settings.aiConfiguration.organizationPolicy.targetGroupCount) 个主题。"))
+                            .font(.caption2).foregroundStyle(.secondary)
+                        let outside = selection.memberIDs.subtracting(scopeIDs).count
+                        if outside > 0 {
+                            Text(L10n.tr("替换旧主题还会让范围外的 \(outside) 条旧成员返回未分组；这些内容不发送给模型，原文保留。可选全库范围将它们一起重新分类。"))
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
                     Text(L10n.tr("所选旧主题及定义在应用方案时替换，其他主题定义保留；内容可以匹配到已有主题。原有分组在应用前保持可用。")).font(.caption2).foregroundStyle(.secondary)
                     if controller.state.groups.count - selection.groupIDs.count >= state.settings.aiConfiguration.organizationPolicy.maximumGroupCount {
                         Text(L10n.tr("未选组已用完主题名额，本次复用已有主题；无匹配内容保留未分组或候选。")).font(.caption2).foregroundStyle(.secondary)
                     }
                     Text(L10n.tr("正文、显示标题和复制时间；备注：\(state.settings.aiConfiguration.includeNotes ? L10n.tr("包含") : L10n.tr("不包含"))；来源应用名：\(state.settings.aiConfiguration.includeSource ? L10n.tr("包含") : L10n.tr("不包含"))。仅做分类，不生成摘要或聚合。")).font(.caption2).foregroundStyle(.secondary)
+                    Text(state.settings.aiConfiguration.includeImageText == true ? L10n.tr("包含本地 OCR 已识别的图片文字；不发送图片文件。") : L10n.tr("不发送图片 OCR 文字或图片文件；可在 AI 分析策略中启用识别文字。")).font(.caption2).foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
     }

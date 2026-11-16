@@ -728,6 +728,23 @@ struct SettingsView: View {
                 }
             }
             WebCacheSettingsSection(settings: settings, cache: state.webCacheMaintenance)
+            Section(L10n.tr("图片文字识别")) {
+                Toggle(L10n.tr("自动识别新增图片的文字"), isOn: $settings.localImageOCREnabled)
+                    .onChange(of: settings.localImageOCREnabled) { _, enabled in
+                        if enabled { state.resumePendingLocalOCR() } else { state.stopLocalOCR() }
+                    }
+                Picker(L10n.tr("OCR 能力"), selection: $settings.localOCRMethod) {
+                    ForEach(LocalOCRMethod.allCases, id: \.self) { Text($0.title).tag($0) }
+                }.disabled(!settings.localImageOCREnabled)
+                Text(L10n.tr("默认关闭。开启后只在后台处理新入库的图片，历史图片和重复复制的已有图片不补扫；未完成的新增任务可在下次启动继续。准确模式适合中英文，快速模式适合英文等西文，两者均在本机运行。"))
+                    .font(.caption).foregroundStyle(.secondary)
+                Text(L10n.tr("识别成功后在原备注末尾追加 [OCR:识别文字]。原备注和 OCR 内容均可手动编辑，修改后同步用于搜索；无文字时不追加备注。AI 是否使用识别文字由 AI 分析策略单独控制。"))
+                    .font(.caption).foregroundStyle(.secondary)
+                if state.localOCRRunning {
+                    HStack { ProgressView().controlSize(.small); Text(L10n.tr("正在后台识别；本次启动已完成 \(state.localOCRCompleted) 条")).font(.caption) }
+                }
+                if let error = state.localOCRError { Text(error).font(.caption).foregroundStyle(.secondary) }
+            }
             HistoryCleanupSection(state: state, period: storageAnalyticsPeriod)
             Section(L10n.tr("自动归档")) {
                 Text(L10n.tr("超过 30 天或热数据超过 10,000 条时归档。收藏、置顶和普通分组内容不会自动归档。"))

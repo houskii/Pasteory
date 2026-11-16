@@ -16,21 +16,23 @@ struct ClipListPage: Sendable {
 actor ClipListLoader {
     static let pageSize = 100
     private let repository: any ClipRepository
-    private var ranked: (generation: UUID, request: ClipListRequest, clips: [Clip])?
+    private var ranked: (revision: Int64, request: ClipListRequest, clips: [Clip])?
+    private var metadataRevision: Int64?
 
     init(repository: any ClipRepository) { self.repository = repository }
 
     func page(_ request: ClipListRequest, generation: UUID, offset: Int = 0, limit: Int = pageSize) async throws -> ClipListPage {
         let query = request.query.trimmingCharacters(in: .whitespacesAndNewlines)
         if query.isEmpty && request.rules == nil {
-            ranked = nil
             let clips = try await repository.list(filter: request.filter, query: "", limit: limit + 1, offset: offset)
             try Task.checkCancellation()
             return ClipListPage(clips: Array(clips.prefix(limit)), hasMore: clips.count > limit)
         }
 
         let all: [Clip]
-        if let cached = ranked, cached.generation == generation, cached.request == request {
+        let changes = try await repository.clipMetadataChanges(since: metadataRevision)
+        metadataRevision = changes.revision
+        if let cached = ranked, cached.revision == changes.revision, cached.request == request {
             all = cached.clips
         } else {
             // Match against the entire library before paginating the presentation.
@@ -47,7 +49,7 @@ actor ClipListLoader {
             try Task.checkCancellation()
             all = SearchRanker.rank(candidates, query: query)
             try Task.checkCancellation()
-            ranked = (generation, request, all)
+            ranked = (changes.revision, request, all)
         }
         let page = Array(all.dropFirst(offset).prefix(limit))
         let hydrated = try await repository.clips(ids: page.map(\.id))
