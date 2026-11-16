@@ -108,13 +108,16 @@ extension AppState {
             let memberIDs = loaded.flatMap(\.memberClipIDs)
             let all = try await repository.clips(ids: memberIDs).filter { $0.deletedAt == nil }
             let byID = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) })
-            aggregations = loaded
-            aggregationMembers = Dictionary(uniqueKeysWithValues: loaded.map { aggregation in
+            if aggregations != loaded { aggregations = loaded }
+            let members = Dictionary(uniqueKeysWithValues: loaded.map { aggregation in
                 (aggregation.id, aggregation.memberClipIDs.compactMap { byID[$0] })
             })
+            if aggregationMembers != members { aggregationMembers = members }
             let validIDs = Set(loaded.map(\.id))
-            quickExpandedAggregationIDs.formIntersection(validIDs)
-            libraryExpandedAggregationIDs.formIntersection(validIDs)
+            let quickExpanded = quickExpandedAggregationIDs.intersection(validIDs)
+            let libraryExpanded = libraryExpandedAggregationIDs.intersection(validIDs)
+            if quickExpandedAggregationIDs != quickExpanded { quickExpandedAggregationIDs = quickExpanded }
+            if libraryExpandedAggregationIDs != libraryExpanded { libraryExpandedAggregationIDs = libraryExpanded }
             if let id = quickSelectedAggregationID, !validIDs.contains(id) { quickSelectedAggregationID = nil }
             if let id = selectedAggregationID, !validIDs.contains(id) { selectedAggregationID = nil }
         } catch { show(error) }
@@ -123,11 +126,11 @@ extension AppState {
     func selectQuickEntry(_ entry: AggregationListEntry) {
         switch entry.content {
         case .aggregation(let aggregation):
-            quickSelectedAggregationID = aggregation.id
-            quickSelectionID = nil
+            if quickSelectedAggregationID != aggregation.id { quickSelectedAggregationID = aggregation.id }
+            if quickSelectionID != nil { quickSelectionID = nil }
         case .clip(let clip, let parentID):
-            quickSelectedAggregationID = nil
-            quickSelectionID = clip.id
+            if quickSelectedAggregationID != nil { quickSelectedAggregationID = nil }
+            if quickSelectionID != clip.id { quickSelectionID = clip.id }
             if let parentID { quickLastSelectedChildIDs[parentID] = clip.id }
         }
     }
@@ -266,9 +269,9 @@ extension AppState {
     }
 
     func exitQuickMultiSelect() {
-        quickMultiSelectActive = false
-        quickMultiSelectionIDs.removeAll()
-        quickMultiSelectionAnchorID = nil
+        if quickMultiSelectActive { quickMultiSelectActive = false }
+        if !quickMultiSelectionIDs.isEmpty { quickMultiSelectionIDs.removeAll() }
+        if quickMultiSelectionAnchorID != nil { quickMultiSelectionAnchorID = nil }
     }
 
     func prepareQuickAggregation() async {
@@ -359,9 +362,9 @@ extension AppState {
     }
 
     func dismissQuickAggregationDraft() {
-        quickAggregationDraft = nil
-        quickAggregationCommitRequestID = nil
-        quickAggregationDismissRequestID = nil
+        if quickAggregationDraft != nil { quickAggregationDraft = nil }
+        if quickAggregationCommitRequestID != nil { quickAggregationCommitRequestID = nil }
+        if quickAggregationDismissRequestID != nil { quickAggregationDismissRequestID = nil }
     }
 
     func removeAggregation(_ aggregation: ClipAggregation) async {

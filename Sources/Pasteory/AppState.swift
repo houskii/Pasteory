@@ -29,6 +29,9 @@ private actor ClipClassificationPipeline {
 
 @MainActor
 final class AppState: ObservableObject {
+#if DEBUG
+    private(set) var quickPreparationMetrics: [String: Double] = [:]
+#endif
     private struct ViewPosition {
         var quickScope: QuickScope
         var libraryFilter: ClipFilter
@@ -56,6 +59,7 @@ final class AppState: ObservableObject {
     @Published private(set) var quickHasMore = false
     @Published private(set) var libraryHasMore = false
     @Published private(set) var quickLoadingMore = false
+    @Published private(set) var quickCapturePending = false
     @Published private(set) var libraryLoadingMore = false
     @Published var collections: [ClipCollection] = []
     @Published var libraryFilter: ClipFilter = .all
@@ -134,6 +138,10 @@ final class AppState: ObservableObject {
     private var libraryLoadGeneration = UUID()
     private var appliedQuickQuery = ""
     private var appliedQuickScope: QuickScope = .all
+    private var quickSnapshotReady = false
+    private var capturedWrites: [UUID: (displayID: UUID, task: Task<Clip, Error>)] = [:]
+    private var capturedAliases: [UUID: UUID] = [:]
+    private var lastQuickMetadataRefresh = Date.distantPast
     private var appliedLibraryQuery = ""
     private var appliedLibraryFilter: ClipFilter = .all
     private var statusDismissTask: Task<Void, Never>?
@@ -206,14 +214,19 @@ final class AppState: ObservableObject {
         return fixed + shown.map { QuickTab(scope: .collection($0.id), title: $0.name, symbol: $0.kind == .smart ? "sparkles" : "folder") }
     }
     var orderedAICollections: [ClipCollection] {
-        let ranked = collections.filter { intelligence.state.groups[$0.id] != nil }.sorted {
-            let left = intelligence.groupActivity(intelligence.state.groups[$0.id]!).score
-            let right = intelligence.groupActivity(intelligence.state.groups[$1.id]!).score
-            return left == right ? $0.sortOrder < $1.sortOrder : left > right
-        }
         let frozen = intelligence.presentationGroupOrder.isEmpty ? intelligence.state.automation.recommendedIDs : intelligence.presentationGroupOrder
-        let first = frozen.compactMap { id in ranked.first { $0.id == id } }
-        return first + ranked.filter { !frozen.contains($0.id) }
+        let ai = collections.filter { intelligence.state.groups[$0.id] != nil }
+        let byID = Dictionary(uniqueKeysWithValues: ai.map { ($0.id, $0) })
+        let first = frozen.compactMap { byID[$0] }, frozenIDs = Set(frozen)
+        let remaining = ai.filter { !frozenIDs.contains($0.id) }
+        let scores = Dictionary(uniqueKeysWithValues: remaining.map {
+            ($0.id, intelligence.groupActivity(intelligence.state.groups[$0.id]!).score)
+        })
+        let rest = remaining.sorted { lhs, rhs in
+            let left = scores[lhs.id] ?? 0, right = scores[rhs.id] ?? 0
+            return left == right ? lhs.sortOrder < rhs.sortOrder : left > right
+        }
+        return first + rest
     }
     var recommendedAICollections: [ClipCollection] { Array(orderedAICollections.prefix(settings.aiConfiguration.organizationPolicy.recommendedCount)) }
 
@@ -266,9 +279,10 @@ final class AppState: ObservableObject {
 
     func recordHumanUse(_ clip: Clip, event: ContentActivity.Event) async {
         do {
-            try await repository.recordHumanActivity(id: clip.id, event: event, at: Date())
-            if let updated = try await repository.clip(id: clip.id) { replaceLocal(updated); intelligence.synchronize(updated) }
-            if event == .copy { intelligence.contentChanged(clip.id) }
+            let id = await persistedCaptureID(clip.id)
+            try await repository.recordHumanActivity(id: id, event: event, at: Date())
+            if let updated = try await repository.clip(id: id) { replaceLocal(updated); intelligence.synchronize(updated) }
+            if event == .copy { intelligence.contentChanged(id) }
         } catch { show(error) }
     }
 
@@ -336,11 +350,46 @@ final class AppState: ObservableObject {
     func accept(_ capture: PasteboardCapture) async {
         guard let clip = await classificationPipeline.makeClip(from: capture),
               !clip.previewText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let existing = quickClips.first { $0.primaryKind == clip.primaryKind && $0.deduplicationKey == clip.deduplicationKey }
+            ?? intelligence.clipIndex.values.first { $0.deletedAt == nil && $0.primaryKind == clip.primaryKind && $0.deduplicationKey == clip.deduplicationKey }
+        let display = existing?.mergingCapture(clip) ?? clip
+        let first = quickListEntries.first
+        let atTop = quickScrollAnchor == nil || quickScrollAnchor == first?.id
+        let firstSelected: Bool
+        switch first?.content {
+        case .clip(let item, _): firstSelected = quickSelectionID == item.id && quickSelectedAggregationID == nil
+        case .aggregation(let group): firstSelected = quickSelectedAggregationID == group.id
+        case nil: firstSelected = true
+        }
+        let selectNewCopy = quickCapturePending && quickScope == .all && quickQuery.isEmpty && atTop && firstSelected
+        replaceLocal(display)
+        if quickScope == .all, quickQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let limit = max(ClipListLoader.pageSize, quickClips.count)
+            let recent = SearchRanker.rank(quickClips.filter { $0.id != display.id } + [display], query: "")
+            quickClips = Array(recent.prefix(limit))
+            if recent.count > limit, !quickHasMore { quickHasMore = true }
+            quickSnapshotReady = true
+            if selectNewCopy, let first = quickListEntries.first {
+                selectQuickEntry(first); quickListResetID = UUID()
+            }
+        }
+        setQuickCapturePending(false)
+        let requestID = UUID(), repository = repository
+        let write = Task { try await repository.saveCaptured(clip, context: capture.sourceContext) }
+        capturedWrites[requestID] = (display.id, write)
+        defer { capturedWrites.removeValue(forKey: requestID) }
         do {
-            let stored = try await repository.saveCaptured(clip, context: capture.sourceContext)
+            let stored = try await write.value
+            if stored.id != display.id {
+                capturedAliases[display.id] = stored.id
+                quickClips.removeAll { $0.id == display.id }
+                if quickSelectionID == display.id { quickSelectionID = stored.id }
+            }
             intelligence.synchronize(stored)
             intelligence.contentChanged(stored.id)
-            replaceLocal(stored)
+            if !quickClips.contains(where: { $0.id == stored.id && ($0.lastCopiedAt > stored.lastCopiedAt || $0.updatedAt > stored.updatedAt) }) {
+                replaceLocal(stored)
+            }
             await refreshQuick()
             Task { [weak self, linkResolutionService] in
                 guard let self else { return }
@@ -362,6 +411,17 @@ final class AppState: ObservableObject {
                 await self.refreshLinkResolutionData()
             }
         } catch { show(error) }
+    }
+
+    func waitForCapturedWrites() async {
+        for entry in Array(capturedWrites.values) { _ = try? await entry.task.value }
+    }
+
+    private func persistedCaptureID(_ id: UUID) async -> UUID {
+        for entry in Array(capturedWrites.values) where entry.displayID == id {
+            if let stored = try? await entry.task.value { return stored.id }
+        }
+        return capturedAliases[id] ?? id
     }
 
     func refreshLinkResolutionData() async {
@@ -643,8 +703,9 @@ final class AppState: ObservableObject {
                 let page = try await quickListLoader.page(request, generation: generation, limit: limit)
                 guard !Task.isCancelled, query == quickQuery, scope == quickScope else { return }
                 let searchChanged = query != appliedQuickQuery || scope != appliedQuickScope
-                quickClips = page.clips
-                quickHasMore = page.hasMore
+                if quickClips != page.clips { quickClips = page.clips }
+                if quickHasMore != page.hasMore { quickHasMore = page.hasMore }
+                quickSnapshotReady = true
                 appliedQuickQuery = query
                 appliedQuickScope = scope
                 let entries = quickListEntries
@@ -671,13 +732,60 @@ final class AppState: ObservableObject {
     }
 
     func prepareQuickPanel() async {
+#if DEBUG
+        let started = ContinuousClock.now
+        var previous = started
+        func stage(_ name: String) {
+            let now = ContinuousClock.now, duration = previous.duration(to: now)
+            quickPreparationMetrics[name] = Double(duration.components.seconds) * 1000 + Double(duration.components.attoseconds) / 1e15
+            previous = now
+        }
+        quickPreparationMetrics = [:]
+#endif
+        if !prepareCachedQuickPanel() {
+            await refreshQuick(resetSelection: true)
+            _ = prepareCachedQuickPanel()
+        }
+#if DEBUG
+        stage("first_page_ms")
+#endif
+    }
+
+    @discardableResult
+    func prepareCachedQuickPanel() -> Bool {
+        guard quickSnapshotReady, appliedQuickQuery == quickQuery, appliedQuickScope == quickScope else { return false }
+        var reset = quickScrollAnchor != nil && quickScrollAnchor != quickListEntries.first?.id
         quickScrollAnchor = nil
+        if quickClips.count > ClipListLoader.pageSize {
+            quickClips = Array(quickClips.prefix(ClipListLoader.pageSize))
+            if !quickHasMore { quickHasMore = true }
+            reset = true
+        }
+        if let first = quickListEntries.first {
+            switch first.content {
+            case .clip(let clip, _): reset = reset || quickSelectionID != clip.id || quickSelectedAggregationID != nil
+            case .aggregation(let group): reset = reset || quickSelectedAggregationID != group.id || quickSelectionID != nil
+            }
+            selectQuickEntry(first)
+        } else {
+            if quickSelectionID != nil { quickSelectionID = nil; reset = true }
+            if quickSelectedAggregationID != nil { quickSelectedAggregationID = nil; reset = true }
+        }
+        if reset { quickListResetID = UUID(); quickPresentationID = UUID() }
+        return true
+    }
+
+    func setQuickCapturePending(_ pending: Bool) {
+        if quickCapturePending != pending { quickCapturePending = pending }
+    }
+
+    func refreshQuickPanelMetadataIfNeeded(now: Date = Date()) async {
+        guard now.timeIntervalSince(lastQuickMetadataRefresh) >= 30 else { return }
+        lastQuickMetadataRefresh = now
         await refreshCollections()
         await refreshAggregations()
-        await refreshQuick(resetSelection: true)
         await refreshQuickStats()
         intelligence.refreshRecommendations()
-        quickPresentationID = UUID()
     }
 
     func refreshQuickStats(now: Date = Date()) async {
@@ -685,8 +793,9 @@ final class AppState: ObservableObject {
             let range = NaturalDayRange(containing: now)
             async let day = repository.recentClipCount(since: range.todayStart)
             async let week = repository.recentClipCount(since: range.sevenDayStart)
-            quickDayCount = try await day
-            quickWeekCount = try await week
+            let dayCount = try await day, weekCount = try await week
+            if quickDayCount != dayCount { quickDayCount = dayCount }
+            if quickWeekCount != weekCount { quickWeekCount = weekCount }
         } catch { show(error) }
     }
 
@@ -767,12 +876,12 @@ final class AppState: ObservableObject {
     }
 
     func dismissQuickMetadataEditor() {
-        quickMetadataEditorClipID = nil
-        quickMetadataEditorActive = false
-        quickMetadataEditorFocusedField = .title
-        quickMetadataEditorKeyCommand = nil
-        quickMetadataEditorCommitRequestID = nil
-        quickMetadataEditorDismissRequestID = nil
+        if quickMetadataEditorClipID != nil { quickMetadataEditorClipID = nil }
+        if quickMetadataEditorActive { quickMetadataEditorActive = false }
+        if quickMetadataEditorFocusedField != .title { quickMetadataEditorFocusedField = .title }
+        if quickMetadataEditorKeyCommand != nil { quickMetadataEditorKeyCommand = nil }
+        if quickMetadataEditorCommitRequestID != nil { quickMetadataEditorCommitRequestID = nil }
+        if quickMetadataEditorDismissRequestID != nil { quickMetadataEditorDismissRequestID = nil }
     }
 
     func refreshLibrary(debounce: Bool = false, minimumCount: Int = ClipListLoader.pageSize) async {
@@ -895,9 +1004,10 @@ final class AppState: ObservableObject {
                 if collection != original { try await repository.saveCollection(collection) }
                 normalized.append(collection)
             }
-            collections = normalized.sorted { lhs, rhs in
+            let ordered = normalized.sorted { lhs, rhs in
                 lhs.sortOrder == rhs.sortOrder ? lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending : lhs.sortOrder < rhs.sortOrder
             }
+            if collections != ordered { collections = ordered }
         } catch { show(error) }
     }
 
@@ -911,14 +1021,19 @@ final class AppState: ObservableObject {
         let value = changed
         replaceLocal(value)
         Task {
-            do { try await repository.updateExisting(value); intelligence.synchronize(value); intelligence.contentChanged(value.id) }
+            do {
+                var saved = value; saved.id = await persistedCaptureID(value.id)
+                try await repository.updateExisting(saved)
+                replaceLocal(saved); intelligence.synchronize(saved); intelligence.contentChanged(saved.id)
+            }
             catch { show(error) }
         }
     }
 
     func recordPaste(_ clip: Clip) async -> Bool {
         do {
-            guard let updated = try await repository.recordPaste(id: clip.id, at: Date()) else {
+            let id = await persistedCaptureID(clip.id)
+            guard let updated = try await repository.recordPaste(id: id, at: Date()) else {
                 presentStatus(L10n.tr("已粘贴，但没有找到对应的资料库记录"), kind: .warning, dismissAfter: 5)
                 return false
             }

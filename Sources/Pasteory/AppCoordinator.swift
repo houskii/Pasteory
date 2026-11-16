@@ -37,7 +37,11 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
         onOpenSettings: { [weak self] in self?.openSettings() },
         onOpenUpdate: { [weak self] in self?.updateService.checkForUpdates() },
         onCreateTextClip: { [weak self] in self?.createManualTextClip() },
-        prepareClipboard: { [weak self] in await self?.monitor.flushPendingCapture() }
+        prepareClipboard: { [weak self] in
+            guard let self else { return }
+            let ready = await monitor.flushPendingCapture(maximumWait: .milliseconds(30))
+            state.setQuickCapturePending(!ready)
+        }
     )
 
     init(state: AppState, settings: AppSettings, attachments: AttachmentStore, defaults: UserDefaults = .standard) {
@@ -49,6 +53,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
             await state?.accept(capture)
         }
         super.init()
+        monitor.onCaptureSettled = { [weak state] in state?.setQuickCapturePending(false) }
         updateService.onPresent = { [weak self] in self?.presentUpdateDialog() }
         updateService.onDismiss = { [weak self] in self?.updateWindow?.orderOut(nil) }
         languageObservation = settings.$appLanguage.dropFirst().sink { [weak self] language in
@@ -141,6 +146,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
 #endif
         Task {
             await state.bootstrap(processExistingClips: !ProcessInfo.processInfo.arguments.contains("--skip-existing-maintenance"))
+            quickPanel.prewarm()
         }
         Task { await state.webCacheMaintenance.check() }
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
@@ -182,6 +188,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
                     await quickPanel.waitForPresentation()
                     if ProcessInfo.processInfo.arguments.contains("--debug-repeat-quick-presentation") {
                         for _ in 0..<2 {
+                            try? await Task.sleep(for: .milliseconds(250))
                             quickPanel.close(restoreTargetApplication: false)
                             quickPanel.show(); await quickPanel.waitForPresentation()
                         }
@@ -228,6 +235,12 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
 
     func showSettings() {
         openSettings()
+    }
+
+    func prepareToTerminate() async {
+        await monitor.flushPendingCapture()
+        monitor.stop()
+        await state.waitForCapturedWrites()
     }
 
 #if DEBUG
@@ -337,6 +350,11 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
             "libraryHasMore": state.libraryHasMore,
             "organizationRunning": state.intelligence.running,
             "organizationProgress": state.intelligence.checkpointProgress,
+            "aiIndexCount": state.intelligence.clipIndex.count,
+            "aiIndexRepresentationCount": state.intelligence.clipIndex.values.reduce(0) { $0 + $1.items.count },
+            "aiEligibleCount": state.intelligence.eligibleClipIDs.count,
+            "aiGroupedCount": state.intelligence.groupedContentCount,
+            "presentationMetrics": quickPanel.presentationMetrics,
             "sampleTitles": state.quickClips.map(\.title)
         ]
         if let metadataData = try? JSONSerialization.data(withJSONObject: metadata, options: [.prettyPrinted, .sortedKeys]) {

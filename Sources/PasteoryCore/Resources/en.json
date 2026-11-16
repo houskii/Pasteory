@@ -1129,5 +1129,18 @@
   "上次整理进度：{0}": "Saved organization progress: {0}",
   "放弃任务": "Discard task",
   "放弃这次未完成的整理？": "Discard this unfinished organization task?",
-  "仅放弃未应用的整理进度，原有分组和内容保持不变。之后可以重新开始整理。": "Only unapplied progress will be discarded. Your existing groups and content will be kept, and you can start again."
+  "仅放弃未应用的整理进度，原有分组和内容保持不变。之后可以重新开始整理。": "Only unapplied progress will be discarded. Your existing groups and content will be kept, and you can start again.",
+  "正在读取刚复制的内容…": "Reading the content you just copied…",
+  "资料库共 {0} 条；已进入 AI 分组 {1} 条；未进入 AI 分组 {2} 条。": "Library: {0} items; in AI groups: {1}; outside AI groups: {2}.",
+  "重新整理范围": "Reorganization scope",
+  "仅重分所选组成员": "Selected group members only",
+  "整个资料库（包含未分组）": "Entire library, including ungrouped items",
+  "按全局整理偏好重新规划主题并分析全库，检查方案后替换旧 AI 分组。原文和手动文件夹保留。": "Plan new themes from your global preferences and analyze the entire library. Existing AI groups are replaced after you review and apply the plan. Original content and manual folders are kept.",
+  "此范围只包含已在所选 AI 组中的成员，不包含尚未进入 AI 组的其余内容。": "This scope includes only members already in the selected AI groups. Items outside those groups are excluded.",
+  "生成全库重新分组方案": "Generate a new plan for the entire library",
+  "沿用现有主题分析全库": "Analyze the library using existing themes",
+  "重新整理全库…": "Reorganize the entire library…",
+  "不满意现有主题时，请到资料库的 AI 整理菜单选择“重新整理全库…”，确认全库范围和 Prompt 后生成替换方案。": "To replace existing themes, choose Reorganize the entire library… in the library AI menu, review the scope and prompt, then generate a replacement plan.",
+  "已包含全部分组": "All groups included",
+  "本次按全库范围分批处理，不受最近 Top N 限制；目标为 {0} 个主题。": "The entire library is processed in batches, without the recent Top N limit. Target: {0} themes."
 }

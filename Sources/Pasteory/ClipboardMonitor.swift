@@ -13,6 +13,8 @@ final class ClipboardMonitor {
     private var ownChangeCounts = Set<Int>()
     private var observers = [NSObjectProtocol]()
     private var captureWork: Task<Void, Never>?
+    private var pendingCaptureCount = 0
+    var onCaptureSettled: (() -> Void)?
     private(set) var isRunning = false
 
     init(
@@ -83,10 +85,17 @@ final class ClipboardMonitor {
 
     /// The hotkey checks the pasteboard before activating Pasteory, so a copy
     /// made between polling ticks is ready for the panel's first frame.
-    func flushPendingCapture() async {
-        guard isRunning else { return }
+    @discardableResult
+    func flushPendingCapture(maximumWait: Duration? = nil) async -> Bool {
+        guard isRunning else { return true }
         capturePendingChanges()
-        await captureWork?.value
+        if let maximumWait {
+            let deadline = ContinuousClock.now.advanced(by: maximumWait)
+            while pendingCaptureCount > 0, ContinuousClock.now < deadline, !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(3))
+            }
+        } else { await captureWork?.value }
+        return pendingCaptureCount == 0
     }
 
     private func capturePendingChanges() {
@@ -128,7 +137,12 @@ final class ClipboardMonitor {
             ["public.utf8-plain-text", "public.text", "NSStringPboardType", "public.url"].contains($0.uti)
         }).flatMap { String(data: $0.data, encoding: .utf8) } ?? ""
         let previous = captureWork
+        pendingCaptureCount += 1
         captureWork = Task {
+            defer {
+                pendingCaptureCount -= 1
+                if pendingCaptureCount == 0 { onCaptureSettled?() }
+            }
             let context = await sourceContextCapture.captureContext(for: source, copiedText: copiedText, capturedAt: capturedAt)
             let effectiveSource: ClipSource
             if context?.strategyIdentifier == "chrome.extension.web-context.v1",

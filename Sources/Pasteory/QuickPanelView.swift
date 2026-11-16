@@ -58,9 +58,9 @@ struct QuickPanelView: View {
         }
         .onAppear {
             searchFocused = false
-            state.quickSearchFocused = false
+            if state.quickSearchFocused { state.quickSearchFocused = false }
             DispatchQueue.main.async {
-                NSApp.keyWindow?.makeFirstResponder(nil)
+                (NSApp.keyWindow as? PasteoryPanel)?.makeFirstResponder(nil)
             }
 #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--debug-show-collection-overview") {
@@ -127,8 +127,9 @@ struct QuickPanelView: View {
             .buttonStyle(.plain).help(state.quickPanelPinned ? L10n.tr("取消固定") : L10n.tr("固定面板"))
 
             HStack(spacing: 7) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField(L10n.tr("输入开始搜索…"), text: $state.quickQuery)
+                if state.quickCapturePending { ProgressView().controlSize(.mini) }
+                else { Image(systemName: "magnifyingglass").foregroundStyle(.secondary) }
+                TextField(state.quickCapturePending ? L10n.tr("正在读取刚复制的内容…") : L10n.tr("输入开始搜索…"), text: $state.quickQuery)
                     .textFieldStyle(.plain)
                     .focused($searchFocused)
                     .onChange(of: state.quickQuery) { _, _ in Task { await state.refreshQuick(debounce: true) } }

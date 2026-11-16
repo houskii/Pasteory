@@ -145,9 +145,16 @@ final class QuickPanelController: NSObject {
         panel.title = L10n.tr("Pasteory 快捷面板")
     }
 
+    func prewarm() {
+        guard !panel.isVisible, presentationTask == nil else { return }
+        _ = state.prepareCachedQuickPanel()
+        panel.contentView?.layoutSubtreeIfNeeded()
+    }
+
     func toggle() { panel.isVisible || presentationTask != nil ? close() : show() }
 
 #if DEBUG
+    private(set) var presentationMetrics: [[String: Double]] = []
     var debugWindow: NSWindow { panel }
     func waitForPresentation() async { await presentationTask?.value }
 #endif
@@ -165,8 +172,8 @@ final class QuickPanelController: NSObject {
 #endif
         presentationTask?.cancel()
         activatedApplicationForQuickPanel = false
-        state.quickCommandKeyDown = false
-        state.quickSearchFocused = false
+        if state.quickCommandKeyDown { state.quickCommandKeyDown = false }
+        if state.quickSearchFocused { state.quickSearchFocused = false }
         cancelPendingCommandHelp()
         hideCommandHelp()
         commandHelpArmed = !NSEvent.modifierFlags.contains(.command)
@@ -190,6 +197,9 @@ final class QuickPanelController: NSObject {
             // Capture the external app's clipboard and finish the initial page
             // while hidden. Showing cached rows first caused visible jumps.
             await prepareClipboard()
+#if DEBUG
+            let clipboardReady = ContinuousClock.now
+#endif
             guard !Task.isCancelled else { return }
             await state.prepareQuickPanel()
             guard !Task.isCancelled else { return }
@@ -210,7 +220,22 @@ final class QuickPanelController: NSObject {
             if backgroundSnapshot { panel.orderBack(nil) }
             else { panel.makeKeyAndOrderFront(nil); panel.makeFirstResponder(nil) }
 #if DEBUG
+            func ms(_ duration: Duration) -> Double {
+                Double(duration.components.seconds) * 1000 + Double(duration.components.attoseconds) / 1e15
+            }
+            var metrics = state.quickPreparationMetrics
+            metrics["clipboard_ms"] = ms(preparationStarted.duration(to: clipboardReady))
+            metrics["before_show_ms"] = milliseconds
+            metrics["through_show_ms"] = ms(preparationStarted.duration(to: .now))
+            let metricIndex = presentationMetrics.count
+            presentationMetrics.append(metrics)
+            if let data = try? JSONSerialization.data(withJSONObject: metrics, options: [.sortedKeys]) {
+                FileHandle.standardError.write(data + Data("\n".utf8))
+            }
             DispatchQueue.main.async { [weak panel] in
+                panel?.contentView?.layoutSubtreeIfNeeded()
+                panel?.displayIfNeeded()
+                self.presentationMetrics[metricIndex]["layout_ready_ms"] = ms(preparationStarted.duration(to: .now))
                 print("quick-panel-is-key=\(panel?.isKeyWindow == true)")
                 if ProcessInfo.processInfo.arguments.contains("--debug-panel-frame"), let panel {
                     print("quick-panel-frame-stable=\(panel.frame == frameBeforeShow) before=\(NSStringFromRect(frameBeforeShow)) after=\(NSStringFromRect(panel.frame))")
@@ -219,6 +244,11 @@ final class QuickPanelController: NSObject {
 #endif
             installKeyMonitor()
             installOutsideClickMonitor()
+            Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(200))
+                guard let self else { return }
+                await state.refreshQuickPanelMetadataIfNeeded()
+            }
 #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--debug-command-help") {
                 state.quickCommandKeyDown = true
@@ -230,22 +260,24 @@ final class QuickPanelController: NSObject {
 
     func close(restoreTargetApplication: Bool = true) {
         presentationTask?.cancel(); presentationTask = nil
-        state.quickCommandKeyDown = false
-        state.quickSearchFocused = false
-        state.quickQuery = ""
+        panel.orderOut(nil)
+        if state.quickCommandKeyDown { state.quickCommandKeyDown = false }
+        if state.quickSearchFocused { state.quickSearchFocused = false }
+        if !state.quickQuery.isEmpty { state.quickQuery = "" }
+        state.setQuickCapturePending(false)
         state.quickActionsMenu.cancel()
         commandHelpArmed = false
         cancelPendingCommandHelp()
         hideCommandHelp()
         state.quickHoveredClipID = nil
         state.dismissQuickMetadataEditor()
-        state.quickCollectionPickerActive = false
-        state.quickNewNormalCollectionActive = false
-        state.quickCollectionManagerActive = false
+        if state.quickCollectionPickerActive { state.quickCollectionPickerActive = false }
+        if state.quickNewNormalCollectionActive { state.quickNewNormalCollectionActive = false }
+        if state.quickCollectionManagerActive { state.quickCollectionManagerActive = false }
         state.dismissQuickAggregationDraft()
         state.exitQuickMultiSelect()
         panel.saveFrame(usingName: frameAutosaveName)
-        panel.orderOut(nil)
+        _ = state.prepareCachedQuickPanel()
         if let eventMonitor { NSEvent.removeMonitor(eventMonitor); self.eventMonitor = nil }
         if let globalMouseMonitor { NSEvent.removeMonitor(globalMouseMonitor); self.globalMouseMonitor = nil }
         if activatedApplicationForQuickPanel,

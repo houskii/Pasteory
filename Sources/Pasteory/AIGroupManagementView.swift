@@ -22,6 +22,7 @@ struct AIGroupPromptCard: View {
 }
 
 struct AIGroupManagementView: View {
+    enum Scope: Hashable { case selectedGroups, library }
     @ObservedObject var state: AppState
     @ObservedObject private var controller: AIOrganizationController
     @Environment(\.dismiss) private var dismiss
@@ -30,17 +31,20 @@ struct AIGroupManagementView: View {
     @State private var promptExpanded = false
     @State private var cleanupSelection: AIGroupSelection?
     @State private var confirmingCleanup = false
+    @State private var scope: Scope
 
-    init(state: AppState, preselected: Set<UUID> = []) {
+    init(state: AppState, preselected: Set<UUID> = [], scope: Scope = .selectedGroups) {
         self.state = state; controller = state.intelligence
         _selected = State(initialValue: preselected)
+        _scope = State(initialValue: scope)
     }
     private var groups: [ClipCollection] { state.orderedAICollections }
     private var groupIDs: Set<UUID> { Set(groups.map(\.id)) }
-    private var selection: AIGroupSelection { AIGroupSelection(groups: selected.intersection(groupIDs).compactMap { controller.state.groups[$0] }) }
-    private var eligibleCount: Int { selection.memberIDs.filter { controller.clipIndex[$0]?.mayParticipateInAI == true }.count }
+    private var selection: AIGroupSelection { AIGroupSelection(groups: (scope == .library ? groupIDs : selected.intersection(groupIDs)).compactMap { controller.state.groups[$0] }) }
+    private var eligibleCount: Int { scope == .library ? controller.eligibleClipIDs.count : selection.memberIDs.intersection(controller.eligibleClipIDs).count }
+    private var scopeCount: Int { scope == .library ? controller.libraryContentCount : selection.memberIDs.count }
     private var busy: Bool { controller.running || controller.storageBusy }
-    private var canOperate: Bool { !busy && controller.pending == nil && controller.state.checkpoint == nil && !selection.groupIDs.isEmpty }
+    private var canOperate: Bool { !busy && controller.pending == nil && controller.state.checkpoint == nil }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -51,12 +55,24 @@ struct AIGroupManagementView: View {
                 }
                 Spacer(); Button(L10n.tr("关闭")) { dismiss() }
             }
+            VStack(alignment: .leading, spacing: 5) {
+                Text(L10n.tr("资料库共 \(controller.libraryContentCount) 条；已进入 AI 分组 \(controller.groupedContentCount) 条；未进入 AI 分组 \(max(0, controller.libraryContentCount - controller.groupedContentCount)) 条。"))
+                    .font(.caption).foregroundStyle(.secondary)
+                Picker(L10n.tr("重新整理范围"), selection: $scope) {
+                    Text(L10n.tr("仅重分所选组成员")).tag(Scope.selectedGroups)
+                    Text(L10n.tr("整个资料库（包含未分组）")).tag(Scope.library)
+                }.pickerStyle(.segmented).disabled(busy)
+                Text(scope == .library
+                     ? L10n.tr("按全局整理偏好重新规划主题并分析全库，检查方案后替换旧 AI 分组。原文和手动文件夹保留。")
+                     : L10n.tr("此范围只包含已在所选 AI 组中的成员，不包含尚未进入 AI 组的其余内容。"))
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
             HStack {
                 Text(L10n.tr("已选 \(selection.groupIDs.count) / \(groups.count) 个组，包含 \(selection.memberIDs.count) 条不同内容")).font(.caption)
                 Spacer()
-                Button(selected == groupIDs && !groupIDs.isEmpty ? L10n.tr("取消全选") : L10n.tr("全选")) {
+                Button(scope == .library ? L10n.tr("已包含全部分组") : selected == groupIDs && !groupIDs.isEmpty ? L10n.tr("取消全选") : L10n.tr("全选")) {
                     selected = selected == groupIDs ? [] : groupIDs
-                }.disabled(groups.isEmpty || busy)
+                }.disabled(groups.isEmpty || busy || scope == .library)
             }
             ScrollView {
                 LazyVStack(spacing: 8) {
@@ -86,9 +102,10 @@ struct AIGroupManagementView: View {
                 Spacer()
                 Button(L10n.tr("清理所选分组…"), role: .destructive) {
                     cleanupSelection = selection; confirmingCleanup = true
-                }.disabled(!canOperate)
-                Button(L10n.tr("生成重新分组方案")) {
-                    if controller.regroupGroups(selection) { dismiss() }
+                }.disabled(!canOperate || selection.groupIDs.isEmpty)
+                Button(scope == .library ? L10n.tr("生成全库重新分组方案") : L10n.tr("生成重新分组方案")) {
+                    let started = scope == .library ? controller.regroupLibrary() : controller.regroupGroups(selection)
+                    if started { dismiss() }
                 }.buttonStyle(.borderedProminent).disabled(!canOperate || eligibleCount == 0)
             }
         }
@@ -116,9 +133,9 @@ struct AIGroupManagementView: View {
         if let group = controller.state.groups[collection.id] {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 9) {
-                Toggle("", isOn: Binding(get: { selected.contains(collection.id) }, set: { value in
+                Toggle("", isOn: Binding(get: { scope == .library || selected.contains(collection.id) }, set: { value in
                     if value { selected.insert(collection.id) } else { selected.remove(collection.id) }
-                })).toggleStyle(.checkbox).labelsHidden().disabled(busy)
+                })).toggleStyle(.checkbox).labelsHidden().disabled(busy || scope == .library)
                 GroupIdentityIcon(isAI: true)
                 Text(group.name).font(.callout.weight(.semibold))
                 if group.retained || group.definitionIsManual || group.nameIsManual { Text(L10n.tr("含手动设置")).font(.caption2).foregroundStyle(.secondary) }
@@ -151,7 +168,10 @@ struct AIGroupManagementView: View {
             .padding(10).background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 9))
                 VStack(alignment: .leading, spacing: 3) {
                     Text(L10n.tr("当前模型：\(state.settings.aiConfiguration.model.isEmpty ? L10n.tr("未设置") : state.settings.aiConfiguration.model)")).font(.caption2).foregroundStyle(.secondary)
-                    Text(L10n.tr("重新分组范围：\(eligibleCount) 条可分析内容，\(selection.memberIDs.count - eligibleCount) 条不发送给模型。")).font(.caption2)
+                    Text(L10n.tr("重新分组范围：\(eligibleCount) 条可分析内容，\(scopeCount - eligibleCount) 条不发送给模型。")).font(.caption2)
+                    if scope == .library {
+                        Text(L10n.tr("本次按全库范围分批处理，不受最近 Top N 限制；目标为 \(state.settings.aiConfiguration.organizationPolicy.targetGroupCount) 个主题。")).font(.caption2).foregroundStyle(.secondary)
+                    }
                     Text(L10n.tr("所选旧主题及定义在应用方案时替换，其他主题定义保留；内容可以匹配到已有主题。原有分组在应用前保持可用。")).font(.caption2).foregroundStyle(.secondary)
                     if controller.state.groups.count - selection.groupIDs.count >= state.settings.aiConfiguration.organizationPolicy.maximumGroupCount {
                         Text(L10n.tr("未选组已用完主题名额，本次复用已有主题；无匹配内容保留未分组或候选。")).font(.caption2).foregroundStyle(.secondary)

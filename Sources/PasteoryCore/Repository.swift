@@ -23,6 +23,8 @@ public protocol ClipRepository: Sendable {
     func recordPaste(id: UUID, at date: Date) async throws -> Clip?
     func list(filter: ClipFilter, query: String, limit: Int) async throws -> [Clip]
     func list(filter: ClipFilter, query: String, limit: Int, offset: Int) async throws -> [Clip]
+    func listMetadata(filter: ClipFilter, query: String, limit: Int, offset: Int) async throws -> [Clip]
+    func aiClipMetadata() async throws -> [Clip]
     func removePermanently(id: UUID) async throws
     func purgeTrash(olderThan date: Date) async throws -> Int
     func previewHistoryCleanup(olderThan cutoff: Date, largerThan minimumBytes: Int64) async throws -> HistoryCleanupPreview

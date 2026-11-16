@@ -19,6 +19,7 @@ struct LibraryView: View {
     @State private var showingAIGroupManager = false
     @State private var suppressingManagerReview = false
     @State private var managedGroupIDs = Set<UUID>()
+    @State private var managedScope = AIGroupManagementView.Scope.selectedGroups
 
     private var accentColor: Color { state.settings.themeColor.accentColor }
     private var brandGradient: LinearGradient { state.settings.themeColor.gradient }
@@ -89,7 +90,7 @@ struct LibraryView: View {
             AIReviewView(controller: state.intelligence)
         }
         .sheet(isPresented: $showingAIGroupManager, onDismiss: { suppressingManagerReview = false }) {
-            AIGroupManagementView(state: state, preselected: managedGroupIDs)
+            AIGroupManagementView(state: state, preselected: managedGroupIDs, scope: managedScope)
         }
         .sheet(item: $state.libraryAggregationDraft) { draft in
             LibraryAggregationEditor(state: state, draft: draft) { state.libraryAggregationDraft = nil }
@@ -104,12 +105,14 @@ struct LibraryView: View {
                 state.libraryFilter = .collection(first.id); await state.refreshLibrary()
             }
             if ProcessInfo.processInfo.arguments.contains("--debug-ai-group-manager") { openAIGroupManager() }
+            if ProcessInfo.processInfo.arguments.contains("--debug-ai-group-library") { openAIGroupManager(scope: .library) }
 #endif
         }
         .onChange(of: state.requestedCollectionEditorID) { _, _ in openRequestedCollectionEditor() }
     }
 
-    private func openAIGroupManager() {
+    private func openAIGroupManager(scope: AIGroupManagementView.Scope = .selectedGroups) {
+        managedScope = scope
         if case .collection(let id) = state.libraryFilter, state.intelligence.state.groups[id] != nil { managedGroupIDs = [id] }
         else { managedGroupIDs = [] }
         suppressingManagerReview = true; showingAIGroupManager = true
@@ -373,7 +376,8 @@ struct LibraryView: View {
                         Button(L10n.tr("分析最近内容")) { state.intelligence.analyze() }
                         Button(L10n.tr("检查整理建议")) { state.intelligence.showingReview = true }
                             .disabled(state.intelligence.pending == nil)
-                        Button(L10n.tr("分批整理全库")) { state.intelligence.analyze(all: true) }
+                        Button(L10n.tr("沿用现有主题分析全库")) { state.intelligence.analyze(all: true) }
+                        Button(L10n.tr("重新整理全库…")) { openAIGroupManager(scope: .library) }
                         Button(L10n.tr("复核主题与低活跃分组")) { state.intelligence.analyze(trigger: "manual-review") }
                         if state.intelligence.latestUndoable != nil {
                             Button(L10n.tr("撤销最近一次整理")) { Task { await state.intelligence.undo() } }

@@ -14,6 +14,7 @@ final class AIOrganizationController: ObservableObject {
     @Published var showingReview = false
     @Published private(set) var clipIndex: [UUID: Clip] = [:]
     @Published private(set) var clipActivities: [UUID: ActivityEvaluation] = [:]
+    private(set) var eligibleClipIDs = Set<UUID>()
     @Published private(set) var storageBusy = false
     let repository: any ClipRepository
     let settings: AppSettings
@@ -68,6 +69,10 @@ final class AIOrganizationController: ObservableObject {
         return "\(job.cursor) / \(job.clipIDs.count)"
     }
     var needsAttention: Bool { running || pending != nil || state.checkpoint != nil || error != nil }
+    var libraryContentCount: Int { clipIndex.values.filter { $0.deletedAt == nil }.count }
+    var groupedContentCount: Int {
+        Set(state.groups.values.flatMap(\.memberIDs)).filter { clipIndex[$0]?.deletedAt == nil && clipIndex[$0] != nil }.count
+    }
 
     func bootstrap(deferMaintenance: Bool = false) async {
         if deferMaintenance { lastLifecycleRefresh = clock() }
@@ -92,10 +97,16 @@ final class AIOrganizationController: ObservableObject {
             state.automation.viewedGroupMembers = baseline
             try await repository.updateAIState { if $0.automation.viewedGroupMembers == nil { $0.automation.viewedGroupMembers = baseline } }
         }
-        let clips = try await repository.allClips()
-        clipIndex = Dictionary(uniqueKeysWithValues: clips.map { ($0.id, $0) })
+        let clips = try await repository.aiClipMetadata()
         let policy = settings.aiConfiguration.lifecycle
-        clipActivities = Dictionary(uniqueKeysWithValues: clips.filter { $0.deletedAt == nil }.map { ($0.id, policy.evaluate($0.activity)) })
+        let prepared = await Task.detached(priority: .utility) {
+            (Dictionary(uniqueKeysWithValues: clips.map { ($0.id, $0) }),
+             Dictionary(uniqueKeysWithValues: clips.filter { $0.deletedAt == nil }.map { ($0.id, policy.evaluate($0.activity)) }),
+             Set(clips.filter(\.mayParticipateInAI).map(\.id)))
+        }.value
+        eligibleClipIDs = prepared.2
+        if clipIndex != prepared.0 { clipIndex = prepared.0 }
+        if clipActivities != prepared.1 { clipActivities = prepared.1 }
     }
 
     func contentChanged(_ id: UUID) {
@@ -112,14 +123,15 @@ final class AIOrganizationController: ObservableObject {
 
     func refreshRecommendations() {
         let count = settings.aiConfiguration.organizationPolicy.recommendedCount
-        let ordered = state.groups.values.sorted {
-            let left = groupActivity($0).score, right = groupActivity($1).score
-            if $0.retained != $1.retained { return $0.retained }
-            if left != right { return left > right }
-            return $0.id.uuidString < $1.id.uuidString
-        }.map(\.id)
+        let ordered = state.groups.values.map { (group: $0, score: groupActivity($0).score) }.sorted {
+            if $0.group.retained != $1.group.retained { return $0.group.retained }
+            if $0.score != $1.score { return $0.score > $1.score }
+            return $0.group.id.uuidString < $1.group.id.uuidString
+        }.map(\.group.id)
         let next = Array(ordered.prefix(count)), old = recommendedIDs.isEmpty ? state.automation.recommendedIDs : recommendedIDs
-        recommendedIDs = next; presentationGroupOrder = ordered
+        if recommendedIDs != next { recommendedIDs = next }
+        if presentationGroupOrder != ordered { presentationGroupOrder = ordered }
+        guard state.automation.recommendedIDs != next || old != next else { return }
         let now = clock(), repository = repository
         state.automation.recommendedIDs = next
         for id in Set(old).subtracting(next) { state.automation.protectedUntil[id] = now.addingTimeInterval(7 * 86_400) }
@@ -163,7 +175,9 @@ final class AIOrganizationController: ObservableObject {
     }
 
     func synchronize(_ clip: Clip) {
-        clipIndex[clip.id] = clip
+        if clip.mayParticipateInAI { eligibleClipIDs.insert(clip.id) } else { eligibleClipIDs.remove(clip.id) }
+        var metadata = clip; metadata.items = []
+        clipIndex[clip.id] = metadata
         if clip.deletedAt == nil { clipActivities[clip.id] = settings.aiConfiguration.lifecycle.evaluate(clip.activity) }
         else { clipActivities.removeValue(forKey: clip.id) }
     }
@@ -310,10 +324,23 @@ final class AIOrganizationController: ObservableObject {
         guard settings.aiConfiguration.enabled else { error = L10n.tr("请先在 AI 整理设置中启用模型连接"); return false }
         do {
             try settings.aiConfiguration.validate(); try selection.validate(in: state.groups)
-            guard selection.memberIDs.contains(where: { clipIndex[$0]?.mayParticipateInAI == true }) else {
+            guard !selection.memberIDs.isDisjoint(with: eligibleClipIDs) else {
                 error = L10n.tr("所选组没有可分析内容，可以使用清理分组"); return false
             }
             analyze(trigger: "manual-regroup", groupSelection: selection)
+            return running
+        } catch { self.error = error.localizedDescription; return false }
+    }
+
+    func regroupLibrary() -> Bool {
+        guard !running, !storageBusy else { return false }
+        guard pending == nil, state.checkpoint == nil else { error = L10n.tr("请先处理整理建议或继续、放弃已保存的任务"); return false }
+        guard settings.aiConfiguration.enabled else { error = L10n.tr("请先在 AI 整理设置中启用模型连接"); return false }
+        do {
+            try settings.aiConfiguration.validate()
+            guard !eligibleClipIDs.isEmpty else { error = L10n.tr("没有需要整理的内容"); return false }
+            let selection = state.groups.isEmpty ? nil : AIGroupSelection(groups: Array(state.groups.values))
+            analyze(all: true, trigger: "manual-regroup-all", groupSelection: selection)
             return running
         } catch { self.error = error.localizedDescription; return false }
     }
@@ -380,12 +407,13 @@ final class AIOrganizationController: ObservableObject {
         let replacedIDs = selection?.groupIDs ?? []
         let catalogGroups = Array(state.groups.values.filter { !replacedIDs.contains($0.id) })
         let protected = selection == nil ? protectedGroups : Set(catalogGroups.map(\.id))
-        let eligible = clipIndex.values.filter(\.mayParticipateInAI).sorted {
+        let eligible = clipIndex.values.filter { eligibleClipIDs.contains($0.id) }.sorted {
             $0.lastCopiedAt == $1.lastCopiedAt ? $0.id.uuidString < $1.id.uuidString : $0.lastCopiedAt > $1.lastCopiedAt
         }
         let catalog = AIThemeCatalog.fingerprint(Array(state.groups.values)), prompt = AIHash.fingerprint(config.prompt)
         let focus: [Clip]
-        if let selection { focus = eligible.filter { selection.memberIDs.contains($0.id) } }
+        if trigger == "manual-regroup-all" { focus = eligible }
+        else if let selection { focus = eligible.filter { selection.memberIDs.contains($0.id) } }
         else if let ids = contentIDs { let selected = Set(ids); focus = eligible.filter { selected.contains($0.id) } }
         else if review {
             let cold = Set(state.groups.keys).subtracting(protected)
@@ -427,6 +455,7 @@ final class AIOrganizationController: ObservableObject {
             job.organization = AIJobOrganization(trigger: trigger, revisions: Dictionary(uniqueKeysWithValues: focus.map { ($0.id, $0.aiContentRevision) }), protectedGroupIDs: protected, review: review)
             job.organization?.semanticFingerprint = AIThemeCatalog.configurationFingerprint(config)
             job.organization?.requiresThemePlan = review || (trigger.hasPrefix("manual") && state.groups.isEmpty && focus.count >= 18)
+            if trigger == "manual-regroup-all", focus.count >= policy.minimumThemeMembers { job.organization?.requiresThemePlan = true }
             if let selection {
                 job.organization?.groupSelection = selection
                 job.organization?.groupCleanup = try AIGroupManagement.cleanup(selection, state: state, clips: Array(clipIndex.values))

@@ -67,34 +67,8 @@ public actor SQLiteClipRepository: ClipRepository {
         }
         var stored = incoming
         try transaction {
-            if var previous = try activeClip(identityKey: incoming.deduplicationKey, kind: incoming.primaryKind) {
-                previous.copyCount += max(1, incoming.copyCount)
-                var activity = previous.activity
-                activity.record(.copy, at: incoming.createdAt)
-                previous.intelligenceActivity = activity
-                previous.lifecycleEvaluation = nil
-                previous.lastCopiedAt = max(previous.lastCopiedAt, incoming.createdAt)
-                previous.updatedAt = max(previous.updatedAt, incoming.createdAt)
-                previous.source = incoming.source
-                previous.isArchived = false
-                previous.archivePath = nil
-                previous.previewText = incoming.previewText
-                previous.contentHash = incoming.contentHash
-                previous.identityKey = incoming.identityKey
-                previous.byteSize = incoming.byteSize
-                previous.items = incoming.items
-                previous.secondaryKinds.formUnion(incoming.secondaryKinds)
-                if previous.automaticTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
-                    previous.automaticTitle = incoming.automaticTitle
-                }
-                if incoming.codeMetadata != nil { previous.codeMetadata = incoming.codeMetadata }
-                if incoming.fileMetadata != nil { previous.fileMetadata = incoming.fileMetadata }
-                for transformation in incoming.quickTextTransformations ?? [] {
-                    if previous.quickTextTransformations?.contains(transformation) == true { continue }
-                    previous.quickTextTransformations = (previous.quickTextTransformations ?? []) + [transformation]
-                    if !previous.note.isEmpty { previous.note += "\n\n" }
-                    previous.note += transformation.note
-                }
+            if let existing = try activeClip(identityKey: incoming.deduplicationKey, kind: incoming.primaryKind) {
+                let previous = existing.mergingCapture(incoming)
                 try save(previous)
                 stored = previous
             } else {
@@ -260,6 +234,14 @@ public actor SQLiteClipRepository: ClipRepository {
     }
 
     public func list(filter: ClipFilter, query: String, limit: Int, offset: Int) throws -> [Clip] {
+        try list(filter: filter, query: query, limit: limit, offset: offset, metadataOnly: false)
+    }
+
+    public func listMetadata(filter: ClipFilter, query: String, limit: Int, offset: Int) throws -> [Clip] {
+        try list(filter: filter, query: query, limit: limit, offset: offset, metadataOnly: true)
+    }
+
+    private func list(filter: ClipFilter, query: String, limit: Int, offset: Int, metadataOnly: Bool) throws -> [Clip] {
         var clauses = [String]()
         var bindings = [String]()
         switch filter {
@@ -302,7 +284,8 @@ public actor SQLiteClipRepository: ClipRepository {
         }
         let whereSQL = clauses.isEmpty ? "1" : clauses.joined(separator: " AND ")
         let ordering = "c.pinned DESC, c.last_used_at DESC, c.id ASC"
-        let sql = "SELECT c.payload_json FROM clips c \(join) WHERE \(whereSQL) ORDER BY \(ordering) LIMIT ? OFFSET ?;"
+        let payload = metadataOnly ? "json_set(c.payload_json, '$.items', json_array())" : "c.payload_json"
+        let sql = "SELECT \(payload) FROM clips c \(join) WHERE \(whereSQL) ORDER BY \(ordering) LIMIT ? OFFSET ?;"
         let statement = try prepare(sql)
         defer { sqlite3_finalize(statement) }
         for (index, value) in bindings.enumerated() { bind(value, at: Int32(index + 1), to: statement) }
@@ -551,6 +534,16 @@ public actor SQLiteClipRepository: ClipRepository {
 
     public func allClips() throws -> [Clip] {
         let statement = try prepare("SELECT payload_json FROM clips ORDER BY created_at;")
+        defer { sqlite3_finalize(statement) }
+        var result = [Clip]()
+        while sqlite3_step(statement) == SQLITE_ROW { result.append(try decodeClip(statement, column: 0)) }
+        return result
+    }
+
+    /// AI needs revisions, previews, activity and membership, never every
+    /// inline representation in memory. Full context is loaded per batch.
+    public func aiClipMetadata() throws -> [Clip] {
+        let statement = try prepare("SELECT json_set(payload_json, '$.items', json_array()) FROM clips ORDER BY created_at;")
         defer { sqlite3_finalize(statement) }
         var result = [Clip]()
         while sqlite3_step(statement) == SQLITE_ROW { result.append(try decodeClip(statement, column: 0)) }

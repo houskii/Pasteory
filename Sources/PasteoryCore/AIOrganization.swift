@@ -30,7 +30,7 @@ public extension Clip {
                               note: includeNotes ? note : "", source: includeSource ? source.appName : "",
                               kind: primaryKind.rawValue, copiedAt: lastCopiedAt,
                               groupIDs: collectionIDs.sorted { $0.uuidString < $1.uuidString },
-                              truncated: metadataOnly || items.flatMap(\.representations).contains {
+                              truncated: metadataOnly || items.isEmpty || items.flatMap(\.representations).contains {
                                   $0.uti == "public.utf8-plain-text" && $0.storage.byteCount > text.utf8.count
                               })
     }

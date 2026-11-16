@@ -674,3 +674,19 @@ private func textClip(_ value: String, date: Date = Date(), source: String = "ap
     #expect(tail.contains { $0.id == clips[0].id })
     #expect(Set(first.map(\.id)).isDisjoint(with: Set(tail.map(\.id))))
 }
+
+@Test func lightweightMetadataPreservesAIRevisionsAndSearchWithoutLoadingInlinePayloads() async throws {
+    let directories = try temporaryDirectories(); defer { try? FileManager.default.removeItem(at: directories.root) }
+    let repository = try SQLiteClipRepository(databaseURL: directories.databaseFile)
+    let text = String(repeating: "sample material ", count: 2000) + "deep-unique-search"
+    var clip = textClip(text); clip.title = "Human title"; clip.note = "Human note"
+    try await repository.save(clip)
+    let full = try #require(await repository.clip(id: clip.id))
+    let metadata = try #require(await repository.aiClipMetadata().first)
+    #expect(!full.items.isEmpty && metadata.items.isEmpty)
+    #expect(metadata.previewText == full.previewText && metadata.note == full.note)
+    #expect(metadata.aiRevision == full.aiRevision && metadata.aiContentRevision == full.aiContentRevision)
+    let matches = try await repository.listMetadata(filter: .all, query: "sample material", limit: 100, offset: 0)
+    #expect(matches.map(\.id) == [clip.id] && matches[0].items.isEmpty)
+    #expect(try await repository.clips(ids: matches.map(\.id)).first?.items == full.items)
+}

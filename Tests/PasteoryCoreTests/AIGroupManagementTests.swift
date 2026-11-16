@@ -253,3 +253,34 @@ private actor RegroupTransport: AIChatTransport {
     #expect(reopened.state.groups[groupID] == original[groupID])
     #expect(await transport.planningCalls == 4)
 }
+
+@Test @MainActor func regroupingTheLibraryIncludesUngroupedItemsAndOnlyReplacesOldThemesAfterReview() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("AIRegroupLibrary-" + UUID().uuidString)
+    let dirs = try AppDirectories(root: root); defer { try? FileManager.default.removeItem(at: root) }
+    let suite = "AIRegroupLibrary." + UUID().uuidString, defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let repo = try SQLiteClipRepository(databaseURL: dirs.databaseFile), settings = AppSettings(defaults: defaults)
+    settings.aiConfiguration.enabled = true; settings.aiConfiguration.model = "synthetic-model"
+    settings.aiConfiguration.topN = 1; settings.aiConfiguration.applyMode = .appendExisting
+    let clips = try (0..<6).map { try managementClip("Whole library synthetic \($0)") }; try await repo.saveBatch(clips)
+    let oldID = try await addManagementGroup(Array(clips.prefix(3)), name: "Old topic", repo: repo)
+    let transport = RegroupTransport()
+    let controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic" })
+    try await controller.reload()
+    #expect(controller.libraryContentCount == 6 && controller.groupedContentCount == 3)
+    #expect(controller.clipIndex.values.allSatisfy { $0.items.isEmpty })
+    let original = controller.state.groups, dates = try groupManagementDates(dirs.databaseFile)
+    #expect(controller.regroupLibrary()); await controller.waitUntilIdle()
+    #expect(controller.error == nil)
+    #expect(Set(await transport.batches.flatMap { $0 }) == Set(clips.map(\.id)))
+    #expect(controller.state.groups == original)
+    let pending = try #require(controller.pending)
+    #expect(pending.inputCount == 6 && pending.userSelectedGroupIDs == [oldID] && pending.isThemeReview == true)
+    await controller.apply(pending, selectedIDs: Set(pending.commands.map(\.id)))
+    #expect(controller.error == nil && controller.state.groups[oldID] == nil)
+    #expect(controller.state.groups.count == 2)
+    #expect(try groupManagementDates(dirs.databaseFile) == dates)
+    await controller.undo()
+    #expect(controller.state.groups == original)
+    #expect(try await repo.clip(id: clips.last!.id)?.collectionIDs.isEmpty == true)
+}

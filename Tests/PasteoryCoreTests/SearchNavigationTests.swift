@@ -562,3 +562,52 @@ private func searchClip(_ text: String, timestamp: TimeInterval) throws -> Clip 
         #expect(!state.quickHasMore && !state.libraryHasMore)
     }
 }
+
+@Test @MainActor func openingAnUnchangedPreparedPanelDoesNotPublishOrReloadMetadata() async throws {
+    try await withSearchState { state, repository in
+        let clip = try searchClip("Ready before opening", timestamp: 1000)
+        try await repository.save(clip); await state.refreshQuick()
+        let reset = state.quickListResetID, presentation = state.quickPresentationID
+        var invalidations = 0
+        let observation = state.objectWillChange.sink { invalidations += 1 }; defer { observation.cancel() }
+        await state.prepareQuickPanel(); await state.prepareQuickPanel()
+        #expect(invalidations == 0)
+        #expect(state.quickListResetID == reset && state.quickPresentationID == presentation)
+        #expect(state.quickSelectionID == clip.id)
+    }
+}
+
+@Test @MainActor func capturedContentReachesTheMemoryListBeforeABusyDatabaseAndReconcilesItsIdentity() async throws {
+    try await withSearchState { state, repository in
+        let text = "A copied item already stored outside the initial page"
+        var original = try searchClip(text, timestamp: 1000)
+        original.title = "Saved title"; original.note = "Human note"
+        try await repository.save(original)
+        let entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
+        let blocker = Task.detached {
+            try await repository.updateAIState { _ in entered.signal(); release.wait() }
+        }
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global().async { entered.wait(); continuation.resume() }
+        }
+        defer { release.signal() }
+        state.setQuickCapturePending(true)
+        let capture = PasteboardCapture(items: [.init(order: 0, representations: [.init(uti: "public.utf8-plain-text", data: Data(text.utf8))])],
+                                       source: .init(appName: "Tests", confidence: .high))
+        let acceptance = Task { await state.accept(capture) }
+        for _ in 0..<300 {
+            if state.quickClips.first?.previewText == text { break }
+            try await Task.sleep(for: .milliseconds(3))
+        }
+        let display = state.quickClips.first
+        #expect(display?.previewText == text)
+        #expect(!state.quickCapturePending)
+        release.signal(); try await blocker.value; await acceptance.value
+        #expect(state.quickClips.first?.id == original.id)
+        #expect(state.quickClips.first?.title == "Saved title" && state.quickClips.first?.note == "Human note")
+        if let display { #expect(await state.recordPaste(display)) }
+        let stored = try #require(await repository.clip(id: original.id))
+        #expect(stored.copyCount == 2 && stored.recordedPasteCount == 1)
+        #expect(try await repository.activeClipCount() == 1)
+    }
+}

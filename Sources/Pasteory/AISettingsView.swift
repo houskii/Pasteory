@@ -165,9 +165,11 @@ struct AISettingsView: View {
                 HStack {
                     Spacer()
                     Button(L10n.tr("复核并收敛主题")) { if save() { controller.analyze(trigger: "manual-review") } }.disabled(controller.running)
-                    Button(L10n.tr("分批整理全库")) { if save() { controller.analyze(all: true) } }.disabled(controller.running)
+                    Button(L10n.tr("沿用现有主题分析全库")) { if save() { controller.analyze(all: true) } }.disabled(controller.running)
                     Button(L10n.tr("分析最近内容")) { if save() { controller.analyze() } }.disabled(controller.running)
                 }
+                Text(L10n.tr("不满意现有主题时，请到资料库的 AI 整理菜单选择“重新整理全库…”，确认全库范围和 Prompt 后生成替换方案。"))
+                    .font(.caption).foregroundStyle(.secondary)
             }
             AISettingsCard(title: L10n.tr("预算与调用上限")) {
                 Stepper(value: $draft.dailyTokenLimit, in: 1000...10_000_000, step: 10_000) { Text(L10n.tr("每日 token 上限：\(draft.dailyTokenLimit)")) }

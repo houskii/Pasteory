@@ -38,7 +38,7 @@ actor ClipListLoader {
             var candidates = [Clip](), cursor = 0
             while true {
                 try Task.checkCancellation()
-                let batch = try await repository.list(filter: request.filter, query: query, limit: 500, offset: cursor)
+                let batch = try await repository.listMetadata(filter: request.filter, query: query, limit: 500, offset: cursor)
                 if let rules = request.rules { candidates += try SmartRuleEngine().matchingItems(in: batch, ruleSet: rules) }
                 else { candidates += batch }
                 cursor += batch.count
@@ -49,6 +49,9 @@ actor ClipListLoader {
             try Task.checkCancellation()
             ranked = (generation, request, all)
         }
-        return ClipListPage(clips: Array(all.dropFirst(offset).prefix(limit)), hasMore: offset + limit < all.count)
+        let page = Array(all.dropFirst(offset).prefix(limit))
+        let hydrated = try await repository.clips(ids: page.map(\.id))
+        try Task.checkCancellation()
+        return ClipListPage(clips: hydrated, hasMore: offset + limit < all.count)
     }
 }
