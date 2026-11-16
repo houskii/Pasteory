@@ -52,6 +52,8 @@ public struct AIToolDefinition: Encodable, Sendable {
             ]), "required": .array([.string("kind"), .string("text"), .string("evidence")]), "additionalProperties": .bool(false)
         ])])
         return [
+            Self(name: "clips_classify", description: "Record an explicit result for every current-batch clip. group_ids may be empty: unrelated content stays ungrouped. Give a short reason. Existing groups are preferred.", properties: ["decisions": .object(["type": .string("array"), "maxItems": .number(100), "items": .object(["type": .string("object"), "properties": .object(["clip_id": text, "group_ids": ids, "reason": text]), "required": .array([.string("clip_id"), .string("group_ids"), .string("reason")]), "additionalProperties": .bool(false)])])], required: ["decisions"]),
+            Self(name: "themes_propose", description: "Keep a proposed new theme as a candidate without creating a group. Supply distinct supporting current-batch clips. Candidates are combined across batches and reviewed later.", properties: ["name": text, "definition": text, "clip_ids": ids, "reason": text], required: ["name", "definition", "clip_ids"]),
             Self(name: "clips_get", description: "Read bounded content for known IDs. offset_chars and max_chars page through longer current-batch bodies (up to 60,000 characters loaded locally). Historical bodies may only contain previews. Only supplied data may be cited.", properties: ["clip_ids": ids, "offset_chars": .object(["type": .string("integer"), "minimum": .number(0), "maximum": .number(60_000)]), "max_chars": .object(["type": .string("integer"), "minimum": .number(200), "maximum": .number(8000)])], required: ["clip_ids"]),
             Self(name: "clips_search", description: "Find a small number of related clips in the authorized context. Reading does not authorize changing historical content.", properties: ["query": text, "limit": limit], required: ["query"]),
             Self(name: "groups_search", description: "Find existing AI groups by meaning and keywords before creating a group. Results include topic definitions and current overview coverage.", properties: ["query": text, "limit": limit], required: ["query"]),
@@ -80,9 +82,13 @@ public struct AtomicWorkspace: Sendable {
     private let reservedNames: Set<String>
     private let readLimit: Int
     private var newlyCreatedGroups = 0
+    private let rules: AIAnalysisRules?
+    private var initialIDs = Set<UUID>()
 
     public init(documents: [AIClipDocument], writableIDs: Set<UUID>, groups: [AIGroupProfile],
-                reservedNames: Set<String> = [], draft: AIChangeSet = AIChangeSet(), readLimit: Int = 150) throws {
+                reservedNames: Set<String> = [], draft: AIChangeSet = AIChangeSet(), readLimit: Int = 150,
+                rules: AIAnalysisRules? = nil) throws {
+        self.rules = rules
         self.documents = Dictionary(documents.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         self.writable = writableIDs; self.groups = Dictionary(uniqueKeysWithValues: groups.map { ($0.id, $0) })
         self.reservedNames = Set(reservedNames.map(Self.normalized)); self.readLimit = max(1, readLimit)
@@ -107,12 +113,19 @@ public struct AtomicWorkspace: Sendable {
             let perItem = min(2400, max(80, left / max(1, ids.count - result.count) - 300))
             let bounded = d.bounded(to: perItem)
             left -= bounded.evidenceText.utf8.count + 250
-            try recordRead(bounded); result.append(bounded)
+            try recordRead(bounded); initialIDs.insert(id); result.append(bounded)
         }
         return result
     }
 
     public mutating func execute(name: String, arguments: String) throws -> JSONValue {
+        var working = self
+        let result = try working.performExecute(name: name, arguments: arguments)
+        self = working
+        return result
+    }
+    private mutating func performExecute(name: String, arguments: String) throws -> JSONValue {
+        if rules != nil, ["aggregations_create", "summaries_set"].contains(name) { throw AIError.invalid("This job only classifies content") }
         guard arguments.utf8.count <= 65_536 else { throw AIError.invalid("Tool arguments are too large") }
         let a = try JSONDecoder().decode(JSONValue.self, from: Data(arguments.utf8))
         let definition = AIToolDefinition.all.first { $0.function.name == name }
@@ -134,6 +147,45 @@ public struct AtomicWorkspace: Sendable {
         let limit = Int(rawLimit)
         let reason = String((a["reason"].string ?? "").prefix(1000))
         switch name {
+        case "clips_classify":
+            guard let decisions = a["decisions"].array, !decisions.isEmpty, decisions.count <= 100 else { throw AIError.invalid("Invalid classification results") }
+            var seen = Set<UUID>()
+            for value in decisions {
+                guard let clipID = value["clip_id"].string.flatMap(UUID.init(uuidString:)), seen.insert(clipID).inserted,
+                      let rawGroups = value["group_ids"].array, rawGroups.count <= 8,
+                      let reason = value["reason"].string, !reason.isEmpty, reason.count <= 1000 else { throw AIError.invalid("Invalid classification result") }
+                try validateWritable([clipID])
+                let selected = try Set(rawGroups.map { item -> UUID in
+                    guard let id = item.string.flatMap(UUID.init(uuidString:)), let group = groups[id], !group.excludedClipIDs.contains(clipID) else { throw AIError.invalid("Unknown or excluded theme") }
+                    return id
+                })
+                if rules?.allowReassignment == true {
+                    for group in Array(groups.values) where group.aiMemberIDs.contains(clipID) && !selected.contains(group.id) && rules?.protectedGroupIDs.contains(group.id) != true {
+                        try stage(AICommand(kind: .removeItems, targetID: group.id, clipIDs: [clipID], reason: reason))
+                    }
+                }
+                for id in selected where groups[id]?.memberIDs.contains(clipID) == false {
+                    try stage(AICommand(kind: .addItems, targetID: id, clipIDs: [clipID], reason: reason))
+                }
+                let actual = Set(groups.values.filter { $0.memberIDs.contains(clipID) }.map(\.id))
+                let revision = documents[clipID]!.revision
+                let candidate = draft.candidates?.contains { $0.supportRevisions[clipID] != nil } == true
+                draft.decisions = draft.decisions ?? [:]
+                draft.decisions?[clipID] = AIClassificationDecision(revision: revision, groupIDs: actual,
+                                                                  outcome: actual.isEmpty ? (candidate ? .candidate : .unmatched) : .assigned, reason: reason)
+            }
+            return .object(["recorded": .number(Double(seen.count))])
+        case "themes_propose":
+            let members = try ids("clip_ids"); try validateWritable(members)
+            let candidate = AIThemeCandidate(name: try text("name", max: 16), definition: try text("definition", max: 2000),
+                                             supportRevisions: Dictionary(uniqueKeysWithValues: members.map { ($0, documents[$0]!.revision) }))
+            var combined = AIAutomationState(); combined.candidates = draft.candidates ?? []; combined.mergeCandidates([candidate]); draft.candidates = combined.candidates
+            draft.decisions = draft.decisions ?? [:]
+            for id in members where !groups.values.contains(where: { $0.memberIDs.contains(id) }) {
+                let decision = AIClassificationDecision(revision: documents[id]!.revision, outcome: .candidate, reason: reason.isEmpty ? candidate.definition : reason)
+                draft.decisions?[id] = decision
+            }
+            return .object(["candidate": .bool(true), "name": .string(candidate.name)])
         case "clips_get":
             let offset = a["offset_chars"].number ?? 0, requested = a["max_chars"].number ?? 2400
             guard offset.isFinite, offset.rounded() == offset, (0...60_000).contains(offset),
@@ -168,6 +220,9 @@ public struct AtomicWorkspace: Sendable {
             return describe(g)
         case "groups_create":
             guard newlyCreatedGroups < 3 else { throw AIError.invalid("At most three new themes per batch") }
+            if let rules {
+                guard rules.allowNewGroups, groups.count < rules.maximumGroups else { throw AIError.invalid("Reuse an existing theme or propose a candidate; the library has a global theme limit") }
+            }
             let name = try text("name", max: 40), definition = try text("definition", max: 2000)
             let key = Self.normalized(name)
             guard !reservedNames.contains(key), !groups.values.contains(where: { Self.normalized($0.name) == key }) else {
@@ -178,6 +233,9 @@ public struct AtomicWorkspace: Sendable {
             return .object(["group_id": .string(groupID.uuidString), "staged": .bool(true)])
         case "groups_add_items", "groups_remove_items":
             let groupID = try id("group_id"), members = try ids("clip_ids")
+            if name == "groups_remove_items", let rules {
+                guard rules.allowReassignment, !rules.protectedGroupIDs.contains(groupID) else { throw AIError.invalid("This job preserves existing or protected memberships") }
+            }
             try validateWritable(members)
             guard let group = groups[groupID] else { throw AIError.invalid("Unknown AI group") }
             if name == "groups_add_items" {
@@ -189,6 +247,9 @@ public struct AtomicWorkspace: Sendable {
             return .object(["staged": .bool(true), "member_count": .number(Double(groups[groupID]?.memberIDs.count ?? 0))])
         case "groups_update_overview":
             let groupID = try id("group_id"), sources = try ids("source_ids")
+            if let rules, !rules.allowOverviewRefresh, (groups[groupID]?.overviewPendingCount ?? 0) < 5 {
+                throw AIError.invalid("Update this overview after five changes in this group or during idle maintenance")
+            }
             guard let g = groups[groupID], Set(sources).isSubset(of: g.memberIDs), sources.allSatisfy({ readDocuments[$0] != nil }) else {
                 throw AIError.invalid("Overview sources must be read members of this group")
             }
@@ -225,11 +286,19 @@ public struct AtomicWorkspace: Sendable {
         }
     }
 
-    public func catalog(limit: Int = 20) -> [JSONValue] { groups.values.sorted { $0.id.uuidString < $1.id.uuidString }.prefix(limit).map(describe) }
+    public func catalog(limit: Int = 1000) -> [JSONValue] {
+        groups.values.sorted { $0.id.uuidString < $1.id.uuidString }.prefix(limit).map {
+            .object(["group_id": .string($0.id.uuidString), "name": .string($0.name), "definition": .string(String($0.definition.prefix(240))),
+                     "member_count": .number(Double($0.memberIDs.count)), "protected": .bool(rules?.protectedGroupIDs.contains($0.id) == true)])
+        }
+    }
+    public var missingDecisionIDs: Set<UUID> { initialIDs.subtracting(Set(draft.decisions?.keys.map { $0 } ?? [])) }
     public func finish() throws -> AIChangeSet {
         for command in draft.commands where command.kind == .createGroup {
             guard groups[command.targetID]?.memberIDs.isEmpty == false else { throw AIError.invalid("Do not create an empty AI group") }
+            if let rules { guard (groups[command.targetID]?.memberIDs.count ?? 0) >= rules.minimumMembers else { throw AIError.invalid("A new theme needs distinct supporting content; keep small topics as candidates") } }
         }
+        if rules != nil { guard missingDecisionIDs.isEmpty else { throw AIError.invalid("Every input needs an explicit classification result") } }
         return draft
     }
     private func describe(_ g: AIGroupProfile) -> JSONValue {
@@ -265,16 +334,26 @@ public struct AtomicWorkspace: Sendable {
             guard groups[command.targetID] != nil else { throw AIError.invalid("Unknown group") }
             let newlyAdded = Set(command.clipIDs).subtracting(groups[command.targetID]!.memberIDs)
             groups[command.targetID]?.memberIDs.formUnion(newlyAdded); groups[command.targetID]?.aiMemberIDs.formUnion(newlyAdded)
+            let pending = (groups[command.targetID]?.overviewPendingCount ?? 0) + newlyAdded.count
+            groups[command.targetID]?.overviewPendingCount = pending
         case .removeItems:
             guard groups[command.targetID] != nil else { throw AIError.invalid("Unknown group") }
             groups[command.targetID]?.memberIDs.subtract(command.clipIDs); groups[command.targetID]?.aiMemberIDs.subtract(command.clipIDs)
         case .updateOverview:
             guard var g = groups[command.targetID] else { throw AIError.invalid("Unknown group") }
             g.overview = command.overview
+            g.overviewPendingCount = 0
             g.overviewMemberFingerprint = Set(command.clipIDs) == g.memberIDs ? g.membershipFingerprint : ""
             groups[g.id] = g
         case .createAggregation: aggregations[command.targetID] = command.clipIDs
         case .setSummary: break
+        case .renameGroup:
+            guard var group = groups[command.targetID], !group.nameIsManual, !group.definitionIsManual else { throw AIError.invalid("A manually defined theme is protected") }
+            group.name = command.name; group.definition = command.definition; group.definitionVersion += 1
+            groups[group.id] = group
+        case .retireGroup:
+            guard let group = groups[command.targetID], group.memberIDs.isEmpty else { throw AIError.invalid("Only empty themes can be retired") }
+            groups.removeValue(forKey: command.targetID)
         }
     }
     private static func normalized(_ s: String) -> String { s.trimmingCharacters(in: .whitespacesAndNewlines).folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX")) }

@@ -20,7 +20,7 @@ private actor UsageCollector {
     configuration.model = "test-model"
     configuration.topN = 1000
     try configuration.validate()
-    #expect(configuration.batchSize == 50)
+    #expect(configuration.batchSize == 20)
     let restored = try JSONDecoder().decode(AIConfiguration.self, from: JSONEncoder().encode(configuration))
     #expect(restored.topN == 1000)
     configuration.topN = 1001

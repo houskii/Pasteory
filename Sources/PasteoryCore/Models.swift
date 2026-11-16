@@ -677,7 +677,7 @@ public struct RetentionPolicy: Codable, Sendable {
 }
 
 public enum ClipFilter: Hashable, Sendable {
-    case all, favorite, recent, archived, trash
+    case all, favorite, recent, archived, trash, ungrouped
     case kind(ClipKind)
     case collection(UUID)
 }

@@ -229,7 +229,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
             onOpenUpdate: { [weak self] in self?.updateService.checkForUpdates() },
             onCreateTextClip: {}
         )
-        let panelWidth = width + state.settings.quickTabLayout.sidebarWidth
+        let panelWidth = width + state.settings.groupSidebarWidth
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: panelWidth, height: 660),
             styleMask: [.titled, .closable, .resizable],
@@ -411,6 +411,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
         if ProcessInfo.processInfo.arguments.contains("--debug-readme-seed") {
             await seedReadmeData()
             if ProcessInfo.processInfo.arguments.contains("--debug-ai-seed") { await seedAIData() }
+            if ProcessInfo.processInfo.arguments.contains("--debug-group-seed") { await seedOrganizationDemo() }
             return
         }
         let samples = [
@@ -571,6 +572,29 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
             await state.refreshLibrary()
         }
         state.quickSelectionID = state.quickClips.first?.id
+    }
+
+    private func seedOrganizationDemo() async {
+        let names = settings.appLanguage == .english ? ["Pasteory", "Claude", "Orca", "Mobile Dev", "AI Assets", "Networking", "Releases"] : ["Pasteory", "Claude", "Orca", "移动开发", "AI 资产", "网络排查", "发布运维"]
+        do {
+            var draft = AIChangeSet()
+            for (index, name) in names.enumerated() {
+                let group = UUID(); var members = [UUID]()
+                for sample in 0..<3 {
+                    let text = "\(name) · \(sample + 1)\nPublic synthetic example for checking the group layout."
+                    let capture = PasteboardCapture(items: [CapturedItem(order: 0, representations: [CapturedRepresentation(uti: "public.utf8-plain-text", data: Data(text.utf8))])],
+                                                   source: ClipSource(appName: "Notes", bundleIdentifier: "com.apple.Notes", confidence: .high),
+                                                   capturedAt: Date().addingTimeInterval(-Double(index * 5 * 86_400 + sample * 60)))
+                    guard let clip = ClipClassifier.makeClip(from: capture) else { continue }
+                    try await state.repository.save(clip); members.append(clip.id); draft.clipRevisions[clip.id] = clip.aiRevision
+                }
+                draft.commands.append(AICommand(kind: .createGroup, targetID: group, name: name, definition: "\(name) — public synthetic topic for UI verification"))
+                draft.commands.append(AICommand(kind: .addItems, targetID: group, clipIDs: members))
+            }
+            try await state.repository.applyAIChangeSet(draft)
+            try await state.intelligence.reload(); state.intelligence.refreshRecommendations()
+            await state.refreshCollections(); await state.refreshLibrary(); await state.refreshQuick()
+        } catch { state.show(error) }
     }
 #endif
 

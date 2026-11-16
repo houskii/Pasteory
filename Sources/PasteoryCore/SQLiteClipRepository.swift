@@ -261,6 +261,13 @@ public actor SQLiteClipRepository: ClipRepository {
         switch filter {
         case .all:
             clauses += ["c.deleted_at IS NULL", "c.archived=0"]
+        case .ungrouped:
+            clauses += ["c.deleted_at IS NULL", "c.archived=0"]
+            let ids = try aiState().groups.keys.map(\.uuidString).sorted()
+            if !ids.isEmpty {
+                clauses.append("NOT EXISTS (SELECT 1 FROM clip_collections cc WHERE cc.clip_id=c.id AND cc.collection_id IN (\(Array(repeating: "?", count: ids.count).joined(separator: ","))))")
+                bindings += ids
+            }
         case .favorite:
             clauses += ["c.deleted_at IS NULL", "c.favorite=1"]
         case .recent:
@@ -526,7 +533,7 @@ public actor SQLiteClipRepository: ClipRepository {
             let oldApplying = applyingIntelligence; applyingIntelligence = true
             defer { applyingIntelligence = oldApplying }
             for var clip in try allClips() where clip.collectionIDs.contains(id) {
-                clip.collectionIDs.remove(id); try save(clip)
+                clip.collectionIDs.remove(id); try save(clip, preservingTimestamps: true)
             }
             if !oldApplying { try updateAIState { state in state.groups.removeValue(forKey: id) } }
             let statement = try prepare("DELETE FROM collections WHERE id=?;")
@@ -1768,6 +1775,7 @@ extension SQLiteClipRepository {
                 return
             }
             if let stored = state.changes.first(where: { $0.id == proposed.id }) {
+                if stored.isThemeReview == true, proposed.commands != stored.commands { throw AIError.invalid("Apply the theme review as one complete operation") }
                 guard proposed.commands.allSatisfy({ stored.commands.contains($0) }),
                       proposed.clipRevisions == stored.clipRevisions, proposed.groupRevisions == stored.groupRevisions else {
                     throw AIError.invalid("Only an unchanged subset of the recorded draft may be applied")
@@ -1784,6 +1792,10 @@ extension SQLiteClipRepository {
             var undo = AIUndoRecord(beforeMemberships: [:], afterMemberships: [:], beforeGroups: [:], afterGroups: [:],
                                     createdGroupIDs: [], createdAggregations: [], beforeSummaries: [:], changedSummaryIDs: [])
             var changedGroups = Set<UUID>()
+            let births = Dictionary(state.changes.flatMap { change in change.commands.filter { $0.kind == .createGroup }.map { ($0.targetID, change.createdAt) } }, uniquingKeysWith: min)
+            let protectedGroups = AIGroupProtection.ids(groups: Array(state.groups.values), automation: state.automation,
+                                                        activities: Dictionary(uniqueKeysWithValues: currentClips.map { ($0.id, $0.activity) }), births: births)
+                .union(proposed.protectedGroupIDs ?? [])
             var changedClips = Set<UUID>()
             var createdAggregations = [UUID: ClipAggregation]()
             var targetMap = [UUID: UUID]()
@@ -1804,6 +1816,7 @@ extension SQLiteClipRepository {
                 switch cmd.kind {
                 case .createGroup:
                     guard state.groups[cmd.targetID] == nil, !cmd.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                          state.groups.count < 8,
                           cmd.name.count <= 40, !cmd.definition.isEmpty,
                           !(try collections()).contains(where: { $0.id == cmd.targetID }) else { throw AIError.invalid("Invalid new group") }
                     let collection = ClipCollection(id: cmd.targetID, name: cmd.name, kind: .normal, sortOrder: try collections().count)
@@ -1816,9 +1829,11 @@ extension SQLiteClipRepository {
                         throw AIError.invalid("Only versioned AI groups can be changed")
                     }
                     if !undo.createdGroupIDs.contains(profile.id), undo.beforeGroups[profile.id] == nil { undo.beforeGroups[profile.id] = profile }
+                    if proposed.isThemeReview == true, cmd.kind == .removeItems, protectedGroups.contains(profile.id) { throw AIError.conflict("This theme became active; review it again before changing members") }
                     if cmd.kind == .updateOverview {
                         guard !cmd.clipIDs.isEmpty, Set(cmd.clipIDs).isSubset(of: profile.memberIDs), !cmd.overview.isEmpty else { throw AIError.invalid("Invalid overview coverage") }
                         profile.overview = cmd.overview
+                        profile.overviewPendingCount = 0
                         profile.overviewMemberFingerprint = Set(cmd.clipIDs) == profile.memberIDs ? profile.membershipFingerprint : ""
                     } else {
                         for id in cmd.clipIDs {
@@ -1826,6 +1841,7 @@ extension SQLiteClipRepository {
                             if undo.beforeMemberships[id] == nil { undo.beforeMemberships[id] = clip.collectionIDs }
                             if cmd.kind == .addItems {
                                 guard !profile.excludedClipIDs.contains(id) else { throw AIError.invalid("This member was excluded by the user") }
+                                if !profile.memberIDs.contains(id) { profile.overviewPendingCount = (profile.overviewPendingCount ?? 0) + 1 }
                                 if !clip.collectionIDs.contains(profile.id) { profile.aiMemberIDs.insert(id) }
                                 profile.memberIDs.insert(id); clip.collectionIDs.insert(profile.id)
                             } else {
@@ -1866,10 +1882,30 @@ extension SQLiteClipRepository {
                     if let old = state.summaries[resolved], undo.beforeSummaries[resolved] == nil { undo.beforeSummaries[resolved] = old }
                     undo.changedSummaryIDs.insert(resolved)
                     state.summaries[resolved] = AISummary(targetID: resolved, claims: cmd.claims, sourceRevisions: revisions)
+                case .renameGroup:
+                    guard var profile = state.groups[cmd.targetID], proposed.groupRevisions[profile.id] != nil,
+                          !protectedGroups.contains(profile.id), !profile.nameIsManual, !profile.definitionIsManual,
+                          !cmd.name.isEmpty, cmd.name.count <= 16, !cmd.definition.isEmpty,
+                          var collection = try collections().first(where: { $0.id == profile.id }) else { throw AIError.conflict("The theme is protected or changed") }
+                    if undo.beforeGroups[profile.id] == nil { undo.beforeGroups[profile.id] = profile }
+                    profile.name = cmd.name; profile.definition = cmd.definition; profile.definitionVersion += 1; profile.overviewMemberFingerprint = ""
+                    collection.name = cmd.name; try saveCollection(collection)
+                    state.groups[profile.id] = profile; changedGroups.insert(profile.id)
+                case .retireGroup:
+                    guard let profile = state.groups[cmd.targetID], proposed.groupRevisions[profile.id] != nil,
+                          !protectedGroups.contains(profile.id), profile.memberIDs.isEmpty,
+                          let collection = try collections().first(where: { $0.id == profile.id }) else { throw AIError.conflict("Only empty, inactive themes can be retired") }
+                    if undo.beforeGroups[profile.id] == nil { undo.beforeGroups[profile.id] = profile }
+                    undo.retiredCollections = undo.retiredCollections ?? [:]; undo.retiredCollections?[profile.id] = collection
+                    try removeCollection(id: profile.id); state.groups.removeValue(forKey: profile.id)
+                    changedGroups.remove(profile.id)
                 }
             }
             for id in changedGroups {
                 guard var profile = state.groups[id], !undo.createdGroupIDs.contains(id) || !profile.memberIDs.isEmpty else { throw AIError.invalid("Cannot commit an empty AI group") }
+                if undo.createdGroupIDs.contains(id), proposed.decisions != nil || proposed.isThemeReview == true {
+                    guard profile.memberIDs.count >= 3 else { throw AIError.invalid("A new theme needs three distinct supporting clips") }
+                }
                 profile.revision += 1; state.groups[id] = profile; undo.afterGroups[id] = profile
             }
             for id in changedClips {
@@ -1899,6 +1935,9 @@ extension SQLiteClipRepository {
             for (groupID, expected) in undo.afterGroups {
                 guard state.groups[groupID] == expected else { throw AIError.conflict("Group changed after this organization") }
             }
+            for id in undo.retiredCollections?.keys ?? Dictionary<UUID, ClipCollection>().keys {
+                guard state.groups[id] == nil, !(try collections()).contains(where: { $0.id == id }) else { throw AIError.conflict("A retired group was recreated") }
+            }
             for (clipID, expected) in undo.afterMemberships {
                 guard try clip(id: clipID)?.collectionIDs == expected else { throw AIError.conflict("Membership changed after this organization") }
             }
@@ -1907,12 +1946,16 @@ extension SQLiteClipRepository {
             }
             let oldApplying = applyingIntelligence; applyingIntelligence = true
             defer { applyingIntelligence = oldApplying }
+            for collection in undo.retiredCollections?.values ?? Dictionary<UUID, ClipCollection>().values { try saveCollection(collection) }
             for (clipID, memberships) in undo.beforeMemberships {
                 guard var current = try clip(id: clipID) else { throw AIError.conflict("Content was removed") }
                 current.collectionIDs = memberships; try save(current, preservingTimestamps: true)
             }
             for groupID in undo.createdGroupIDs { try removeCollection(id: groupID); state.groups.removeValue(forKey: groupID) }
-            for (groupID, profile) in undo.beforeGroups { state.groups[groupID] = profile }
+            for (groupID, profile) in undo.beforeGroups {
+                state.groups[groupID] = profile
+                if var collection = try collections().first(where: { $0.id == groupID }) { collection.name = profile.name; try saveCollection(collection) }
+            }
             for aggregation in undo.createdAggregations { try removeAggregation(id: aggregation.id) }
             for target in undo.changedSummaryIDs { state.summaries[target] = undo.beforeSummaries[target] }
             state.changes[index].isUndone = true

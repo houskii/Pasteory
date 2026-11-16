@@ -38,6 +38,54 @@ private func persistedAITimestamps(_ url: URL) throws -> [String: [Double?]] {
     return result
 }
 
+@Test func aiThemeRetirementAndUndoPreserveExactDatesAndManualGroups() async throws {
+    let dirs = try aiDirectories(); defer { try? FileManager.default.removeItem(at: dirs.root) }
+    let repo = try SQLiteClipRepository(databaseURL: dirs.databaseFile)
+    let clips = (0..<3).map { aiClip("Theme retirement sample \($0)", at: Date(timeIntervalSince1970: 1_700_000_000 + Double($0) / 10_000_000)) }
+    try await repo.saveBatch(clips)
+    let first = aiGrouping([clips[0]])
+    try await repo.applyAIChangeSet(first)
+    var second = aiGrouping([clips[1]]); second.commands[0].name = "Another project"
+    try await repo.applyAIChangeSet(second)
+    let manual = ClipCollection(name: "Manual collection", kind: .normal, sortOrder: 2)
+    try await repo.saveCollection(manual)
+    var manualClip = clips[2]; manualClip.collectionIDs = [manual.id]; try await repo.updateExisting(manualClip)
+    let before = try persistedAITimestamps(dirs.databaseFile)
+    let originalOrder = try await repo.list(filter: .all, query: "", limit: 100).map(\.id)
+    let state = try await repo.aiState(), retained = try #require(state.groups[second.commands[0].targetID])
+    let documents = try await repo.allClips().map { $0.aiDocument(includeNotes: true, includeSource: true) }
+    let plan = AIThemePlan(themes: [.init(groupID: retained.id, name: "Combined", definition: "Combined project topic")])
+    let draft = try plan.changeSet(groups: Array(state.groups.values), documents: documents, protectedIDs: [], policy: AIOrganizationPolicy())
+    try await repo.applyAIChangeSet(draft)
+    #expect(try await repo.aiState().groups.count == 1)
+    #expect(try await repo.list(filter: .ungrouped, query: "", limit: 100).map(\.id).contains(clips[0].id))
+    #expect(try await repo.list(filter: .ungrouped, query: "", limit: 100).map(\.id).contains(clips[2].id))
+    #expect(try persistedAITimestamps(dirs.databaseFile) == before)
+    #expect(try await repo.list(filter: .all, query: "", limit: 100).map(\.id) == originalOrder)
+    try await repo.undoAIChangeSet(draft.id)
+    #expect(try await repo.aiState().groups.count == 2)
+    #expect(try await repo.collections().contains(manual))
+    #expect(try await repo.clip(id: clips[0].id)?.collectionIDs == [first.commands[0].targetID])
+    #expect(try persistedAITimestamps(dirs.databaseFile) == before)
+}
+
+@Test func aiThemeReviewRejectsAGroupThatBecameActiveBeforeApply() async throws {
+    let dirs = try aiDirectories(); defer { try? FileManager.default.removeItem(at: dirs.root) }
+    let repo = try SQLiteClipRepository(databaseURL: dirs.databaseFile)
+    let clip = aiClip("Cold project", at: Date(timeIntervalSince1970: 1_700_000_000))
+    try await repo.save(clip)
+    let creation = aiGrouping([clip]), id = creation.commands[0].targetID
+    try await repo.applyAIChangeSet(creation)
+    let profile = try #require(await repo.aiState().groups[id]), current = try #require(await repo.clip(id: clip.id))
+    var review = AIChangeSet(); review.isThemeReview = true
+    review.clipRevisions[clip.id] = current.aiRevision; review.groupRevisions[id] = profile.revision
+    review.commands = [.init(kind: .removeItems, targetID: id, clipIDs: [clip.id]), .init(kind: .retireGroup, targetID: id)]
+    try await repo.recordHumanActivity(id: clip.id, event: .open, at: Date())
+    await #expect(throws: AIError.self) { try await repo.applyAIChangeSet(review) }
+    #expect(try await repo.clip(id: clip.id)?.collectionIDs == [id])
+    #expect(try await repo.aiState().groups[id]?.memberIDs == [clip.id])
+}
+
 @Test func aiGroupingAndUndoPreserveExactPersistedTimestamps() async throws {
     let dirs = try aiDirectories(); defer { try? FileManager.default.removeItem(at: dirs.root) }
     let repo = try SQLiteClipRepository(databaseURL: dirs.databaseFile)

@@ -24,7 +24,8 @@ final class QuickPanelController: NSObject {
     private var commandHelpArmed = false
     private var commandHelpTask: Task<Void, Never>?
     private var layoutObservation: AnyCancellable?
-    private var appliedTabLayout: QuickTabLayout = .horizontal
+    private var appliedSidebarWidth: CGFloat = 0
+    private var presentationObservation: AnyCancellable?
     private var eventMonitor: Any?
     private var globalMouseMonitor: Any?
     private let frameAutosaveName = "PasteoryQuickPanelWindow"
@@ -72,7 +73,7 @@ final class QuickPanelController: NSObject {
 #else
         let panelStyleMask: NSWindow.StyleMask = [.nonactivatingPanel, .borderless, .resizable]
 #endif
-        let sidebarWidth = state.settings.quickTabLayout.sidebarWidth
+        let sidebarWidth = state.settings.groupSidebarWidth
         panel = PasteoryPanel(
             contentRect: NSRect(x: 0, y: 0, width: 380 + sidebarWidth, height: 660),
             styleMask: panelStyleMask,
@@ -110,19 +111,23 @@ final class QuickPanelController: NSObject {
         hasInitialPlacement = panel.setFrameUsingName(frameAutosaveName)
         panel.setFrameAutosaveName(frameAutosaveName)
         // Saved frames already include the sidebar width when that layout is active.
-        appliedTabLayout = state.settings.quickTabLayout
+        appliedSidebarWidth = state.settings.groupSidebarWidth
         updateTabLayout(state.settings.quickTabLayout)
-        layoutObservation = state.settings.$quickTabLayout.dropFirst().sink { [weak self] layout in
-            self?.updateTabLayout(layout)
+        layoutObservation = state.settings.$quickTabLayout.dropFirst().sink { [weak self] _ in
+            Task { @MainActor in guard let self else { return }; self.updateTabLayout(self.state.settings.quickTabLayout) }
+        }
+        presentationObservation = state.settings.$groupPresentation.dropFirst().sink { [weak self] _ in
+            Task { @MainActor in guard let self else { return }; self.updateTabLayout(self.state.settings.quickTabLayout) }
         }
     }
 
     private func updateTabLayout(_ layout: QuickTabLayout) {
-        let widthDelta = layout.sidebarWidth - appliedTabLayout.sidebarWidth
-        appliedTabLayout = layout
+        let sidebarWidth = state.settings.groupSidebarWidth
+        let widthDelta = sidebarWidth - appliedSidebarWidth
+        appliedSidebarWidth = sidebarWidth
         var frame = panel.frame
-        panel.minSize = NSSize(width: 340 + layout.sidebarWidth, height: 480)
-        panel.maxSize = NSSize(width: 520 + layout.sidebarWidth, height: 760)
+        panel.minSize = NSSize(width: 340 + sidebarWidth, height: 480)
+        panel.maxSize = NSSize(width: 520 + sidebarWidth, height: 760)
         frame.size.width = min(max(frame.width + widthDelta, panel.minSize.width), panel.maxSize.width)
         if let visible = panel.screen?.visibleFrame {
             frame.origin.x = min(max(frame.minX, visible.minX), visible.maxX - frame.width)

@@ -23,7 +23,8 @@ struct AISettingsView: View {
 
     init(controller: AIOrganizationController) {
         self.controller = controller
-        _draft = State(initialValue: controller.settings.aiConfiguration)
+        var configuration = controller.settings.aiConfiguration; configuration.batchSize = min(20, configuration.batchSize)
+        _draft = State(initialValue: configuration)
         _credential = State(initialValue: (try? AICredentialStore.load()) ?? "")
 #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
@@ -132,14 +133,20 @@ struct AISettingsView: View {
         VStack(alignment: .leading, spacing: 16) {
             AISettingsCard(title: L10n.tr("分析范围与触发")) {
                 Stepper(value: $draft.topN, in: 1...1000, step: 10) { Text(L10n.tr("最近内容 Top N：\(draft.topN)")) }
-                Stepper(value: $draft.batchSize, in: 1...100, step: 5) { Text(L10n.tr("每批最多：\(draft.batchSize) 条")) }
+                Stepper(value: $draft.batchSize, in: 1...20, step: 1) { Text(L10n.tr("每批最多：\(draft.batchSize) 条")) }
                 Text(L10n.tr("按最近复制时间取不同内容。全库任务也按批次处理，保存进度；不会一次发送整个资料库。"))
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle(L10n.tr("新增内容后分析"), isOn: $draft.analyzeNew).toggleStyle(.switch)
                 Text(L10n.tr("连续复制等待 30 秒；累计 5 条或等待 2 分钟进入队列；自动分析至少间隔 5 分钟。"))
                     .font(.caption).foregroundStyle(.secondary)
-                Toggle(L10n.tr("定时检查变化"), isOn: $draft.timerEnabled).toggleStyle(.switch)
-                Stepper(value: $draft.intervalMinutes, in: 1...1440, step: 5) { Text(L10n.tr("检查间隔：\(draft.intervalMinutes) 分钟")) }
+                Toggle(L10n.tr("每天闲时整理未分组内容"), isOn: $draft.organizationPolicy.idleEnabled).toggleStyle(.switch)
+                HStack {
+                    Stepper(value: $draft.organizationPolicy.idleStartHour, in: 0...22) { Text(L10n.tr("开始：\(draft.organizationPolicy.idleStartHour) 点")) }
+                    Stepper(value: $draft.organizationPolicy.idleEndHour, in: 1...23) { Text(L10n.tr("结束：\(draft.organizationPolicy.idleEndHour) 点")) }
+                }
+                Toggle(L10n.tr("每 7 天复核低活跃主题"), isOn: $draft.organizationPolicy.weeklyReviewEnabled).toggleStyle(.switch)
+                Text(L10n.tr("默认凌晨 1～2 点，设备唤醒并空闲 5 分钟后执行。每晚最多 100 条、10 分钟或 30 万 token；错过时顺延下一晚。近期常用、手动锁定与当前阅读的主题保持稳定。"))
+                    .font(.caption).foregroundStyle(.secondary)
                 Toggle(L10n.tr("分析用户备注"), isOn: $draft.includeNotes).toggleStyle(.switch)
                 Toggle(L10n.tr("分析来源应用名称"), isOn: $draft.includeSource).toggleStyle(.switch)
                 Text(L10n.tr("图片和文件仅发送元数据；逐条禁止 AI 的资料及已识别的密钥不参与分析。应用退出或休眠时不运行定时任务。"))
@@ -150,10 +157,12 @@ struct AISettingsView: View {
                     Text(L10n.tr("先检查，再应用")).tag(AIConfiguration.ApplyMode.preview)
                     Text(L10n.tr("自动补充已有 AI 分组")).tag(AIConfiguration.ApplyMode.appendExisting)
                 }
-                Text(L10n.tr("新分组、聚合和移出操作仍进入预览。用户的主题定义与手动成员受到保护。"))
+                Stepper(value: $draft.organizationPolicy.targetGroupCount, in: 6...8) { Text(L10n.tr("AI 主题目标：\(draft.organizationPolicy.targetGroupCount) 个，上限 8 个")) }
+                Text(L10n.tr("新主题通常需要至少 3 条不同内容。零散主题先保留为候选，无关内容保留未分组。主题结构调整统一预览并可撤销。"))
                     .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Spacer()
+                    Button(L10n.tr("复核并收敛主题")) { if save() { controller.analyze(trigger: "manual-review") } }.disabled(controller.running)
                     Button(L10n.tr("分批整理全库")) { if save() { controller.analyze(all: true) } }.disabled(controller.running)
                     Button(L10n.tr("分析最近内容")) { if save() { controller.analyze() } }.disabled(controller.running)
                 }

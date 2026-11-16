@@ -38,6 +38,71 @@ private func searchClip(_ text: String, timestamp: TimeInterval) throws -> Clip 
     )))
 }
 
+@Test @MainActor func groupProfilesRestoreSearchSelectionAndScrollAnchorsWithoutAIRequests() async throws {
+    try await withSearchState { state, repository in
+        let a = try searchClip("alpha", timestamp: 300), b = try searchClip("beta", timestamp: 200)
+        try await repository.saveBatch([a, b]); await state.refreshQuick(); await state.refreshLibrary()
+        state.quickSelectionID = b.id; state.selectedClipID = b.id
+        state.quickScrollAnchor = .clip(b.id); state.libraryScrollAnchor = .clip(b.id)
+        state.switchGroupView(.ai); await state.waitForGroupView()
+        state.quickScope = .ungrouped; state.libraryFilter = .ungrouped
+        await state.refreshQuick(); await state.refreshLibrary()
+        state.quickSelectionID = a.id; state.quickScrollAnchor = .clip(a.id)
+        state.switchGroupView(.common); await state.waitForGroupView()
+        #expect(state.quickScope == .all && state.libraryFilter == .all)
+        #expect(state.quickSelectionID == b.id && state.selectedClipID == b.id)
+        #expect(state.quickScrollAnchor == .clip(b.id) && state.libraryScrollAnchor == .clip(b.id))
+        state.switchGroupView(.ai); await state.waitForGroupView()
+        #expect(state.quickScope == .ungrouped && state.libraryFilter == .ungrouped)
+        #expect(state.quickSelectionID == a.id && state.quickScrollAnchor == .clip(a.id))
+        #expect(try await repository.aiState().usage.isEmpty)
+    }
+}
+
+@Test @MainActor func commonViewShowsThreeAIRecommendationsAndKeepsManualGroupsSeparate() async throws {
+    try await withSearchState { state, repository in
+        let clips = try (0..<8).map { try searchClip("Topic source \($0)", timestamp: Double(100 + $0)) }
+        try await repository.saveBatch(clips)
+        for (index, clip) in clips.enumerated() {
+            let id = UUID(); var draft = AIChangeSet(); draft.clipRevisions[clip.id] = clip.aiRevision
+            draft.commands = [.init(kind: .createGroup, targetID: id, name: "Topic \(index)", definition: "Definition \(index)"), .init(kind: .addItems, targetID: id, clipIDs: [clip.id])]
+            try await repository.applyAIChangeSet(draft)
+        }
+        let manual = ClipCollection(name: "Manual", kind: .normal, sortOrder: 9)
+        try await repository.saveCollection(manual)
+        await state.refreshCollections(); try await state.intelligence.reload(); state.intelligence.refreshRecommendations()
+        #expect(state.recommendedAICollections.count == 3)
+        #expect(state.quickTabs.count == 6)
+        #expect(state.quickTabs.contains { $0.scope == .collection(manual.id) })
+        state.switchGroupView(.ai); await state.waitForGroupView()
+        #expect(state.quickTabs.count == 10)
+        #expect(!state.quickTabs.contains { $0.scope == .collection(manual.id) })
+        state.switchGroupView(.minimal); await state.waitForGroupView()
+        #expect(state.quickTabs.map(\.scope) == [.all, .ungrouped])
+        #expect(state.settings.groupSidebarWidth == 0)
+    }
+}
+
+@Test @MainActor func backgroundOrganizationDefersRemovingAnUngroupedItemBeingRead() async throws {
+    try await withSearchState { state, repository in
+        let clip = try searchClip("A synthetic item being read", timestamp: 200)
+        try await repository.save(clip)
+        state.quickScope = .ungrouped; state.libraryFilter = .ungrouped
+        await state.refreshQuick(); await state.refreshLibrary()
+        state.quickSelectionID = clip.id; state.selectedClipID = clip.id
+        let id = UUID(); var draft = AIChangeSet(); draft.clipRevisions[clip.id] = clip.aiRevision
+        draft.commands = [.init(kind: .createGroup, targetID: id, name: "Reading", definition: "Synthetic source"), .init(kind: .addItems, targetID: id, clipIDs: [clip.id])]
+        try await repository.applyAIChangeSet(draft)
+        await state.organizationApplied(automatically: true)
+        #expect(state.quickSelectionID == clip.id && state.selectedClipID == clip.id)
+        #expect(state.quickClips.map(\.id) == [clip.id] && state.clips.map(\.id) == [clip.id])
+        #expect(state.organizationResultsWaiting)
+        await state.showOrganizationResults()
+        #expect(state.quickClips.isEmpty && state.clips.isEmpty)
+        #expect(!state.organizationResultsWaiting)
+    }
+}
+
 @Test @MainActor func startupWithoutMaintenanceLoadsPersistedAIGroups() async throws {
     try await withSearchState { state, repository in
         let clip = try searchClip("Saved AI topic member", timestamp: 200)

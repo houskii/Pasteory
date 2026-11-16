@@ -61,4 +61,5 @@ struct AIUndoRecord: Codable {
     var createdAggregations: [ClipAggregation]
     var beforeSummaries: [UUID: AISummary]
     var changedSummaryIDs: Set<UUID>
+    var retiredCollections: [UUID: ClipCollection]?
 }

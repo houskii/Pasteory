@@ -71,7 +71,7 @@ public actor BackupService {
         var aiState = try await repository.aiState()
         // Undo snapshots are tied to a particular database. Restored organization
         // is retained without offering an undo whose transaction was not backed up.
-        aiState.changes = []; aiState.checkpoint = nil
+        aiState.changes = []; aiState.checkpoint = nil; aiState.deferredJobs = nil
         let aiBytes = try encoder.encode(aiState)
         try aiBytes.write(to: destination.appendingPathComponent("ai-state.json"), options: .atomic)
         checksums["ai-state.json"] = digest(aiBytes)

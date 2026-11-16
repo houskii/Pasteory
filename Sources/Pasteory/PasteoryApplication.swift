@@ -81,6 +81,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let storageAnalyticsService = StorageAnalyticsService(repository: repository, directories: directories)
             let settings = AppSettings(defaults: settingsDefaults, logsDirectory: directories.logs)
 #if DEBUG
+            if let argument = arguments.first(where: { $0.hasPrefix("--debug-group-profile=") }),
+               let profile = GroupViewProfile(rawValue: String(argument.dropFirst("--debug-group-profile=".count))) {
+                settings.groupPresentation.profile = profile
+            }
+            if arguments.contains("--debug-group-sidebar") { settings.quickTabLayout = .sidebar }
+            if arguments.contains("--debug-group-compact") { settings.groupPresentation.compact = true }
+            if let argument = arguments.first(where: { $0.hasPrefix("--debug-sidebar-width=") }),
+               let width = Double(argument.dropFirst("--debug-sidebar-width=".count)), (180...320).contains(width) {
+                settings.groupPresentation.sidebarWidth = width
+            }
             if let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--debug-language=") }),
                let language = AppLanguage(rawValue: String(argument.dropFirst("--debug-language=".count))) {
                 settings.appLanguage = language

@@ -23,8 +23,10 @@ struct LibraryView: View {
     var body: some View {
         GeometryReader { geometry in
             HStack(spacing: 0) {
-                sidebar.frame(width: 232)
-                LibraryDivider(axis: .vertical)
+                if state.settings.groupPresentation.profile != .minimal {
+                    sidebar.frame(width: min(320, max(180, state.settings.groupPresentation.sidebarWidth)))
+                    GroupSidebarDivider(settings: state.settings)
+                }
                 content.frame(minWidth: 430, maxWidth: .infinity, maxHeight: .infinity)
                 if geometry.size.width >= 1_050 {
                     LibraryDivider(axis: .vertical)
@@ -84,6 +86,7 @@ struct LibraryView: View {
         .task {
             await state.refreshCollections()
             await state.refreshLibrary()
+            state.intelligence.refreshRecommendations()
             openRequestedCollectionEditor()
         }
         .onChange(of: state.requestedCollectionEditorID) { _, _ in openRequestedCollectionEditor() }
@@ -112,20 +115,34 @@ struct LibraryView: View {
                 LazyVStack(alignment: .leading, spacing: 4) {
                     LibrarySectionLabel(title: L10n.tr("资料库"))
                     sidebarRow(L10n.tr("全部内容"), symbol: "square.stack", filter: .all)
+                    sidebarRow(L10n.tr("未分组"), symbol: "tray", filter: .ungrouped)
+                    if state.settings.groupPresentation.profile == .common {
                     sidebarRow(L10n.tr("收藏"), symbol: "star", filter: .favorite)
                     sidebarRow(L10n.tr("最近使用"), symbol: "clock", filter: .recent)
                     sidebarRow(L10n.tr("归档"), symbol: "archivebox", filter: .archived)
                     sidebarRow(L10n.tr("废纸篓"), symbol: "trash", filter: .trash)
+                    }
 
                     if !state.intelligence.state.groups.isEmpty {
-                        LibrarySectionLabel(title: L10n.tr("AI 分组")).padding(.top, 12)
-                        ForEach(aiCollections(archived: false)) { collection in collectionRow(collection) }
-                        if !aiCollections(archived: true).isEmpty {
-                            DisclosureGroup(L10n.tr("归档的 AI 分组")) {
-                                ForEach(aiCollections(archived: true)) { collection in collectionRow(collection) }
-                            }.font(.caption).padding(.horizontal, 8)
+                        LibrarySectionLabel(title: state.settings.groupPresentation.profile == .ai ? L10n.tr("全部 AI 主题") : L10n.tr("AI 推荐"))
+                            .padding(.top, 12)
+                        if state.settings.groupPresentation.profile == .ai {
+                            ForEach(state.orderedAICollections) { collection in collectionRow(collection) }
+                        } else if state.settings.groupPresentation.recommendationsEnabled {
+                            ForEach(state.recommendedAICollections) { collection in collectionRow(collection) }
+                        }
+                        if state.settings.groupPresentation.profile == .common {
+                            Button(L10n.tr("全部 AI 分组（\(state.intelligence.state.groups.count)）")) { state.switchGroupView(.ai) }
+                                .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary).padding(10)
+                        }
+                        Button(L10n.tr("复核主题，整理为 6～8 个")) { state.intelligence.analyze(trigger: "manual-review") }
+                            .font(.caption).buttonStyle(.plain).foregroundStyle(accentColor).padding(10).disabled(state.intelligence.running)
+                        if !state.intelligence.state.automation.candidates.isEmpty {
+                            Text(L10n.tr("待确认主题：\(state.intelligence.state.automation.candidates.count)"))
+                                .font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 10)
                         }
                     }
+                    if state.settings.groupPresentation.profile == .common {
 
                     LibrarySectionLabel(title: L10n.tr("内容类型")).padding(.top, 12)
                     ForEach(ClipKind.allCases, id: \.self) { kind in sidebarRow(kind.displayName, symbol: kind.symbolName, filter: .kind(kind)) }
@@ -142,6 +159,7 @@ struct LibraryView: View {
                     }
                     addCollectionButton(L10n.tr("新建智能分组"), symbol: "sparkles") {
                         editingSmartCollection = ClipCollection(name: "", kind: .smart, sortOrder: state.collections.count, ruleSet: SmartRuleSet())
+                    }
                     }
                 }
                 .padding(.horizontal, 10)
@@ -186,7 +204,7 @@ struct LibraryView: View {
             .font(.system(size: 13, weight: selected ? .semibold : .regular))
             .foregroundStyle(selected ? Color.white : Color.primary)
             .padding(.horizontal, 10)
-            .frame(height: 34)
+            .frame(height: state.settings.groupPresentation.rowHeight)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(selected ? AnyShapeStyle(brandGradient) : AnyShapeStyle(Color.clear), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
@@ -199,18 +217,17 @@ struct LibraryView: View {
         let selected = state.libraryFilter == filter
         return Button {
             state.libraryFilter = filter
+            state.intelligence.groupOpened(collection.id)
             Task { await state.refreshLibrary() }
         } label: {
             HStack(spacing: 9) {
-                Image(systemName: state.intelligence.state.groups[collection.id] != nil ? "sparkle" : collection.kind == .smart ? "sparkles" : "folder")
-                    .font(.system(size: 13, weight: .medium))
-                    .frame(width: 18)
+                GroupIdentityIcon(isAI: state.intelligence.state.groups[collection.id] != nil, symbol: collection.kind == .smart ? "sparkles" : "folder")
                 Text(String(collection.name.prefix(40)))
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 4)
                 if state.settings.aiConfiguration.lifecycleEnabled, let group = state.intelligence.state.groups[collection.id] {
-                    Text(L10n.text(state.intelligence.groupActivity(group).stage.title)).font(.system(size: 9)).foregroundStyle(.secondary)
+                    Text("\(group.memberIDs.count)").font(.system(size: 10).monospacedDigit()).foregroundStyle(.secondary)
                 }
                 Image(systemName: "line.3.horizontal")
                     .font(.system(size: 9, weight: .semibold))
@@ -220,12 +237,13 @@ struct LibraryView: View {
             .font(.system(size: 13, weight: selected ? .semibold : .regular))
             .foregroundStyle(selected ? Color.white : Color.primary)
             .padding(.horizontal, 10)
-            .frame(height: 34)
+            .frame(height: state.settings.groupPresentation.rowHeight)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(selected ? AnyShapeStyle(brandGradient) : AnyShapeStyle(Color.clear), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
         .buttonStyle(.plain)
+        .help(collection.name + "\n" + (state.intelligence.state.groups[collection.id]?.definition ?? ""))
         .draggable(collection.id.uuidString)
         .dropDestination(for: String.self) { identifiers, _ in
             guard let raw = identifiers.first,
@@ -239,7 +257,7 @@ struct LibraryView: View {
             if state.intelligence.state.groups[collection.id] != nil {
                 Button(L10n.tr("编辑主题与描述…")) { editingNormalCollection = collection }
                 Button(L10n.tr("按当前定义重新检查成员")) { state.intelligence.analyze(groupID: collection.id) }
-                    .disabled(state.intelligence.running)
+                    .disabled(state.intelligence.storageBusy)
                 Button(L10n.tr("压缩本组旧资料")) { Task { await state.intelligence.compress(groupID: collection.id) } }
                     .disabled(state.intelligence.running || state.intelligence.storageBusy)
             } else if collection.kind == .smart {
@@ -290,6 +308,12 @@ struct LibraryView: View {
 
     private var content: some View {
         VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                GroupViewPicker(state: state)
+                Button(L10n.tr("未分组")) { state.libraryFilter = .ungrouped; Task { await state.refreshLibrary() } }.buttonStyle(.plain).font(.caption)
+                Spacer(); GroupSearchButton(state: state)
+                if state.organizationResultsWaiting { Button(L10n.tr("显示新整理结果")) { Task { await state.showOrganizationResults() } }.font(.caption) }
+            }.padding(.horizontal, 20).padding(.top, 12)
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 3) {
@@ -316,12 +340,13 @@ struct LibraryView: View {
                         Button(L10n.tr("检查整理建议")) { state.intelligence.showingReview = true }
                             .disabled(state.intelligence.pending == nil)
                         Button(L10n.tr("分批整理全库")) { state.intelligence.analyze(all: true) }
+                        Button(L10n.tr("复核主题与低活跃分组")) { state.intelligence.analyze(trigger: "manual-review") }
                         if state.intelligence.latestUndoable != nil {
                             Button(L10n.tr("撤销最近一次整理")) { Task { await state.intelligence.undo() } }
                         }
-                    } label: { Label(L10n.tr("AI 整理"), systemImage: "sparkles") }
+                    } label: { Text(L10n.tr("AI 整理")) }
                     .menuStyle(.borderlessButton).fixedSize()
-                    .disabled(state.intelligence.running)
+                    .disabled(state.intelligence.storageBusy)
                     if !state.libraryQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Button {
                             Task { state.libraryAggregationDraft = await state.makeLibraryAggregationDraft() }
@@ -419,14 +444,17 @@ struct LibraryView: View {
                         }
                     }
                 }
+                .scrollTargetLayout()
                 .padding(.horizontal, 14)
                 .padding(.vertical, 14)
             }
+            .scrollPosition(id: $state.libraryScrollAnchor, anchor: .top)
             .contentMargins(.top, 0, for: .scrollContent)
             .onChange(of: state.libraryListResetID) { _, _ in
+                guard !state.restoringGroupView else { return }
                 DispatchQueue.main.async { proxy.scrollTo("library-list-top", anchor: .top) }
             }
-            .onAppear { DispatchQueue.main.async { proxy.scrollTo("library-list-top", anchor: .top) } }
+            .onAppear { if state.libraryScrollAnchor == nil { DispatchQueue.main.async { proxy.scrollTo("library-list-top", anchor: .top) } } }
         }
     }
 
@@ -437,6 +465,7 @@ struct LibraryView: View {
         case .recent: L10n.tr("最近使用")
         case .archived: L10n.tr("归档")
         case .trash: L10n.tr("废纸篓")
+        case .ungrouped: L10n.tr("未分组")
         case .kind(let kind): kind.displayName
         case .collection(let id): state.collections.first(where: { $0.id == id })?.name ?? L10n.tr("分组")
         }
@@ -450,6 +479,7 @@ struct LibraryView: View {
         case .recent: L10n.tr("最近复制或使用过的内容")
         case .archived: L10n.tr("已从常用列表归档的内容")
         case .trash: L10n.tr("删除的内容会在这里保留 30 天")
+        case .ungrouped: L10n.tr("尚无 AI 主题归属的内容，原有手动分组照旧保留")
         case .kind(let kind): L10n.tr("资料库中的\(kind.displayName)内容")
         case .collection(let id):
             state.collections.first(where: { $0.id == id })?.kind == .smart ? L10n.tr("按规则自动收集的内容") : L10n.tr("整理到这个分组的内容")

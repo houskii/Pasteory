@@ -553,6 +553,8 @@ extension AppState {
             candidates = try await repository.list(filter: .all, query: query, limit: 100_000)
         case .favorite:
             candidates = try await repository.list(filter: .favorite, query: query, limit: 100_000)
+        case .ungrouped:
+            candidates = try await repository.list(filter: .ungrouped, query: query, limit: 100_000)
         case .collection(let id):
             if let collection = collections.first(where: { $0.id == id }),
                collection.kind == .smart,
@@ -674,6 +676,7 @@ extension AppState {
     private func quickAggregationIsInOwnScope(_ aggregation: ClipAggregation) -> Bool {
         switch quickScope {
         case .all: true
+        case .ungrouped: false
         case .favorite: aggregation.isFavorite
         case .collection(let id): aggregation.collectionIDs.contains(id)
         }
@@ -682,6 +685,7 @@ extension AppState {
     private func quickAggregationShowsAllMembers(_ aggregation: ClipAggregation) -> Bool {
         switch quickScope {
         case .all: false
+        case .ungrouped: false
         case .favorite: aggregation.isFavorite
         case .collection(let id): aggregation.collectionIDs.contains(id)
         }
@@ -692,7 +696,7 @@ extension AppState {
         case .all, .recent: true
         case .favorite: aggregation.isFavorite
         case .collection(let id): aggregation.collectionIDs.contains(id)
-        case .archived, .trash, .kind: false
+        case .archived, .trash, .kind, .ungrouped: false
         }
     }
 
@@ -700,7 +704,7 @@ extension AppState {
         switch libraryFilter {
         case .favorite: aggregation.isFavorite
         case .collection(let id): aggregation.collectionIDs.contains(id)
-        case .all, .recent, .archived, .trash, .kind: false
+        case .all, .recent, .archived, .trash, .kind, .ungrouped: false
         }
     }
 }

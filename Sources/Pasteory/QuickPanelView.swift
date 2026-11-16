@@ -36,6 +36,9 @@ struct QuickPanelView: View {
         .sheet(item: $editingSmartCollection) {
             SmartCollectionEditor(state: state, existing: $0)
         }
+        .sheet(isPresented: Binding(get: { state.intelligence.showingReview }, set: { state.intelligence.showingReview = $0 })) {
+            AIReviewView(controller: state.intelligence)
+        }
         .alert(
             deletingCollection.map { L10n.tr("删除“\($0.name)”？") } ?? L10n.tr("删除分组？"),
             isPresented: Binding(
@@ -153,9 +156,9 @@ struct QuickPanelView: View {
 
     private var panelSurface: some View {
         HStack(spacing: 0) {
-            if state.settings.quickTabLayout == .sidebar {
+            if state.settings.groupSidebarWidth > 0 {
                 groupSidebar
-                Divider()
+                GroupSidebarDivider(settings: state.settings)
             }
             panelContent
         }
@@ -183,13 +186,33 @@ struct QuickPanelView: View {
                 QuickAggregationEditor(state: state, draft: draft)
             }
         }
-        .frame(minWidth: 340 + state.settings.quickTabLayout.sidebarWidth, idealWidth: 380 + state.settings.quickTabLayout.sidebarWidth, maxWidth: 520 + state.settings.quickTabLayout.sidebarWidth, minHeight: 480, idealHeight: 660, maxHeight: 760)
+        .frame(minWidth: 340 + state.settings.groupSidebarWidth, idealWidth: 380 + state.settings.groupSidebarWidth, maxWidth: 520 + state.settings.groupSidebarWidth, minHeight: 480, idealHeight: 660, maxHeight: 760)
     }
 
     private var panelContent: some View {
         VStack(spacing: 0) {
             header
-            if state.settings.quickTabLayout == .horizontal { groupTabs }
+            HStack(spacing: 8) {
+                GroupViewPicker(state: state)
+                if state.settings.groupPresentation.profile == .minimal {
+                    Button(L10n.tr("未分组")) {
+                        state.quickScope = state.quickScope == .ungrouped ? .all : .ungrouped
+                        Task { await state.refreshQuick(resetSelection: true) }
+                    }.buttonStyle(.plain).font(.caption)
+                        .foregroundStyle(state.quickScope == .ungrouped ? state.settings.themeColor.accentColor : Color.secondary)
+                }
+                Spacer(minLength: 0)
+                GroupSearchButton(state: state, quick: true)
+            }.padding(.horizontal, 10).padding(.bottom, 8)
+            if state.intelligence.running || state.intelligence.pending != nil || state.organizationResultsWaiting {
+                HStack(spacing: 7) {
+                    if state.intelligence.running { ProgressView().controlSize(.mini); Text(state.intelligence.status).lineLimit(1) }
+                    Spacer(minLength: 0)
+                    if state.organizationResultsWaiting { Button(L10n.tr("显示新整理结果")) { Task { await state.showOrganizationResults() } } }
+                    if state.intelligence.pending != nil { Button(L10n.tr("检查整理建议")) { state.intelligence.showingReview = true } }
+                }.font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.bottom, 8)
+            }
+            if state.settings.quickTabLayout == .horizontal && state.settings.groupPresentation.profile != .minimal { groupTabs }
             Divider()
             if state.quickMultiSelectActive { multiSelectionBar }
             else if !state.quickQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -239,9 +262,16 @@ struct QuickPanelView: View {
                 ScrollView(.vertical) {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(state.quickTabs) { tab in
+                            if let title = sectionTitle(for: tab) {
+                                Text(title).font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary).padding(.horizontal, 8).padding(.top, 10)
+                            }
                             quickTabButton(tab)
                                 .modifier(QuickTabDragModifier(tab: tab, state: state))
                                 .id(tab.scope)
+                        }
+                        if state.settings.groupPresentation.profile == .common, state.intelligence.state.groups.count > state.recommendedAICollections.count {
+                            Button(L10n.tr("全部 AI 分组（\(state.intelligence.state.groups.count)）")) { state.switchGroupView(.ai) }
+                                .buttonStyle(.plain).font(.caption).foregroundStyle(.secondary).padding(8)
                         }
                         Color.clear.frame(height: 20)
                             .dropDestination(for: String.self) { identifiers, _ in
@@ -258,7 +288,7 @@ struct QuickPanelView: View {
             }
         }
         .padding(8)
-        .frame(width: 139)
+        .frame(width: state.settings.groupSidebarWidth)
         .frame(maxHeight: .infinity)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.35))
     }
@@ -321,6 +351,7 @@ struct QuickPanelView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
                             ForEach(state.quickTabs) { tab in
+                                if sectionTitle(for: tab) != nil { Divider().frame(height: 20) }
                                 quickTabButton(tab)
                                     .modifier(QuickTabDragModifier(tab: tab, state: state))
                                     .id(tab.scope)
@@ -366,6 +397,7 @@ struct QuickPanelView: View {
     }
 
     private var currentQuickGroupTitle: String {
+        if state.quickScope == .ungrouped { return L10n.tr("未分组") }
         guard case .collection(let id) = state.quickScope,
               let collection = state.collections.first(where: { $0.id == id }) else { return L10n.tr("全部内容") }
         return collection.name
@@ -388,22 +420,38 @@ struct QuickPanelView: View {
             .accessibilityHidden(true)
     }
 
+    private func sectionTitle(for tab: QuickTab) -> String? {
+        if isAITab(tab), state.quickTabs.first(where: isAITab)?.scope == tab.scope {
+            return state.settings.groupPresentation.profile == .ai ? L10n.tr("AI 分组") : L10n.tr("AI 推荐")
+        }
+        if case .collection(let id) = tab.scope, !isAITab(tab),
+           state.collections.first(where: { state.intelligence.state.groups[$0.id] == nil })?.id == id { return L10n.tr("普通与规则分组") }
+        return nil
+    }
+
+    private func isAITab(_ tab: QuickTab) -> Bool {
+        if case .collection(let id) = tab.scope { return state.intelligence.state.groups[id] != nil }
+        return false
+    }
+
     private func quickTabButton(_ tab: QuickTab) -> some View {
         Button {
             selectQuickTab(tab)
         } label: {
             HStack(spacing: 5) {
-                Image(systemName: tab.symbol)
-                    .font(.system(size: 11, weight: .semibold))
+                GroupIdentityIcon(isAI: isAITab(tab), symbol: tab.symbol, size: 11)
                     .foregroundStyle(quickTabIconColor(tab))
                 Text(tab.title)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .frame(maxWidth: state.settings.quickTabLayout == .sidebar ? .infinity : 68, alignment: .leading)
+                    .frame(maxWidth: state.settings.quickTabLayout == .sidebar ? .infinity : 160, alignment: .leading)
+                if case .collection(let id) = tab.scope, let group = state.intelligence.state.groups[id] {
+                    Text("\(group.memberIDs.count)").font(.system(size: 9).monospacedDigit()).foregroundStyle(.secondary)
+                }
             }
             .font(.system(size: 12, weight: state.quickScope == tab.scope ? .semibold : .regular))
             .padding(.horizontal, 8)
-            .padding(.vertical, 6)
+            .padding(.vertical, state.settings.groupPresentation.compact ? 4 : 6)
             .foregroundStyle(state.quickScope == tab.scope ? state.settings.themeColor.accentColor : Color.primary)
             .background(
                 state.quickScope == tab.scope ? state.settings.themeColor.accentColor.opacity(0.16) : Color.clear,
@@ -429,6 +477,7 @@ struct QuickPanelView: View {
     private func selectQuickTab(_ tab: QuickTab) {
         state.dismissQuickMetadataEditor()
         state.quickScope = tab.scope
+        if case .collection(let id) = tab.scope { state.intelligence.groupOpened(id) }
         state.quickPresentationID = UUID()
         Task { await state.refreshQuick(resetSelection: true) }
     }
@@ -481,9 +530,11 @@ struct QuickPanelView: View {
                         }
                     }
                 }
+                .scrollTargetLayout()
                 .padding(.horizontal, 10)
                 .padding(.bottom, 10)
             }
+            .scrollPosition(id: $state.quickScrollAnchor, anchor: .top)
             .contentMargins(.top, 0, for: .scrollContent)
             .onChange(of: ListScrollState(
                 selectionID: state.quickSelectionID,
@@ -491,13 +542,14 @@ struct QuickPanelView: View {
                 resetID: state.quickListResetID,
                 presentationID: state.quickPresentationID
             )) { previous, current in
+                guard !state.restoringGroupView else { return }
                 if previous.resetID != current.resetID || previous.presentationID != current.presentationID {
                     DispatchQueue.main.async { proxy.scrollTo("quick-list-top", anchor: .top) }
                 } else {
                     scrollQuickSelection(proxy)
                 }
             }
-            .onAppear { DispatchQueue.main.async { proxy.scrollTo("quick-list-top", anchor: .top) } }
+            .onAppear { if state.quickScrollAnchor == nil { DispatchQueue.main.async { proxy.scrollTo("quick-list-top", anchor: .top) } } }
         }
     }
 
@@ -804,7 +856,7 @@ private struct QuickCollectionOverview: View {
         let scope = QuickScope.collection(collection.id)
         return overviewRow(
             title: collection.name,
-            symbol: collection.kind == .smart ? "sparkles" : "folder",
+            symbol: state.intelligence.state.groups[collection.id] != nil ? "AI" : collection.kind == .smart ? "sparkles" : "folder",
             selected: state.quickScope == scope,
             highlighted: highlightedScope == scope,
             showsDragHandle: true
@@ -838,7 +890,7 @@ private struct QuickCollectionOverview: View {
     ) -> some View {
         Button(action: action) {
             HStack(spacing: 9) {
-                Image(systemName: symbol)
+                GroupIdentityIcon(isAI: symbol == "AI", symbol: symbol)
                     .foregroundStyle(selected ? state.settings.themeColor.accentColor : Color.secondary)
                     .frame(width: 18)
                 Text(title)
@@ -1745,7 +1797,7 @@ private struct QuickMetadataEditor: View {
             HStack(spacing: 8) {
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(selected || highlighted ? state.settings.themeColor.accentColor : Color.secondary)
-                Image(systemName: "folder")
+                GroupIdentityIcon(isAI: state.intelligence.state.groups[collection.id] != nil)
                     .foregroundStyle(.secondary)
                 Text(collection.name).lineLimit(1)
                 Spacer(minLength: 8)

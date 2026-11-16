@@ -188,6 +188,12 @@ enum QuickTabLayout: String, CaseIterable, Identifiable {
 
 @MainActor
 final class AppSettings: ObservableObject {
+    @Published var groupPresentation: GroupPresentationSettings {
+        didSet { if let data = try? JSONEncoder().encode(groupPresentation) { defaults.set(data, forKey: "groupPresentationV1") } }
+    }
+    var groupSidebarWidth: CGFloat {
+        groupPresentation.profile != .minimal && quickTabLayout == .sidebar ? min(320, max(180, groupPresentation.sidebarWidth)) : 0
+    }
     @Published var aiConfiguration: AIConfiguration {
         didSet { if let data = try? JSONEncoder().encode(aiConfiguration) { defaults.set(data, forKey: "aiOrganizationConfiguration.v1") } }
     }
@@ -287,6 +293,7 @@ final class AppSettings: ObservableObject {
 
     init(defaults: UserDefaults = .standard, logsDirectory: URL? = nil) {
         self.defaults = defaults
+        self.groupPresentation = defaults.data(forKey: "groupPresentationV1").flatMap { try? JSONDecoder().decode(GroupPresentationSettings.self, from: $0) } ?? GroupPresentationSettings()
         self.aiConfiguration = defaults.data(forKey: "aiOrganizationConfiguration.v1")
             .flatMap { try? JSONDecoder().decode(AIConfiguration.self, from: $0) } ?? AIConfiguration()
         fileCommandLogsDirectory = logsDirectory?.appendingPathComponent("FileCommands", isDirectory: true)

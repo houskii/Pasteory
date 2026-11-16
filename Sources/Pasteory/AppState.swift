@@ -6,6 +6,7 @@ import PasteoryAI
 enum QuickScope: Hashable {
     case all
     case favorite
+    case ungrouped
     case collection(UUID)
 }
 
@@ -28,6 +29,24 @@ private actor ClipClassificationPipeline {
 
 @MainActor
 final class AppState: ObservableObject {
+    private struct ViewPosition {
+        var quickScope: QuickScope
+        var libraryFilter: ClipFilter
+        var quickQuery: String
+        var libraryQuery: String
+        var quickSelection: UUID?
+        var librarySelection: UUID?
+        var quickAggregation: UUID?
+        var libraryAggregation: UUID?
+        var quickAnchor: AggregationListEntryID?
+        var libraryAnchor: AggregationListEntryID?
+    }
+    private var viewPositions: [GroupViewProfile: ViewPosition] = [:]
+    private var groupViewTask: Task<Void, Never>?
+    @Published var quickScrollAnchor: AggregationListEntryID?
+    @Published var libraryScrollAnchor: AggregationListEntryID?
+    @Published private(set) var restoringGroupView = false
+    @Published private(set) var organizationResultsWaiting = false
     @Published var clips: [Clip] = []
     @Published var quickClips: [Clip] = []
     @Published var collections: [ClipCollection] = []
@@ -145,12 +164,17 @@ final class AppState: ObservableObject {
         self.intelligenceObservation = intelligence.objectWillChange.sink { [weak self] in
             Task { @MainActor in self?.objectWillChange.send() }
         }
-        intelligence.onApplied = { [weak self] in
-            Task { @MainActor in
-                await self?.refreshCollections(); await self?.refreshLibrary()
-                await self?.refreshQuick(); await self?.refreshAggregations()
-            }
+        intelligence.readingGroupIDs = { [weak self] in
+            guard let self else { return [] }
+            var ids = Set<UUID>()
+            if case .collection(let id) = self.quickScope { ids.insert(id) }
+            if case .collection(let id) = self.libraryFilter { ids.insert(id) }
+            return ids
         }
+        intelligence.onApplied = { [weak self] automatic in
+            Task { @MainActor in await self?.organizationApplied(automatically: automatic) }
+        }
+
     }
 
     var selectedClip: Clip? { clips.first(where: { $0.id == selectedClipID }) ?? quickClips.first(where: { $0.id == selectedClipID }) }
@@ -158,12 +182,63 @@ final class AppState: ObservableObject {
     var selectedAggregation: ClipAggregation? { aggregations.first { $0.id == selectedAggregationID } }
     var quickSelectedAggregation: ClipAggregation? { aggregations.first { $0.id == quickSelectedAggregationID } }
     var quickTabs: [QuickTab] {
-        [QuickTab(scope: .all, title: L10n.tr("全部"), symbol: "clock")] + collections.filter {
-            guard settings.aiConfiguration.lifecycleEnabled, let profile = intelligence.state.groups[$0.id] else { return true }
-            return profile.retained || intelligence.groupActivity(profile).stage != .archived
-        }.map {
-            QuickTab(scope: .collection($0.id), title: $0.name, symbol: $0.kind == .smart ? "sparkles" : "folder")
+        let fixed = [QuickTab(scope: .all, title: L10n.tr("全部"), symbol: "clock"), QuickTab(scope: .ungrouped, title: L10n.tr("未分组"), symbol: "tray")]
+        if settings.groupPresentation.profile == .minimal { return fixed }
+        let ai = settings.groupPresentation.profile == .ai ? orderedAICollections : (settings.groupPresentation.recommendationsEnabled ? recommendedAICollections : [])
+        var shown = ai
+        if case .collection(let id) = quickScope, intelligence.state.groups[id] != nil,
+           !shown.contains(where: { $0.id == id }), let selected = collections.first(where: { $0.id == id }) { shown.append(selected) }
+        if settings.groupPresentation.profile == .common { shown += collections.filter { intelligence.state.groups[$0.id] == nil } }
+        return fixed + shown.map { QuickTab(scope: .collection($0.id), title: $0.name, symbol: $0.kind == .smart ? "sparkles" : "folder") }
+    }
+    var orderedAICollections: [ClipCollection] {
+        let ranked = collections.filter { intelligence.state.groups[$0.id] != nil }.sorted {
+            let left = intelligence.groupActivity(intelligence.state.groups[$0.id]!).score
+            let right = intelligence.groupActivity(intelligence.state.groups[$1.id]!).score
+            return left == right ? $0.sortOrder < $1.sortOrder : left > right
         }
+        let frozen = intelligence.presentationGroupOrder.isEmpty ? intelligence.state.automation.recommendedIDs : intelligence.presentationGroupOrder
+        let first = frozen.compactMap { id in ranked.first { $0.id == id } }
+        return first + ranked.filter { !frozen.contains($0.id) }
+    }
+    var recommendedAICollections: [ClipCollection] { Array(orderedAICollections.prefix(settings.aiConfiguration.organizationPolicy.recommendedCount)) }
+
+    func switchGroupView(_ profile: GroupViewProfile) {
+        let previous = settings.groupPresentation.profile
+        guard previous != profile else { return }
+        viewPositions[previous] = ViewPosition(quickScope: quickScope, libraryFilter: libraryFilter, quickQuery: quickQuery, libraryQuery: libraryQuery,
+                                               quickSelection: quickSelectionID, librarySelection: selectedClipID,
+                                               quickAggregation: quickSelectedAggregationID, libraryAggregation: selectedAggregationID,
+                                               quickAnchor: quickScrollAnchor, libraryAnchor: libraryScrollAnchor)
+        let position = viewPositions[profile]
+        restoringGroupView = true; settings.groupPresentation.profile = profile
+        quickScope = position?.quickScope ?? .all; libraryFilter = position?.libraryFilter ?? .all
+        quickQuery = position?.quickQuery ?? ""; libraryQuery = position?.libraryQuery ?? ""
+        quickSelectionID = position?.quickSelection; selectedClipID = position?.librarySelection
+        quickSelectedAggregationID = position?.quickAggregation; selectedAggregationID = position?.libraryAggregation
+        appliedQuickScope = quickScope; appliedLibraryFilter = libraryFilter
+        appliedQuickQuery = quickQuery; appliedLibraryQuery = libraryQuery
+        groupViewTask?.cancel()
+        groupViewTask = Task {
+            await refreshQuick(); await refreshLibrary()
+            guard !Task.isCancelled, settings.groupPresentation.profile == profile else { return }
+            quickScrollAnchor = position?.quickAnchor; libraryScrollAnchor = position?.libraryAnchor
+            await Task.yield(); restoringGroupView = false
+        }
+    }
+    func waitForGroupView() async { await groupViewTask?.value }
+    func organizationApplied(automatically: Bool) async {
+        let deferQuick = automatically && quickScope == .ungrouped
+        let deferLibrary = automatically && libraryFilter == .ungrouped
+        organizationResultsWaiting = deferQuick || deferLibrary
+        await refreshCollections()
+        if !deferLibrary { await refreshLibrary() }
+        if !deferQuick { await refreshQuick() }
+        await refreshAggregations()
+    }
+    func showOrganizationResults() async {
+        organizationResultsWaiting = false
+        await refreshQuick(); await refreshLibrary()
     }
 
     func recordHumanUse(_ clip: Clip, event: ContentActivity.Event) async {
@@ -188,8 +263,7 @@ final class AppState: ObservableObject {
         await refreshQuickStats()
         await refreshLinkResolutionData()
         guard processExistingClips else {
-            do { try await intelligence.reload() }
-            catch { show(error) }
+            await intelligence.bootstrap(deferMaintenance: true)
             return
         }
         await intelligence.bootstrap()
@@ -546,6 +620,8 @@ final class AppState: ObservableObject {
                     result = try await repository.list(filter: .all, query: query, limit: 500)
                 case .favorite:
                     result = try await repository.list(filter: .favorite, query: query, limit: 500)
+                case .ungrouped:
+                    result = try await repository.list(filter: .ungrouped, query: query, limit: 500)
                 case .collection(let id):
                     if let collection = collections.first(where: { $0.id == id }), collection.kind == .smart, let rules = collection.ruleSet {
                         let candidates = try await repository.list(filter: .all, query: query, limit: 10_000)
@@ -582,6 +658,7 @@ final class AppState: ObservableObject {
     }
 
     func prepareQuickPanel() async {
+        intelligence.refreshRecommendations()
         await refreshCollections()
         await refreshQuick(resetSelection: true)
         await refreshAggregations()

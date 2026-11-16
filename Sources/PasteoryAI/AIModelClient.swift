@@ -29,6 +29,7 @@ public struct AIChatMessage: Codable, Sendable {
     public var content: String?
     public var tool_calls: [AIToolCall]?
     public var tool_call_id: String?
+    public var reasoning_content: String?
     public init(role: String, content: String? = nil, toolCalls: [AIToolCall]? = nil, toolCallID: String? = nil) {
         self.role = role; self.content = content; self.tool_calls = toolCalls; self.tool_call_id = toolCallID
     }
@@ -84,7 +85,8 @@ public actor OpenAICompatibleClient: AIChatTransport {
         return models.compactMap { value in
             guard let id = value["id"].string, !id.isEmpty else { return nil }
             let levels = value["reasoning_levels"].array?.compactMap(\.string)
-                ?? value["supported_reasoning_levels"].array?.compactMap { $0["effort"].string } ?? []
+                ?? value["supported_reasoning_levels"].array?.compactMap { $0["effort"].string }
+                ?? value["effort"]["supported_levels"].array?.compactMap(\.string) ?? []
             func boundedInt(_ key: String) -> Int? {
                 guard let number = value[key].number, number.isFinite, (1...100_000_000).contains(number) else { return nil }
                 return Int(number)
@@ -128,28 +130,34 @@ public actor AIAnalyzer {
     public func analyze(documents: [AIClipDocument], batchIDs: [UUID], groups: [AIGroupProfile], reservedNames: Set<String> = [],
                         continuing draft: AIChangeSet = AIChangeSet(), configuration: AIConfiguration,
                         credential: String, ledger: [AIUsageRecord], trigger: String, runID: UUID = UUID(),
+                        rules: AIAnalysisRules? = nil,
                         onUsage: @Sendable (AIUsageRecord) async throws -> Void) async throws -> AIAnalysisResult {
         try configuration.validate()
         try Task.checkCancellation()
         let budget = configuration.maxInputTokens
         var workspace = try AtomicWorkspace(documents: documents, writableIDs: Set(batchIDs), groups: groups,
                                             reservedNames: reservedNames, draft: draft,
-                                            readLimit: min(200, batchIDs.count + 30))
+                                            readLimit: min(200, batchIDs.count + 30), rules: rules)
         let initial = try workspace.initialDocuments(batchIDs, characterBudget: max(1000, budget - 5000))
         guard !initial.isEmpty else { throw AIError.invalid("No eligible content fits the context budget") }
         let payload: JSONValue = .object([
             "preferences": .string(configuration.prompt),
             "current_batch": try .value(initial),
             "existing_ai_groups": .array(workspace.catalog()),
+            "candidate_themes": try .value(draft.candidates ?? []),
             "scope": .string("Only current_batch IDs may be assigned or removed; historical reads are context only. Use clips_get if a provided excerpt is insufficient.")
         ])
-        var messages = [AIChatMessage(role: "system", content: Self.systemPrompt), AIChatMessage(role: "user", content: payload.encoded)]
+        let classification = rules == nil ? "" : """
+
+        This job is CLASSIFICATION ONLY: no aggregations or summaries. Use clips_classify to record a result and a concise reason for EVERY current_batch ID. Empty group_ids is a valid result for unrelated or ambiguous content. Prefer one batch call. Use themes_propose for small or new topics; candidates do not create groups. Use concise Chinese theme names (normally 4–8 characters; preserve product names). Never rename or reorganize protected themes. Do not update unrelated groups. A full-library theme cap applies across all batches.
+        """
+        var messages = [AIChatMessage(role: "system", content: Self.systemPrompt + classification), AIChatMessage(role: "user", content: payload.encoded)]
         var calls = [AIUsageRecord]()
         for _ in 0..<configuration.maxToolRounds {
             try Task.checkCancellation()
             var fields: [String: JSONValue] = [
                 "model": .string(configuration.model), "messages": try .value(messages),
-                "tools": try .value(AIToolDefinition.all), "tool_choice": .string("auto"),
+                "tools": try .value(rules == nil ? AIToolDefinition.all : AIToolDefinition.all.filter { !["aggregations_create", "summaries_set"].contains($0.function.name) }), "tool_choice": .string("auto"),
                 "max_tokens": .number(Double(configuration.maxOutputTokens)), "stream": .bool(false)
             ]
             if configuration.reasoning != "auto" { fields["reasoning_effort"] = .string(configuration.reasoning) }
@@ -185,6 +193,10 @@ public actor AIAnalyzer {
             guard let message = response.choices.first?.message else { throw AIError.invalid("The model returned no message") }
             messages.append(message)
             guard let toolCalls = message.tool_calls, !toolCalls.isEmpty else {
+                if rules != nil, !workspace.missingDecisionIDs.isEmpty {
+                    messages.append(AIChatMessage(role: "user", content: "Record explicit clips_classify results for these remaining input IDs before finishing: " + workspace.missingDecisionIDs.map(\.uuidString).sorted().joined(separator: ",")))
+                    continue
+                }
                 var changeSet = try workspace.finish()
                 changeSet.inputCount += initial.count
                 changeSet.promptFingerprint = AIHash.fingerprint(configuration.prompt)

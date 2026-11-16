@@ -257,6 +257,14 @@ struct SettingsView: View {
                         Text(layout.title).tag(layout)
                     }
                 }
+                Toggle(L10n.tr("在常用视图推荐 AI 分组"), isOn: $settings.groupPresentation.recommendationsEnabled)
+                Stepper(value: $settings.aiConfiguration.organizationPolicy.recommendedCount, in: 1...8) {
+                    Text(L10n.tr("AI 推荐数量：\(settings.aiConfiguration.organizationPolicy.recommendedCount)"))
+                }
+                Slider(value: $settings.groupPresentation.sidebarWidth, in: 180...320, step: 1) {
+                    Text(L10n.tr("分组栏宽度"))
+                }
+                Toggle(L10n.tr("紧凑分组行高"), isOn: $settings.groupPresentation.compact)
                 Text(L10n.tr("两种布局均用 ↑↓ 选择内容、←→ 切换分组；搜索输入时保留文字编辑操作。"))
                     .font(.caption).foregroundStyle(.secondary)
             }

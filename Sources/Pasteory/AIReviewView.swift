@@ -45,7 +45,7 @@ struct AIReviewView: View {
     private func commandRow(_ command: AICommand, in pending: AIChangeSet) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Toggle("", isOn: Binding(get: { selected.contains(command.id) }, set: { enabled in toggle(command, enabled: enabled, in: pending) }))
-                .toggleStyle(.checkbox).labelsHidden()
+                .toggleStyle(.checkbox).labelsHidden().disabled(pending.isThemeReview == true)
             VStack(alignment: .leading, spacing: 7) {
                 HStack { Text(commandTitle(command)).font(.callout.weight(.semibold)); Spacer(); Text(command.kind.rawValue).font(.caption2.monospaced()).foregroundStyle(.secondary) }
                 if ![.createGroup, .createAggregation].contains(command.kind) {
@@ -81,6 +81,8 @@ struct AIReviewView: View {
         case .updateOverview: L10n.tr("更新内容概况")
         case .createAggregation: L10n.tr("创建资料聚合") + " · " + command.name
         case .setSummary: L10n.tr("保存带依据的归纳")
+        case .renameGroup: L10n.tr("调整低活跃主题") + " · " + command.name
+        case .retireGroup: L10n.tr("合并或移除旧主题入口")
         }
     }
     private func toggle(_ command: AICommand, enabled: Bool, in draft: AIChangeSet) {
@@ -89,7 +91,7 @@ struct AIReviewView: View {
             for parent in draft.commands where parent.targetID == command.targetID && [.createGroup, .createAggregation].contains(parent.kind) {
                 selected.insert(parent.id)
             }
-            if command.kind == .createGroup, let add = draft.commands.first(where: { $0.targetID == command.targetID && $0.kind == .addItems }) { selected.insert(add.id) }
+            if command.kind == .createGroup { for add in draft.commands where add.targetID == command.targetID && add.kind == .addItems { selected.insert(add.id) } }
         } else {
             selected.remove(command.id)
             if [.createGroup, .createAggregation].contains(command.kind) {
