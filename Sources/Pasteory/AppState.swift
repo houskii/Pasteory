@@ -224,7 +224,8 @@ final class AppState: ObservableObject {
                                                quickSelection: quickSelectionID, librarySelection: selectedClipID,
                                                quickAggregation: quickSelectedAggregationID, libraryAggregation: selectedAggregationID,
                                                quickAnchor: quickScrollAnchor, libraryAnchor: libraryScrollAnchor,
-                                               quickCount: quickClips.count, libraryCount: clips.count)
+                                               quickCount: max(ClipListLoader.pageSize, quickClips.count),
+                                               libraryCount: max(ClipListLoader.pageSize, clips.count))
         let position = viewPositions[profile]
         restoringGroupView = true; settings.groupPresentation.profile = profile
         quickScope = position?.quickScope ?? .all; libraryFilter = position?.libraryFilter ?? .all

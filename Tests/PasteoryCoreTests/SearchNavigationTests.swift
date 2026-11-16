@@ -548,3 +548,17 @@ private func searchClip(_ text: String, timestamp: TimeInterval) throws -> Clip 
         #expect(state.quickSelectedClip?.previewText == "A new unrelated copy")
     }
 }
+
+@Test @MainActor func restoringAnEmptyProfileStillLoadsTheFirstPageAfterContentIsAdded() async throws {
+    try await withSearchState { state, repository in
+        await state.refreshQuick(); await state.refreshLibrary()
+        state.switchGroupView(.ai); await state.waitForGroupView()
+        state.quickScope = .favorite; state.libraryFilter = .favorite
+        await state.refreshQuick(); await state.refreshLibrary()
+        let clip = try searchClip("Added while an empty group was selected", timestamp: 1000)
+        try await repository.save(clip)
+        state.switchGroupView(.common); await state.waitForGroupView()
+        #expect(state.quickClips.map(\.id) == [clip.id] && state.clips.map(\.id) == [clip.id])
+        #expect(!state.quickHasMore && !state.libraryHasMore)
+    }
+}
