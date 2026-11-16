@@ -27,7 +27,14 @@ struct OpenBehaviorSettingsView: View {
             }
 
             Section(L10n.tr("图片")) {
-                LabeledContent(L10n.tr("打开方式"), value: L10n.tr("系统图片预览器（预览）"))
+                applicationRow(
+                    title: L10n.tr("图片打开应用"),
+                    bundleIdentifier: $settings.imageViewerBundleIdentifier,
+                    placeholder: L10n.tr("预览（默认）"),
+                    pickerTitle: L10n.tr("选择图片打开应用")
+                )
+                Text(L10n.tr("未选择时使用“预览”。可选择 Chrome 等应用，打开本地图片文件。"))
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
             Section(L10n.tr("代码")) {

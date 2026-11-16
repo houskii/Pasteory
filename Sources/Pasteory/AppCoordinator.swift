@@ -104,18 +104,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
                     }
                 }
             }
-            guard event.keyCode == 13,
-                  event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command else { return event }
-            let window: NSWindow?
-            if self.settingsWindow?.isKeyWindow == true { window = self.settingsWindow }
-            else if self.updateWindow?.isKeyWindow == true { window = self.updateWindow }
-            else { window = nil }
-            guard let window, window.attachedSheet == nil else { return event }
-            if let recorder = window.firstResponder as? ShortcutRecorderNSView, recorder.isRecordingShortcut {
-                return event
-            }
-            window.performClose(nil)
-            return nil
+            return TextEditingCommands.handleClose(event, in: event.window ?? NSApp.keyWindow) ? nil : event
         }
     }
 

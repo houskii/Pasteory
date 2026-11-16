@@ -82,3 +82,46 @@ private func previewClip(_ text: String) throws -> Clip {
     #expect(!TextPreviewLinks.canOpen(try #require(URL(string: "javascript:alert(1)"))))
     #expect(!TextPreviewLinks.canOpen(try #require(URL(string: "pasteory:delete"))))
 }
+
+@Test func choosingSourceWhileLoadingIsNotOverwrittenByMarkdownDetection() async throws {
+    let dirs = try AppDirectories(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+    defer { try? FileManager.default.removeItem(at: dirs.root) }
+    let clip = try previewClip("# Markdown 标题\n\n**保留格式标记**")
+    var selection = TextPreviewSelection()
+    selection.begin(contentKey: clip.contentHash)
+    selection.select(.source)
+    let document = try await TextPreviewLoader().document(for: clip, attachments: AttachmentStore(directories: dirs))
+    #expect(document.isMarkdown && selection.mode(for: document) == .source)
+    selection.begin(contentKey: clip.contentHash)
+    #expect(selection.mode(for: document) == .source)
+    selection.select(.markdown)
+    #expect(selection.mode(for: document) == .markdown)
+    selection.begin(contentKey: "another-clip")
+    #expect(selection.mode(for: document) == .markdown)
+    #expect(selection.mode(for: nil) == .source)
+}
+
+@Test @MainActor func commandWClosesThePreviewAndTheSameWindowCanBeReopened() async throws {
+    let dirs = try AppDirectories(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+    defer { try? FileManager.default.removeItem(at: dirs.root) }
+    var windows = [NSWindow]()
+    let preview = TextPreviewController(attachments: AttachmentStore(directories: dirs), presentWindow: {
+        windows.append($0)
+        $0.orderBack(nil)
+    })
+    let clip = try previewClip("关闭后可以重新打开")
+    preview.present(clip)
+    let window = try #require(windows.first)
+    defer { window.close() }
+    let event = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
+        timestamp: 0, windowNumber: window.windowNumber, context: nil, characters: "w", charactersIgnoringModifiers: "w", isARepeat: false, keyCode: 13))
+    #expect(window.isVisible)
+    #expect(TextEditingCommands.handleClose(event, in: window))
+    #expect(!window.isVisible)
+    preview.present(clip)
+    #expect(windows.count == 2 && windows[0] === windows[1] && window.isVisible)
+    let panel = NSPanel(contentRect: .zero, styleMask: [.nonactivatingPanel], backing: .buffered, defer: false)
+    panel.isReleasedWhenClosed = false
+    #expect(!TextEditingCommands.handleClose(event, in: panel))
+    panel.close()
+}

@@ -172,6 +172,7 @@ final class ClipOpenCoordinator {
     private let attachments: AttachmentStore
     private let workspace: NSWorkspace
     private let textPreview: TextPreviewController?
+    private let applicationOpener: (@MainActor (URL, String) async throws -> Void)?
     private let onCommandCompletion: (@MainActor @Sendable (FileCommandExecution) -> Void)?
     private var runningFileCommands: [UUID: Process] = [:]
 
@@ -180,12 +181,14 @@ final class ClipOpenCoordinator {
         attachments: AttachmentStore,
         workspace: NSWorkspace = .shared,
         textPreview: TextPreviewController? = nil,
+        applicationOpener: (@MainActor (URL, String) async throws -> Void)? = nil,
         onCommandCompletion: (@MainActor @Sendable (FileCommandExecution) -> Void)? = nil
     ) {
         self.settings = settings
         self.attachments = attachments
         self.workspace = workspace
         self.textPreview = textPreview
+        self.applicationOpener = applicationOpener
         self.onCommandCompletion = onCommandCompletion
     }
 
@@ -212,7 +215,8 @@ final class ClipOpenCoordinator {
                 let fileExtension = UTType(representation.uti)?.preferredFilenameExtension ?? "png"
                 url = try writeTemporary(data, fileExtension: fileExtension)
             }
-            try await open(url, withBundleIdentifier: "com.apple.Preview")
+            let viewer = settings.imageViewerBundleIdentifier
+            try await open(url, withBundleIdentifier: viewer.isEmpty ? "com.apple.Preview" : viewer)
 
         case .code:
             if settings.codeEditorBundleIdentifier.isEmpty, let textPreview { textPreview.present(clip); return }
@@ -276,11 +280,16 @@ final class ClipOpenCoordinator {
     }
 
     private func open(_ url: URL, withBundleIdentifier bundleIdentifier: String) async throws {
+        if let applicationOpener { try await applicationOpener(url, bundleIdentifier); return }
         guard let applicationURL = workspace.urlForApplication(withBundleIdentifier: bundleIdentifier) else {
             throw ClipOpenError.applicationUnavailable(bundleIdentifier)
         }
         let configuration = NSWorkspace.OpenConfiguration()
+#if DEBUG
+        configuration.activates = !ProcessInfo.processInfo.arguments.contains("--debug-background-snapshot")
+#else
         configuration.activates = true
+#endif
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             workspace.open([url], withApplicationAt: applicationURL, configuration: configuration) { _, error in
                 if let error { continuation.resume(throwing: error) }

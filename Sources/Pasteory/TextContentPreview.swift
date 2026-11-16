@@ -9,6 +9,23 @@ enum TextPreviewMode: String, CaseIterable {
     var title: String { self == .markdown ? "Markdown" : L10n.tr("原文") }
 }
 
+struct TextPreviewSelection {
+    private var contentKey: String?
+    private var selectedMode: TextPreviewMode?
+
+    mutating func begin(contentKey: String) {
+        guard self.contentKey != contentKey else { return }
+        self.contentKey = contentKey
+        selectedMode = nil
+    }
+
+    mutating func select(_ mode: TextPreviewMode) { selectedMode = mode }
+
+    func mode(for document: TextPreviewDocument?) -> TextPreviewMode {
+        selectedMode ?? (document?.isMarkdown == true ? .markdown : .source)
+    }
+}
+
 /// MarkdownUI 2.x contains immutable value nodes, but predates Sendable annotations.
 struct TextPreviewDocument: @unchecked Sendable {
     let source: String
@@ -51,22 +68,25 @@ struct TextContentPreview: View {
     let attachments: AttachmentStore
     var expand: (() -> Void)?
     @State private var document: TextPreviewDocument?
-    @State private var mode = TextPreviewMode.source
+    @State private var selection = TextPreviewSelection()
     @State private var failure: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Picker(L10n.tr("文字显示方式"), selection: $mode) {
+                Picker(L10n.tr("文字显示方式"), selection: Binding(
+                    get: { selection.mode(for: document) },
+                    set: { selection.select($0) }
+                )) {
                     ForEach(TextPreviewMode.allCases, id: \.self) { Text($0.title).tag($0) }
-                }.pickerStyle(.segmented).frame(maxWidth: 230).controlSize(.small)
+                }.pickerStyle(.segmented).labelsHidden().frame(maxWidth: 230).controlSize(.small)
                 Spacer()
                 if let expand { Button(action: expand) { Image(systemName: "arrow.up.left.and.arrow.down.right") }.help(L10n.tr("展开文字预览")) }
             }
             if let document {
                 ScrollView {
                     Group {
-                        if mode == .markdown {
+                        if selection.mode(for: document) == .markdown {
                             Markdown(document.markdown)
                                 .markdownTheme(.gitHub)
                                 .markdownImageProvider(PreviewImageProvider())
@@ -83,6 +103,10 @@ struct TextContentPreview: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.trailing, 8)
                 }
+                if !document.isMarkdown {
+                    Text(L10n.tr("原文未检测到 Markdown 标记，两种模式的显示可能相同。"))
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
                 if document.isTruncated {
                     Text(L10n.tr("长文本仅预览前 \(TextPreviewLoader.maximumCharacters) 字符；复制原文保留完整内容。"))
                         .font(.caption2).foregroundStyle(.secondary)
@@ -94,11 +118,11 @@ struct TextContentPreview: View {
             }
         }
         .task(id: clip.id.uuidString + clip.contentHash) {
+            selection.begin(contentKey: clip.id.uuidString + clip.contentHash)
             document = nil; failure = nil
             do {
                 let loaded = try await TextPreviewLoader.shared.document(for: clip, attachments: attachments)
                 try Task.checkCancellation()
-                mode = loaded.isMarkdown ? .markdown : .source
                 document = loaded
             } catch is CancellationError {} catch { failure = error.localizedDescription }
         }
@@ -134,7 +158,7 @@ final class TextPreviewController {
         let window = window ?? makeWindow()
         self.window = window
         window.title = clip.displayTitle.isEmpty ? L10n.tr("文字预览") : clip.displayTitle
-        window.contentView = NSHostingView(rootView: TextPreviewWindowContent(clip: clip, attachments: attachments, copy: copy, close: { [weak window] in window?.orderOut(nil) }))
+        window.contentView = NSHostingView(rootView: TextPreviewWindowContent(clip: clip, attachments: attachments, copy: copy, close: { [weak window] in window?.performClose(nil) }))
         if let presentWindow { presentWindow(window); return }
 #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--debug-background-snapshot") { window.orderBack(nil); return }

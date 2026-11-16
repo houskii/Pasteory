@@ -219,6 +219,7 @@ final class AppSettings: ObservableObject {
         static let appLanguage = AppLanguage.preferenceKey
         static let quickTabLayout = "quickTabLayout"
         static let browserBundleIdentifier = "browserBundleIdentifier"
+        static let imageViewerBundleIdentifier = "imageViewerBundleIdentifier"
         static let codeEditorBundleIdentifier = "codeEditorBundleIdentifier"
         static let fileOpenRules = "fileOpenRules"
         static let fileCommandShell = "fileCommandShell"
@@ -255,6 +256,9 @@ final class AppSettings: ObservableObject {
     }
     @Published var browserBundleIdentifier: String {
         didSet { defaults.set(browserBundleIdentifier, forKey: Key.browserBundleIdentifier) }
+    }
+    @Published var imageViewerBundleIdentifier: String {
+        didSet { defaults.set(imageViewerBundleIdentifier, forKey: Key.imageViewerBundleIdentifier) }
     }
     @Published var codeEditorBundleIdentifier: String {
         didSet { defaults.set(codeEditorBundleIdentifier, forKey: Key.codeEditorBundleIdentifier) }
@@ -328,6 +332,7 @@ final class AppSettings: ObservableObject {
         defaults.set(resolvedTabLayout.rawValue, forKey: Key.quickTabLayout)
         themeColor = PasteoryThemeColor(rawValue: defaults.string(forKey: Key.themeColor) ?? "") ?? .blueViolet
         browserBundleIdentifier = defaults.string(forKey: Key.browserBundleIdentifier) ?? ""
+        imageViewerBundleIdentifier = defaults.string(forKey: Key.imageViewerBundleIdentifier) ?? ""
         codeEditorBundleIdentifier = defaults.string(forKey: Key.codeEditorBundleIdentifier) ?? ""
         if let data = defaults.data(forKey: Key.fileOpenRules),
            let stored = try? JSONDecoder().decode([FileOpenRule].self, from: data) {

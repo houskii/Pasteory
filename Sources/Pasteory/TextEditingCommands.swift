@@ -14,6 +14,12 @@ enum TextEditingCommands {
         applicationItem.submenu = applicationMenu
         mainMenu.addItem(applicationItem)
 
+        let fileItem = NSMenuItem()
+        let fileMenu = NSMenu(title: L10n.tr("文件"))
+        fileMenu.addItem(withTitle: L10n.tr("关闭窗口"), action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        fileItem.submenu = fileMenu
+        mainMenu.addItem(fileItem)
+
         let editItem = NSMenuItem()
         let editMenu = NSMenu(title: L10n.tr("编辑"))
         editMenu.addItem(withTitle: L10n.tr("撤销"), action: Selector(("undo:")), keyEquivalent: "z")
@@ -28,6 +34,16 @@ enum TextEditingCommands {
         mainMenu.addItem(editItem)
 
         application.mainMenu = mainMenu
+    }
+
+    static func handleClose(_ event: NSEvent, in window: NSWindow?) -> Bool {
+        let modifiers = event.modifierFlags.intersection([.command, .shift, .control, .option])
+        guard event.type == .keyDown, event.keyCode == 13, modifiers == .command,
+              let window, window.styleMask.contains(.closable), window.attachedSheet == nil,
+              window.standardWindowButton(.closeButton)?.isEnabled == true else { return false }
+        if let recorder = window.firstResponder as? ShortcutRecorderNSView, recorder.isRecordingShortcut { return false }
+        window.performClose(nil)
+        return true
     }
 
     static func handle(_ event: NSEvent, in window: NSWindow?) -> Bool {
