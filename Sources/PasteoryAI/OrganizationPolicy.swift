@@ -75,6 +75,7 @@ public struct AIAutomationState: Codable, Equatable, Sendable {
     public var recommendedIDs: [UUID] = []
     public var protectedUntil: [UUID: Date] = [:]
     public var groupOpenedAt: [UUID: Date] = [:]
+    public var viewedGroupMembers: [UUID: Set<UUID>]?
     public var lastNightlyDate: Date?
     public var lastReviewAt: Date?
     public var nightlyBudget: AINightlyBudget?

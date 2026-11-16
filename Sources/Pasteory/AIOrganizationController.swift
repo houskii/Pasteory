@@ -83,6 +83,13 @@ final class AIOrganizationController: ObservableObject {
 
     func reload() async throws {
         state = try await repository.aiState()
+        // Establish a baseline for an existing library once, so upgrading does
+        // not label historical material as new. Later additions stay unread.
+        if state.automation.viewedGroupMembers == nil {
+            let baseline = state.groups.mapValues(\.memberIDs)
+            state.automation.viewedGroupMembers = baseline
+            try await repository.updateAIState { if $0.automation.viewedGroupMembers == nil { $0.automation.viewedGroupMembers = baseline } }
+        }
         let clips = try await repository.allClips()
         clipIndex = Dictionary(uniqueKeysWithValues: clips.map { ($0.id, $0) })
         let policy = settings.aiConfiguration.lifecycle
@@ -124,10 +131,26 @@ final class AIOrganizationController: ObservableObject {
         }
     }
     func groupOpened(_ id: UUID) {
-        guard state.groups[id] != nil else { return }
+        guard let group = state.groups[id] else { return }
         let now = clock(), repository = repository
         state.automation.groupOpenedAt[id] = now
-        Task { do { try await repository.updateAIState { $0.automation.groupOpenedAt[id] = now } } catch { self.error = error.localizedDescription } }
+        state.automation.viewedGroupMembers?[id] = group.memberIDs
+        let previous = queueWrite
+        queueWrite = Task {
+            await previous?.value
+            do { try await repository.updateAIState {
+                $0.automation.groupOpenedAt[id] = now
+                if $0.automation.viewedGroupMembers == nil { $0.automation.viewedGroupMembers = [:] }
+                $0.automation.viewedGroupMembers?[id] = group.memberIDs
+            } } catch { self.error = error.localizedDescription }
+        }
+    }
+
+    func newGroupContentCount(_ id: UUID) -> Int {
+        guard let group = state.groups[id], let viewed = state.automation.viewedGroupMembers else { return 0 }
+        return group.memberIDs.subtracting(viewed[id] ?? []).filter { id in
+            guard let clip = clipIndex[id] else { return false }; return clip.deletedAt == nil
+        }.count
     }
     var protectedGroups: Set<UUID> {
         let births = Dictionary(state.changes.flatMap { change in change.commands.filter { $0.kind == .createGroup }.map { ($0.targetID, change.createdAt) } }, uniquingKeysWith: min)

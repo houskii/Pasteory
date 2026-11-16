@@ -486,6 +486,17 @@ struct SettingsView: View {
             Section(L10n.tr("窗口与页面")) {
                 ForEach(windowActions) { action in quickShortcutSettingRow(action) }
             }
+            Section(L10n.tr("按位置切换分组")) {
+                groupShortcutSettingRow(.allContent)
+                ForEach(GroupNavigationAction.groups) { action in groupShortcutSettingRow(action) }
+                Text(L10n.tr("默认使用 ⌥1～9 切换当前视图从上到下的前 9 个分组，⌥0 返回全部内容。未分组是筛选条件，不占编号。分组顺序改变后，编号同步更新。"))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section(L10n.tr("分组视图切换")) {
+                ForEach(GroupNavigationAction.profiles) { action in groupShortcutSettingRow(action) }
+                Text(L10n.tr("Profile 默认使用 ⌃⌥1～9，按视图标识保存配置；超过 9 个时可另设组合键。页面只显示分组项的快捷键提示。"))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section(L10n.tr("固定导航快捷键")) {
                 LabeledContent(L10n.tr("选择内容 / 切换分组"), value: "↑↓ / ←→")
                 LabeledContent(L10n.tr("快速粘贴前 9 项"), value: "⌘1～⌘9")
@@ -499,7 +510,7 @@ struct SettingsView: View {
                         shortcutError = nil
                     }
                 }
-                Text(L10n.tr("全局唤起恢复为 ⌘⇧V，打开内容恢复为空格，搜索恢复为 ⌘F，其余操作恢复为当前发布默认组合。"))
+                Text(L10n.tr("全局唤起恢复为 ⌘⇧V，打开内容恢复为空格，搜索恢复为 ⌘F，分组切换恢复为 ⌥0～9。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -549,6 +560,18 @@ struct SettingsView: View {
                 )
                 shortcutError = message
                 return message == nil
+            }
+        }
+    }
+
+    private func groupShortcutSettingRow(_ action: GroupNavigationAction) -> some View {
+        let shortcut = settings.groupNavigationShortcuts.shortcut(for: action)
+        return shortcutSettingRow(title: action.title, isConfigured: shortcut != nil, onClear: {
+            settings.clearGroupNavigationShortcut(for: action); shortcutError = nil
+        }) {
+            ShortcutRecorder(keyCode: shortcut?.keyCode ?? 0, modifiers: shortcut?.modifiers ?? 0, isConfigured: shortcut != nil) { keyCode, modifiers in
+                shortcutError = settings.setGroupNavigationShortcut(PasteoryShortcut(keyCode: keyCode, modifiers: modifiers), for: action)
+                return shortcutError == nil
             }
         }
     }

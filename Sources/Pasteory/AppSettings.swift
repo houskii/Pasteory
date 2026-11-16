@@ -188,6 +188,9 @@ enum QuickTabLayout: String, CaseIterable, Identifiable {
 
 @MainActor
 final class AppSettings: ObservableObject {
+    @Published private(set) var groupNavigationShortcuts: GroupNavigationShortcuts {
+        didSet { if let data = try? JSONEncoder().encode(groupNavigationShortcuts) { defaults.set(data, forKey: "groupNavigationShortcutsV1") } }
+    }
     @Published var groupPresentation: GroupPresentationSettings {
         didSet { if let data = try? JSONEncoder().encode(groupPresentation) { defaults.set(data, forKey: "groupPresentationV1") } }
     }
@@ -293,6 +296,8 @@ final class AppSettings: ObservableObject {
 
     init(defaults: UserDefaults = .standard, logsDirectory: URL? = nil) {
         self.defaults = defaults
+        self.groupNavigationShortcuts = defaults.data(forKey: "groupNavigationShortcutsV1")
+            .flatMap { try? JSONDecoder().decode(GroupNavigationShortcuts.self, from: $0) } ?? GroupNavigationShortcuts()
         self.groupPresentation = defaults.data(forKey: "groupPresentationV1").flatMap { try? JSONDecoder().decode(GroupPresentationSettings.self, from: $0) } ?? GroupPresentationSettings()
         self.aiConfiguration = defaults.data(forKey: "aiOrganizationConfiguration.v1")
             .flatMap { try? JSONDecoder().decode(AIConfiguration.self, from: $0) } ?? AIConfiguration()
@@ -377,6 +382,15 @@ final class AppSettings: ObservableObject {
             quickActionShortcuts = Self.defaultQuickActionShortcuts
         }
         disabledQuickActions = disabledActions
+        // New defaults must not take over a previously assigned shortcut.
+        var navigation = groupNavigationShortcuts
+        for action in GroupNavigationAction.allCases where navigation.overrides[action.rawValue] == nil {
+            guard let shortcut = action.defaultShortcut else { continue }
+            if globalShortcut == shortcut || quickAction(keyCode: shortcut.keyCode, modifiers: shortcut.modifiers) != nil {
+                navigation.disabled.insert(action.rawValue)
+            }
+        }
+        groupNavigationShortcuts = navigation
         defaults.set(
             enabledSourceCaptureApplications.map(\.rawValue).sorted(),
             forKey: SourceCapturePreferenceKey.enabledApplications
@@ -421,6 +435,34 @@ final class AppSettings: ObservableObject {
         return quickActionShortcuts[action] ?? Self.defaultQuickActionShortcuts[action]
     }
 
+    func groupNavigationHint(for action: GroupNavigationAction) -> String? {
+        groupNavigationShortcuts.shortcut(for: action).map { ShortcutFormatter.display(keyCode: $0.keyCode, modifiers: $0.modifiers) }
+    }
+
+    func groupNavigationAction(keyCode: UInt32, modifiers: UInt32) -> GroupNavigationAction? {
+        GroupNavigationAction.allCases.first {
+            groupNavigationShortcuts.shortcut(for: $0) == PasteoryShortcut(keyCode: keyCode == 76 ? 36 : keyCode, modifiers: modifiers)
+        }
+    }
+
+    func setGroupNavigationShortcut(_ shortcut: PasteoryShortcut, for action: GroupNavigationAction) -> String? {
+        let normalized = PasteoryShortcut(keyCode: shortcut.keyCode == 76 ? 36 : shortcut.keyCode, modifiers: shortcut.modifiers)
+        if let message = commonShortcutValidationMessage(normalized) { return message }
+        if let duplicate = quickAction(keyCode: normalized.keyCode, modifiers: normalized.modifiers) {
+            return L10n.tr("与“\(duplicate.title)”的快捷键重复")
+        }
+        if let duplicate = GroupNavigationAction.allCases.first(where: { $0 != action && groupNavigationShortcuts.shortcut(for: $0) == normalized }) {
+            return L10n.tr("与“\(duplicate.title)”的快捷键重复")
+        }
+        groupNavigationShortcuts.overrides[action.rawValue] = normalized
+        groupNavigationShortcuts.disabled.remove(action.rawValue)
+        return nil
+    }
+
+    func clearGroupNavigationShortcut(for action: GroupNavigationAction) {
+        groupNavigationShortcuts.disabled.insert(action.rawValue)
+    }
+
     func quickAction(keyCode: UInt32, modifiers: UInt32) -> QuickPanelAction? {
         let normalizedKeyCode: UInt32 = keyCode == 76 ? 36 : keyCode
         return QuickPanelAction.allCases.first {
@@ -458,6 +500,7 @@ final class AppSettings: ObservableObject {
         globalShortcutEnabled = true
         quickActionShortcuts = Self.defaultQuickActionShortcuts
         disabledQuickActions.removeAll()
+        groupNavigationShortcuts = GroupNavigationShortcuts()
     }
 
     func addFileOpenRule() {
@@ -588,11 +631,24 @@ final class AppSettings: ObservableObject {
     }
 
     func globalShortcutConflict(keyCode: UInt32, modifiers: UInt32) -> String? {
-        guard let action = quickAction(keyCode: keyCode, modifiers: modifiers) else { return nil }
-        return L10n.tr("与“\(action.title)”的快捷键重复")
+        if let action = quickAction(keyCode: keyCode, modifiers: modifiers) { return L10n.tr("与“\(action.title)”的快捷键重复") }
+        if let action = groupNavigationAction(keyCode: keyCode, modifiers: modifiers) { return L10n.tr("与“\(action.title)”的快捷键重复") }
+        return nil
     }
 
     private func shortcutValidationMessage(_ shortcut: PasteoryShortcut, for action: QuickPanelAction) -> String? {
+        if let message = commonShortcutValidationMessage(shortcut, allowArrows: [.expandAggregation, .collapseAggregation].contains(action),
+                                                          allowUnmodified: action == .openSelected || [36, 76].contains(shortcut.keyCode)) { return message }
+        if let duplicate = GroupNavigationAction.allCases.first(where: { groupNavigationShortcuts.shortcut(for: $0) == shortcut }) {
+            return L10n.tr("与“\(duplicate.title)”的快捷键重复")
+        }
+        if let duplicate = QuickPanelAction.allCases.first(where: { $0 != action && quickShortcut(for: $0) == shortcut }) {
+            return L10n.tr("与“\(duplicate.title)”的快捷键重复")
+        }
+        return nil
+    }
+
+    private func commonShortcutValidationMessage(_ shortcut: PasteoryShortcut, allowArrows: Bool = false, allowUnmodified: Bool = false) -> String? {
         guard Self.menuRenderableKeyCodes.contains(shortcut.keyCode) else {
             return L10n.tr("该按键无法在 macOS 右键菜单中显示，请换一个按键")
         }
@@ -602,8 +658,7 @@ final class AppSettings: ObservableObject {
         }
         if shortcut.keyCode == 53 { return L10n.tr("Esc 固定用于关闭快捷面板") }
         if [123, 124, 115].contains(shortcut.keyCode) { return L10n.tr("左右方向键和 Home 固定用于列表导航") }
-        if [125, 126].contains(shortcut.keyCode),
-           ![QuickPanelAction.expandAggregation, .collapseAggregation].contains(action) {
+        if [125, 126].contains(shortcut.keyCode), !allowArrows {
             return L10n.tr("上下方向键只用于聚合展开或收起")
         }
         let command = UInt32(cmdKey)
@@ -618,13 +673,8 @@ final class AppSettings: ObservableObject {
            [18, 19, 20, 21, 23, 22, 26, 28, 25].contains(shortcut.keyCode) {
             return L10n.tr("Command-1～9 固定用于快速粘贴对应项目")
         }
-        if shortcut.modifiers == 0, action != .openSelected, ![36, 76].contains(shortcut.keyCode) {
+        if shortcut.modifiers == 0, !allowUnmodified {
             return L10n.tr("除“打开所选内容”和 Return 操作外，请至少加入一个修饰键")
-        }
-        if let duplicate = QuickPanelAction.allCases.first(where: {
-            $0 != action && quickShortcut(for: $0) == shortcut
-        }) {
-            return L10n.tr("与“\(duplicate.title)”的快捷键重复")
         }
         return nil
     }

@@ -182,7 +182,7 @@ final class AppState: ObservableObject {
     var selectedAggregation: ClipAggregation? { aggregations.first { $0.id == selectedAggregationID } }
     var quickSelectedAggregation: ClipAggregation? { aggregations.first { $0.id == quickSelectedAggregationID } }
     var quickTabs: [QuickTab] {
-        let fixed = [QuickTab(scope: .all, title: L10n.tr("全部"), symbol: "clock"), QuickTab(scope: .ungrouped, title: L10n.tr("未分组"), symbol: "tray")]
+        let fixed = [QuickTab(scope: .all, title: L10n.tr("全部"), symbol: "clock")]
         if settings.groupPresentation.profile == .minimal { return fixed }
         let ai = settings.groupPresentation.profile == .ai ? orderedAICollections : (settings.groupPresentation.recommendationsEnabled ? recommendedAICollections : [])
         var shown = ai
@@ -736,6 +736,7 @@ final class AppState: ObservableObject {
         guard tabs[next].scope != quickScope else { return }
         dismissQuickMetadataEditor()
         quickScope = tabs[next].scope
+        if case .collection(let id) = quickScope { intelligence.groupOpened(id) }
 #if DEBUG
         print("quick-scope-index=\(next)")
 #endif

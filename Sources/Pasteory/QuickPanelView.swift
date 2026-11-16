@@ -119,6 +119,7 @@ struct QuickPanelView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
+            if state.settings.groupPresentation.profile == .minimal { GroupViewMenu(state: state, quick: true) }
             Button { state.quickPanelPinned.toggle() } label: {
                 Image(systemName: state.quickPanelPinned ? "pin.fill" : "pin")
                     .foregroundStyle(state.quickPanelPinned ? state.settings.themeColor.accentColor : Color.secondary)
@@ -192,18 +193,13 @@ struct QuickPanelView: View {
     private var panelContent: some View {
         VStack(spacing: 0) {
             header
-            HStack(spacing: 8) {
-                GroupViewPicker(state: state)
-                if state.settings.groupPresentation.profile == .minimal {
-                    Button(L10n.tr("未分组")) {
-                        state.quickScope = state.quickScope == .ungrouped ? .all : .ungrouped
-                        Task { await state.refreshQuick(resetSelection: true) }
-                    }.buttonStyle(.plain).font(.caption)
-                        .foregroundStyle(state.quickScope == .ungrouped ? state.settings.themeColor.accentColor : Color.secondary)
-                }
-                Spacer(minLength: 0)
-                GroupSearchButton(state: state, quick: true)
-            }.padding(.horizontal, 10).padding(.bottom, 8)
+            if state.settings.quickTabLayout == .horizontal && state.settings.groupPresentation.profile != .minimal {
+                HStack(spacing: 8) {
+                    GroupViewPicker(state: state, quick: true)
+                    Spacer(minLength: 0)
+                    GroupSearchButton(state: state, quick: true)
+                }.padding(.horizontal, 10).padding(.bottom, 8)
+            }
             if state.intelligence.running || state.intelligence.pending != nil || state.organizationResultsWaiting {
                 HStack(spacing: 7) {
                     if state.intelligence.running { ProgressView().controlSize(.mini); Text(state.intelligence.status).lineLimit(1) }
@@ -250,10 +246,12 @@ struct QuickPanelView: View {
                 Spacer()
                 collectionManagerButton
             }
+            GroupViewPicker(state: state, quick: true)
             HStack(spacing: 3) {
+                GroupSearchButton(state: state, quick: true)
+                Spacer(minLength: 0)
                 directionKeycap("arrow.left")
                 directionKeycap("arrow.right")
-                Text(L10n.tr("切换分组")).font(.system(size: 10))
             }
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .trailing)
@@ -445,9 +443,8 @@ struct QuickPanelView: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: state.settings.quickTabLayout == .sidebar ? .infinity : 160, alignment: .leading)
-                if case .collection(let id) = tab.scope, let group = state.intelligence.state.groups[id] {
-                    Text("\(group.memberIDs.count)").font(.system(size: 9).monospacedDigit()).foregroundStyle(.secondary)
-                }
+                if case .collection(let id) = tab.scope { GroupNewContentBadge(state: state, id: id) }
+                GroupShortcutHint(text: tabShortcutHint(tab))
             }
             .font(.system(size: 12, weight: state.quickScope == tab.scope ? .semibold : .regular))
             .padding(.horizontal, 8)
@@ -462,6 +459,10 @@ struct QuickPanelView: View {
         .buttonStyle(.plain)
         .help(quickTabHelp(tab))
         .contextMenu {
+            if tab.scope == .all {
+                Button(L10n.tr("全部内容")) { state.setUngroupedFilter(false, quick: true) }
+                Button(L10n.tr("仅查看未分组内容")) { state.setUngroupedFilter(true, quick: true) }
+            }
             if case .collection(let id) = tab.scope,
                let collection = state.collections.first(where: { $0.id == id }) {
                 Button(collection.kind == .smart ? L10n.tr("编辑名称和规则…") : L10n.tr("重命名…")) {
@@ -613,11 +614,18 @@ struct QuickPanelView: View {
     }
 
     private func quickTabHelp(_ tab: QuickTab) -> String {
+        let hint = tabShortcutHint(tab).map { "（\($0)）" } ?? ""
         guard case .collection(let id) = tab.scope,
               let collection = state.collections.first(where: { $0.id == id }) else {
-            return L10n.tr("全部内容")
+            return L10n.tr("全部内容") + hint
         }
-        return L10n.tr("\(collection.kind == .smart ? L10n.tr("智能分组") : L10n.tr("普通分组"))：\(collection.name) · 拖动调整顺序")
+        let kind = isAITab(tab) ? L10n.tr("AI 分组") : (collection.kind == .smart ? L10n.tr("智能分组") : L10n.tr("普通分组"))
+        return kind + "：" + collection.name + hint + "\n" + (state.intelligence.state.groups[id]?.definition ?? L10n.tr("拖动调整顺序"))
+    }
+
+    private func tabShortcutHint(_ tab: QuickTab) -> String? {
+        if case .collection(let id) = tab.scope { return state.groupNavigationHint(for: id, quick: true) }
+        return state.groupNavigationHint(for: nil, quick: true)
     }
 
     private var aggregateResultsHelp: String {
@@ -951,6 +959,7 @@ private struct QuickCollectionOverview: View {
 
     private func select(scope: QuickScope) {
         state.quickScope = scope
+        state.markVisibleGroupOpened(quick: true)
         state.quickPresentationID = UUID()
         isPresented = false
         Task { await state.refreshQuick(resetSelection: true) }

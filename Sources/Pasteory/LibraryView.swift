@@ -48,6 +48,7 @@ struct LibraryView: View {
         }
         .frame(minWidth: embedded ? 663 : 900, maxWidth: .infinity, minHeight: 600, maxHeight: .infinity)
         .pasteoryTheme(state.settings.themeColor, language: state.settings.appLanguage)
+        .background(LibraryGroupKeyMonitor(state: state).frame(width: 0, height: 0))
         .sheet(isPresented: $showingCompactInspector, onDismiss: {
             if let draft = pendingAggregationDraft {
                 pendingAggregationDraft = nil
@@ -111,11 +112,15 @@ struct LibraryView: View {
             .padding(.bottom, 14)
             }
 
+            VStack(alignment: .leading, spacing: 8) {
+                GroupViewPicker(state: state)
+                GroupSearchButton(state: state)
+            }.padding(.horizontal, 10).padding(.vertical, 10)
+            LibraryDivider()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 4) {
                     LibrarySectionLabel(title: L10n.tr("资料库"))
                     sidebarRow(L10n.tr("全部内容"), symbol: "square.stack", filter: .all)
-                    sidebarRow(L10n.tr("未分组"), symbol: "tray", filter: .ungrouped)
                     if state.settings.groupPresentation.profile == .common {
                     sidebarRow(L10n.tr("收藏"), symbol: "star", filter: .favorite)
                     sidebarRow(L10n.tr("最近使用"), symbol: "clock", filter: .recent)
@@ -200,6 +205,7 @@ struct LibraryView: View {
                     .frame(width: 18)
                 Text(title).lineLimit(1)
                 Spacer()
+                if filter == .all { GroupShortcutHint(text: state.groupNavigationHint(for: nil, quick: false)) }
             }
             .font(.system(size: 13, weight: selected ? .semibold : .regular))
             .foregroundStyle(selected ? Color.white : Color.primary)
@@ -210,6 +216,12 @@ struct LibraryView: View {
             .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            if filter == .all {
+                Button(L10n.tr("全部内容")) { state.setUngroupedFilter(false, quick: false) }
+                Button(L10n.tr("仅查看未分组内容")) { state.setUngroupedFilter(true, quick: false) }
+            }
+        }
     }
 
     private func collectionRow(_ collection: ClipCollection) -> some View {
@@ -226,9 +238,8 @@ struct LibraryView: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 4)
-                if state.settings.aiConfiguration.lifecycleEnabled, let group = state.intelligence.state.groups[collection.id] {
-                    Text("\(group.memberIDs.count)").font(.system(size: 10).monospacedDigit()).foregroundStyle(.secondary)
-                }
+                GroupNewContentBadge(state: state, id: collection.id)
+                GroupShortcutHint(text: state.groupNavigationHint(for: collection.id, quick: false))
                 Image(systemName: "line.3.horizontal")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(selected ? Color.white.opacity(0.75) : Color.secondary.opacity(0.55))
@@ -308,12 +319,13 @@ struct LibraryView: View {
 
     private var content: some View {
         VStack(spacing: 0) {
+            if state.settings.groupPresentation.profile == .minimal || state.organizationResultsWaiting {
             HStack(spacing: 12) {
-                GroupViewPicker(state: state)
-                Button(L10n.tr("未分组")) { state.libraryFilter = .ungrouped; Task { await state.refreshLibrary() } }.buttonStyle(.plain).font(.caption)
-                Spacer(); GroupSearchButton(state: state)
+                if state.settings.groupPresentation.profile == .minimal { GroupViewMenu(state: state) }
+                Spacer()
                 if state.organizationResultsWaiting { Button(L10n.tr("显示新整理结果")) { Task { await state.showOrganizationResults() } }.font(.caption) }
             }.padding(.horizontal, 20).padding(.top, 12)
+            }
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 3) {
@@ -1249,7 +1261,7 @@ struct CollectionNameEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(existing == nil ? L10n.tr("新建分组") : L10n.tr("重命名分组")).font(.title2.bold())
+            Text(existing == nil ? L10n.tr("新建分组") : (existing.flatMap { state.intelligence.state.groups[$0.id] } != nil ? L10n.tr("编辑 AI 分组") : L10n.tr("重命名分组"))).font(.title2.bold())
             VStack(alignment: .leading, spacing: 5) {
                 TextField(L10n.tr("分组名称"), text: Binding(get: { name }, set: { name = String($0.prefix(40)) }))
                 Text("\(name.count)/40").font(.caption2).foregroundStyle(.tertiary).frame(maxWidth: .infinity, alignment: .trailing)
@@ -1258,7 +1270,7 @@ struct CollectionNameEditor: View {
                 Text(L10n.tr("主题定义")).font(.caption.weight(.semibold))
                 TextEditor(text: $definition).frame(height: 110).padding(5)
                     .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.secondary.opacity(0.2)))
-                Text(L10n.tr("用户编辑的定义优先，AI 只维护成员和独立的内容概况。")).font(.caption).foregroundStyle(.secondary)
+                Text(L10n.tr("这段定义是此分组的分类要求，与全局整理偏好一起发送给 AI。可写明收录范围和排除项；用户编辑的定义优先。")).font(.caption).foregroundStyle(.secondary)
                 Toggle(L10n.tr("保留此分组"), isOn: $retained).toggleStyle(.switch)
                 if !profile.overview.isEmpty {
                     Text(L10n.tr("当前内容概况")).font(.caption.weight(.semibold))

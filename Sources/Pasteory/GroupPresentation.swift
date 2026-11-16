@@ -30,10 +30,96 @@ struct GroupIdentityIcon: View {
 
 struct GroupViewPicker: View {
     @ObservedObject var state: AppState
+    var quick = false
+#if DEBUG
+    @State private var previewProfileID: String?
+#endif
     var body: some View {
-        Picker(L10n.tr("分组视图"), selection: Binding(get: { state.settings.groupPresentation.profile }, set: { state.switchGroupView($0) })) {
-            ForEach(GroupViewProfile.allCases) { Text($0.title).tag($0) }
-        }.pickerStyle(.segmented).labelsHidden().frame(maxWidth: 260)
+        ProfileTabStrip(items: items, selectedID: selectedID, accent: state.settings.themeColor.accentColor) { id in
+            if let profile = GroupViewProfile(rawValue: id) {
+                state.switchGroupView(profile); state.markVisibleGroupOpened(quick: quick)
+                return
+            }
+#if DEBUG
+            previewProfileID = id
+#endif
+        }
+    }
+    private var items: [ProfileTabItem] {
+        var result = GroupViewProfile.allCases.map { ProfileTabItem(id: $0.rawValue, title: $0.title) }
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--debug-profile-overflow") {
+            result += [.init(id: "demoPersonal", title: L10n.tr("个人")), .init(id: "demoWork", title: L10n.tr("工作"))]
+        }
+#endif
+        return result
+    }
+    private var selectedID: String {
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--debug-profile-overflow") { return previewProfileID ?? "demoWork" }
+#endif
+        return state.settings.groupPresentation.profile.rawValue
+    }
+}
+
+struct ProfileTabItem: Identifiable, Equatable {
+    var id: String
+    var title: String
+}
+
+struct ProfileTabStrip: View {
+    var items: [ProfileTabItem]
+    var selectedID: String
+    var accent: Color
+    var onSelect: (String) -> Void
+    var body: some View {
+        HStack(spacing: 3) {
+            if items.count <= 3 {
+                ForEach(items) { tab($0, fills: true) }
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 3) { ForEach(items) { tab($0, fills: false).id($0.id) } }
+                    }
+                    .onAppear { proxy.scrollTo(selectedID, anchor: .center) }
+                    .onChange(of: selectedID) { _, id in withAnimation(.easeOut(duration: 0.12)) { proxy.scrollTo(id, anchor: .center) } }
+                }
+                Menu {
+                    ForEach(items) { item in
+                        Button { onSelect(item.id) } label: {
+                            if item.id == selectedID { Label(item.title, systemImage: "checkmark") }
+                            else { Text(item.title) }
+                        }
+                    }
+                } label: { Image(systemName: "ellipsis.circle") }
+                    .menuStyle(.borderlessButton).fixedSize().help(L10n.tr("全部视图"))
+            }
+        }.padding(3).frame(height: 32).background(.quaternary, in: RoundedRectangle(cornerRadius: 8)).frame(maxWidth: 260)
+    }
+    private func tab(_ item: ProfileTabItem, fills: Bool) -> some View {
+        let selected = item.id == selectedID
+        return Button { onSelect(item.id) } label: {
+            Text(item.title).font(.system(size: 12, weight: selected ? .semibold : .regular)).lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false).padding(.horizontal, fills ? 0 : 10)
+                .frame(maxWidth: fills ? .infinity : nil).padding(.vertical, 5)
+                .background(selected ? accent.opacity(0.18) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+        }.buttonStyle(.plain).accessibilityLabel(item.title).accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+struct GroupViewMenu: View {
+    @ObservedObject var state: AppState
+    var quick = false
+    var body: some View {
+        Menu {
+            ForEach(GroupViewProfile.allCases) { profile in
+                Button(profile.title) { state.switchGroupView(profile); state.markVisibleGroupOpened(quick: quick) }
+            }
+            Divider()
+            Button(L10n.tr("全部内容")) { state.setUngroupedFilter(false, quick: quick) }
+            Button(L10n.tr("仅查看未分组内容")) { state.setUngroupedFilter(true, quick: quick) }
+        } label: { Image(systemName: "sidebar.left") }
+            .menuStyle(.borderlessButton).fixedSize().help(L10n.tr("分组视图与筛选"))
     }
 }
 
@@ -58,12 +144,21 @@ struct GroupSearchButton: View {
     @State private var presented = false
     @State private var query = ""
     var body: some View {
-        Button { query = ""; presented = true } label: { Label(L10n.tr("搜索分组"), systemImage: "magnifyingglass") }
+        Button { query = ""; presented = true } label: {
+            Label((quick ? state.quickScope == .ungrouped : state.libraryFilter == .ungrouped) ? L10n.tr("未分组筛选") : L10n.tr("搜索分组"), systemImage: "magnifyingglass")
+        }
             .buttonStyle(.plain).font(.caption)
             .popover(isPresented: $presented) {
                 VStack(alignment: .leading, spacing: 10) {
                     TextField(L10n.tr("搜索名称或主题定义"), text: $query).textFieldStyle(.roundedBorder)
                         .onSubmit { if let first = matches.first { select(first) } }
+                    Toggle(L10n.tr("仅查看未分组内容"), isOn: Binding(
+                        get: { quick ? state.quickScope == .ungrouped : state.libraryFilter == .ungrouped },
+                        set: { state.setUngroupedFilter($0, quick: quick); presented = false }
+                    )).toggleStyle(.checkbox)
+                    Text(L10n.tr("未分组表示没有 AI 主题归属，不占用分组切换位置。"))
+                        .font(.caption2).foregroundStyle(.secondary)
+                    Divider()
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 4) {
                             ForEach(matches) { collection in

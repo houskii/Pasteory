@@ -360,6 +360,11 @@ final class QuickPanelController: NSObject {
                 if let hovered = state.quickHoveredClipID { state.quickSelectionID = hovered }
                 return event
             }
+            if event.window === panel, !textInputHasMarkedText,
+               let action = state.settings.groupNavigationAction(keyCode: UInt32(event.keyCode), modifiers: self.carbonModifiers(from: modifiers)) {
+                Task { await self.state.navigateGroup(action, quick: true) }
+                return nil
+            }
             let action = state.settings.quickAction(
                 keyCode: UInt32(event.keyCode),
                 modifiers: self.carbonModifiers(from: modifiers)

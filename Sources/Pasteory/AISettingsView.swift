@@ -124,6 +124,8 @@ struct AISettingsView: View {
                     .padding(6).background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
                 Text(L10n.tr("可调整主题、组织方式与输出语言。原文保护、读取范围和原子能力由应用校验。"))
                     .font(.caption).foregroundStyle(.secondary)
+                Text(L10n.tr("分类时会同时读取每个 AI 分组的主题定义。可在分组的编辑页面设置收录范围与排除项。"))
+                    .font(.caption).foregroundStyle(.secondary)
                 HStack { Spacer(); Button(L10n.tr("恢复默认 Prompt")) { draft.prompt = AIConfiguration.defaultPrompt } }
             }
         }

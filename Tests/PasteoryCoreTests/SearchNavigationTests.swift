@@ -72,13 +72,13 @@ private func searchClip(_ text: String, timestamp: TimeInterval) throws -> Clip 
         try await repository.saveCollection(manual)
         await state.refreshCollections(); try await state.intelligence.reload(); state.intelligence.refreshRecommendations()
         #expect(state.recommendedAICollections.count == 3)
-        #expect(state.quickTabs.count == 6)
+        #expect(state.quickTabs.count == 5)
         #expect(state.quickTabs.contains { $0.scope == .collection(manual.id) })
         state.switchGroupView(.ai); await state.waitForGroupView()
-        #expect(state.quickTabs.count == 10)
+        #expect(state.quickTabs.count == 9)
         #expect(!state.quickTabs.contains { $0.scope == .collection(manual.id) })
-        state.switchGroupView(.minimal); await state.waitForGroupView()
-        #expect(state.quickTabs.map(\.scope) == [.all, .ungrouped])
+        #expect(await state.navigateGroup(.profile(.minimal), quick: true))
+        #expect(state.quickTabs.map(\.scope) == [.all])
         #expect(state.settings.groupSidebarWidth == 0)
     }
 }
@@ -100,6 +100,78 @@ private func searchClip(_ text: String, timestamp: TimeInterval) throws -> Clip 
         await state.showOrganizationResults()
         #expect(state.quickClips.isEmpty && state.clips.isEmpty)
         #expect(!state.organizationResultsWaiting)
+    }
+}
+
+@Test @MainActor func ungroupedFilterDoesNotConsumeGroupNavigationPositions() async throws {
+    try await withSearchState { state, repository in
+        var first = try searchClip("First group source", timestamp: 300)
+        var second = try searchClip("Second group source", timestamp: 200)
+        let ungrouped = try searchClip("Ungrouped source", timestamp: 100)
+        try await repository.saveBatch([first, second, ungrouped])
+        let a = ClipCollection(name: "First", kind: .normal, sortOrder: 0)
+        let b = ClipCollection(name: "Second", kind: .normal, sortOrder: 1)
+        try await repository.saveCollection(a); try await repository.saveCollection(b)
+        first.collectionIDs = [a.id]; second.collectionIDs = [b.id]
+        try await repository.save(first); try await repository.save(second)
+        await state.refreshCollections(); await state.refreshQuick()
+        #expect(state.quickTabs.map(\.scope) == [.all, .collection(a.id), .collection(b.id)])
+        await state.moveQuickScope(by: 1)
+        #expect(state.quickScope == .collection(a.id))
+        #expect(state.quickClips.map(\.id) == [first.id])
+        await state.moveQuickScope(by: 1)
+        #expect(state.quickScope == .collection(b.id))
+        await state.moveQuickScope(by: 1)
+        #expect(state.quickScope == .all)
+        state.quickScope = .ungrouped; await state.refreshQuick()
+        #expect(state.quickClips.count == 3) // Manual membership does not assign an AI theme.
+        #expect(await state.navigateGroup(.group2, quick: true))
+        #expect(state.quickScope == .collection(b.id))
+        #expect(state.quickClips.map(\.id) == [second.id])
+        #expect(!(await state.navigateGroup(.group9, quick: true)))
+        #expect(state.quickScope == .collection(b.id))
+        #expect(await state.navigateGroup(.group1, quick: false))
+        #expect(state.libraryFilter == .collection(a.id))
+        #expect(state.clips.map(\.id) == [first.id])
+        #expect(await state.navigateGroup(.allContent, quick: true))
+        #expect(state.quickClips.count == 3)
+        #expect(state.settings.groupPresentation.profile == .common)
+        state.switchGroupView(.minimal); await state.waitForGroupView()
+        #expect(state.settings.groupPresentation.profile == .minimal)
+        #expect(!(await state.navigateGroup(.group1, quick: true)))
+        #expect(try await repository.aiState().usage.isEmpty)
+    }
+}
+
+@Test @MainActor func groupNewContentBadgeTracksAddedMembersAndSurvivesReload() async throws {
+    try await withSearchState { state, repository in
+        let a = try searchClip("Previously grouped material", timestamp: 300)
+        let b = try searchClip("Newly grouped material", timestamp: 200)
+        try await repository.saveBatch([a, b])
+        let id = UUID()
+        var draft = AIChangeSet(); draft.clipRevisions[a.id] = a.aiRevision
+        draft.commands = [.init(kind: .createGroup, targetID: id, name: "Updates", definition: "Synthetic group"),
+                          .init(kind: .addItems, targetID: id, clipIDs: [a.id])]
+        try await repository.applyAIChangeSet(draft)
+        try await state.intelligence.reload()
+        #expect(state.intelligence.newGroupContentCount(id) == 0) // Historical content starts as seen.
+        #expect(try await repository.aiState().automation.viewedGroupMembers?[id] == [a.id])
+        var addition = AIChangeSet(); addition.clipRevisions[b.id] = b.aiRevision
+        addition.groupRevisions[id] = try #require(state.intelligence.state.groups[id]).revision
+        addition.commands = [.init(kind: .addItems, targetID: id, clipIDs: [b.id])]
+        try await repository.applyAIChangeSet(addition)
+        try await state.intelligence.reload()
+        #expect(state.intelligence.newGroupContentCount(id) == 1)
+        try await repository.updateAIState { $0.groups[id]?.overview = "An overview update is not a new member." }
+        try await state.intelligence.reload()
+        #expect(state.intelligence.newGroupContentCount(id) == 1)
+        state.intelligence.groupOpened(id); await state.intelligence.waitUntilIdle()
+        try await state.intelligence.reload()
+        #expect(state.intelligence.newGroupContentCount(id) == 0)
+        #expect(try await repository.aiState().automation.viewedGroupMembers?[id] == [a.id, b.id])
+        #expect(try await repository.clip(id: a.id)?.lastUsedAt == a.lastUsedAt)
+        #expect(try await repository.clip(id: b.id)?.lastUsedAt == b.lastUsedAt)
+        #expect(try await repository.aiState().usage.isEmpty)
     }
 }
 
