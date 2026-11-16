@@ -1142,5 +1142,18 @@
   "重新整理全库…": "Reorganize the entire library…",
   "不满意现有主题时，请到资料库的 AI 整理菜单选择“重新整理全库…”，确认全库范围和 Prompt 后生成替换方案。": "To replace existing themes, choose Reorganize the entire library… in the library AI menu, review the scope and prompt, then generate a replacement plan.",
   "已包含全部分组": "All groups included",
-  "本次按全库范围分批处理，不受最近 Top N 限制；目标为 {0} 个主题。": "The entire library is processed in batches, without the recent Top N limit. Target: {0} themes."
+  "本次按全库范围分批处理，不受最近 Top N 限制；目标为 {0} 个主题。": "The entire library is processed in batches, without the recent Top N limit. Target: {0} themes.",
+  "代码会按识别出的语言生成临时文件，再交给所选编辑器打开。未选择编辑器时使用内置文字预览。": "Code is saved to a temporary file for the selected editor. When no editor is selected, it opens in the built-in text preview.",
+  "内置预览（Markdown / 原文）": "Built-in Preview (Markdown / Source)",
+  "剪贴板检测、图片文字识别、来源详情和排除应用": "Clipboard polling, image text recognition, source details, and excluded apps",
+  "原文": "Source",
+  "复制原文": "Copy Original",
+  "展开文字预览": "Expand Text Preview",
+  "已复制原文": "Original Copied",
+  "应用设置": "App Settings",
+  "文字显示方式": "Text Display",
+  "文字预览": "Text Preview",
+  "选中文字后按打开内容快捷键即可预览，默认空格。支持标题、列表、表格和代码块，保留原文并可切换查看。": "Select text and press the open shortcut (Space by default) to preview it. Headings, lists, tables, and code blocks are supported. Switch to Source to view the original.",
+  "采集与处理": "Capture & Processing",
+  "长文本仅预览前 {0} 字符；复制原文保留完整内容。": "Only the first {0} characters are shown. Copy Original copies the full text."
 }

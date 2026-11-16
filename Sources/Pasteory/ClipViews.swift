@@ -734,6 +734,7 @@ private enum ClipCodeTextLoader {
 struct RepresentationPreview: View {
     let clip: Clip
     let attachments: AttachmentStore
+    var expandText: (() -> Void)?
     @State private var image: NSImage?
     @State private var loadedCodeText: LoadedCodeText?
 
@@ -758,6 +759,8 @@ struct RepresentationPreview: View {
                         .textSelection(.enabled)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+            } else if clip.primaryKind == .text {
+                TextContentPreview(clip: clip, attachments: attachments, expand: expandText)
             } else if clip.primaryKind == .code {
                 CodeSnippetPreview(
                     text: loadedCodeText?.text ?? clip.previewText,

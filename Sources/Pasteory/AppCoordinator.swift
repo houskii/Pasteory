@@ -186,6 +186,14 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
                 if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "--debug-snapshot-path"),
                    ProcessInfo.processInfo.arguments.indices.contains(index + 1) {
                     await quickPanel.waitForPresentation()
+                    if ProcessInfo.processInfo.arguments.contains("--debug-open-selected") {
+                        quickPanel.debugOpenSelected()
+                        try? await Task.sleep(for: .milliseconds(350))
+                        if let window = state.textPreview.debugWindow {
+                            saveDebugSnapshot(of: window, to: ProcessInfo.processInfo.arguments[index + 1])
+                        }
+                        return
+                    }
                     if ProcessInfo.processInfo.arguments.contains("--debug-repeat-quick-presentation") {
                         for _ in 0..<2 {
                             try? await Task.sleep(for: .milliseconds(250))
@@ -229,6 +237,21 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
         }
         if ProcessInfo.processInfo.arguments.contains("--debug-open-update") {
             updateService.checkForUpdates()
+        }
+        if ProcessInfo.processInfo.arguments.contains("--debug-text-preview") {
+            Task { [weak self] in
+                guard let self else { return }
+                try? await Task.sleep(for: .milliseconds(700))
+                let arguments = ProcessInfo.processInfo.arguments
+                guard let input = arguments.firstIndex(of: "--debug-text-preview-file"), arguments.indices.contains(input + 1),
+                      let source = try? String(contentsOfFile: arguments[input + 1], encoding: .utf8),
+                      let clip = ClipClassifier.makeClip(from: PasteboardCapture(items: [.init(order: 0, representations: [.init(uti: "public.utf8-plain-text", data: Data(source.utf8))])], source: .init(appName: "Markdown QA"))) else { return }
+                state.textPreview.present(clip)
+                try? await Task.sleep(for: .milliseconds(350))
+                if let path = arguments.firstIndex(of: "--debug-snapshot-path"), arguments.indices.contains(path + 1), let window = state.textPreview.debugWindow {
+                    saveDebugSnapshot(of: window, to: arguments[path + 1])
+                }
+            }
         }
 #endif
     }
@@ -365,6 +388,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
         Task {
             var captured = metadata
             if let repository = state.repository as? SQLiteClipRepository { captured["metadataCacheBuildCount"] = await repository.metadataCacheBuildCount() }
+            captured["textPreviewParseCount"] = await TextPreviewLoader.shared.parseCount
             if let metadataData = try? JSONSerialization.data(withJSONObject: captured, options: [.prettyPrinted, .sortedKeys]) {
                 try? metadataData.write(to: URL(fileURLWithPath: path + ".json"), options: .atomic)
             }

@@ -171,6 +171,7 @@ final class ClipOpenCoordinator {
     private let settings: AppSettings
     private let attachments: AttachmentStore
     private let workspace: NSWorkspace
+    private let textPreview: TextPreviewController?
     private let onCommandCompletion: (@MainActor @Sendable (FileCommandExecution) -> Void)?
     private var runningFileCommands: [UUID: Process] = [:]
 
@@ -178,11 +179,13 @@ final class ClipOpenCoordinator {
         settings: AppSettings,
         attachments: AttachmentStore,
         workspace: NSWorkspace = .shared,
+        textPreview: TextPreviewController? = nil,
         onCommandCompletion: (@MainActor @Sendable (FileCommandExecution) -> Void)? = nil
     ) {
         self.settings = settings
         self.attachments = attachments
         self.workspace = workspace
+        self.textPreview = textPreview
         self.onCommandCompletion = onCommandCompletion
     }
 
@@ -212,6 +215,7 @@ final class ClipOpenCoordinator {
             try await open(url, withBundleIdentifier: "com.apple.Preview")
 
         case .code:
+            if settings.codeEditorBundleIdentifier.isEmpty, let textPreview { textPreview.present(clip); return }
             guard !settings.codeEditorBundleIdentifier.isEmpty else { throw ClipOpenError.codeEditorNotConfigured }
             let text = try await textContent(in: clip)
             let url = try writeTemporary(Data(text.utf8), fileExtension: fileExtension(for: clip.codeMetadata?.language))
@@ -263,7 +267,10 @@ final class ClipOpenCoordinator {
                 }
             }
 
-        case .text, .color, .mixed:
+        case .text:
+            guard let textPreview else { throw ClipOpenError.unsupportedKind(.text) }
+            textPreview.present(clip)
+        case .color, .mixed:
             throw ClipOpenError.unsupportedKind(clip.primaryKind)
         }
     }

@@ -9,6 +9,11 @@ struct OpenBehaviorSettingsView: View {
 
     var body: some View {
         Form {
+            Section(L10n.tr("文字")) {
+                LabeledContent(L10n.tr("打开方式"), value: L10n.tr("内置预览（Markdown / 原文）"))
+                Text(L10n.tr("选中文字后按打开内容快捷键即可预览，默认空格。支持标题、列表、表格和代码块，保留原文并可切换查看。"))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section(L10n.tr("链接")) {
                 applicationRow(
                     title: L10n.tr("指定浏览器"),
@@ -32,7 +37,7 @@ struct OpenBehaviorSettingsView: View {
                     placeholder: L10n.tr("选择代码编辑器"),
                     pickerTitle: L10n.tr("选择代码编辑器")
                 )
-                Text(L10n.tr("代码会按识别出的语言生成临时文件，再交给所选编辑器打开。未选择编辑器时不执行。"))
+                Text(L10n.tr("代码会按识别出的语言生成临时文件，再交给所选编辑器打开。未选择编辑器时使用内置文字预览。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

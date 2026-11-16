@@ -25,7 +25,7 @@ enum SettingsDestination: String, CaseIterable, Identifiable {
         switch self {
         case .library: L10n.tr("浏览、搜索和整理保存的内容")
         case .general: L10n.tr("外观、启动和应用状态")
-        case .privacy: L10n.tr("剪贴板检测、来源详情和排除应用")
+        case .privacy: L10n.tr("剪贴板检测、图片文字识别、来源详情和排除应用")
         case .shortcuts: L10n.tr("快捷面板和内容操作")
         case .openBehavior: L10n.tr("浏览器、编辑器和文件规则")
         case .linkResolution: L10n.tr("网页标题、登录规则和兜底规则")

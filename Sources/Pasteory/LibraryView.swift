@@ -600,7 +600,7 @@ struct LibraryView: View {
                             })).toggleStyle(.switch).font(.caption)
                         }
                         inspectorSection(L10n.tr("预览")) {
-                            RepresentationPreview(clip: clip, attachments: state.attachments)
+                            RepresentationPreview(clip: clip, attachments: state.attachments, expandText: { state.textPreview.present(clip) })
                                 .frame(minHeight: 150, maxHeight: 240)
                                 .padding(10)
                                 .background(LibraryTheme.inputBackground, in: RoundedRectangle(cornerRadius: 10))

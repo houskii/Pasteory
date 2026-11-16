@@ -123,6 +123,7 @@ final class AppState: ObservableObject {
     let repository: any ClipRepository
     let attachments: AttachmentStore
     let quickTextActions: QuickTextActionCoordinator
+    let textPreview: TextPreviewController
     let quickActionsMenu = QuickActionMenuController()
     let archive: ArchiveService
     let backup: BackupService
@@ -174,6 +175,7 @@ final class AppState: ObservableObject {
         self.attachments = attachments
         self.imageOCR = LocalImageOCRService(repository: repository, attachments: attachments, recognizer: imageTextRecognizer)
         self.quickTextActions = QuickTextActionCoordinator(repository: repository, attachments: attachments)
+        self.textPreview = TextPreviewController(attachments: attachments)
         self.archive = archive
         self.backup = backup
         self.storageAnalyticsService = storageAnalyticsService
@@ -204,6 +206,11 @@ final class AppState: ObservableObject {
         }
         intelligence.onApplied = { [weak self] automatic in
             Task { @MainActor in await self?.organizationApplied(automatically: automatic) }
+        }
+        textPreview.copy = { [weak self] clip, text in
+            guard let self else { return }
+            try self.quickTextActions.copy(text)
+            await self.recordHumanUse(clip, event: .copy)
         }
 
     }

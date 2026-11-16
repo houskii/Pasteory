@@ -50,6 +50,7 @@ final class QuickPanelController: NSObject {
         self.clipOpenCoordinator = ClipOpenCoordinator(
             settings: state.settings,
             attachments: state.attachments,
+            textPreview: state.textPreview,
             onCommandCompletion: { [weak state] execution in
                 guard let state else { return }
                 switch execution.status {
@@ -156,6 +157,7 @@ final class QuickPanelController: NSObject {
 #if DEBUG
     private(set) var presentationMetrics: [[String: Double]] = []
     var debugWindow: NSWindow { panel }
+    func debugOpenSelected() { perform(.openSelected) }
     func waitForPresentation() async { await presentationTask?.value }
 #endif
 
