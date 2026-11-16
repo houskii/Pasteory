@@ -126,9 +126,11 @@ final class QuickPanelController: NSObject {
         let widthDelta = sidebarWidth - appliedSidebarWidth
         appliedSidebarWidth = sidebarWidth
         var frame = panel.frame
+        let rightEdge = frame.maxX
         panel.minSize = NSSize(width: 340 + sidebarWidth, height: 480)
         panel.maxSize = NSSize(width: 520 + sidebarWidth, height: 760)
         frame.size.width = min(max(frame.width + widthDelta, panel.minSize.width), panel.maxSize.width)
+        if layout == .right { frame.origin.x = rightEdge - frame.width }
         if let visible = panel.screen?.visibleFrame {
             frame.origin.x = min(max(frame.minX, visible.minX), visible.maxX - frame.width)
         }

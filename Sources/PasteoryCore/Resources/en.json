@@ -422,7 +422,6 @@
   "搜索内容、备注、分组或来源": "Search content, notes, groups, or source",
   "搜索后缀或类型": "Search extensions or types",
   "搜索应用名称、Bundle ID 或路径": "Search app name, bundle ID, or path",
-  "搜索框下方横排": "Horizontal, below search",
   "搜索索引": "Search Index",
   "搜索索引已重建": "Search index rebuilt",
   "摘要": "Summary",
@@ -1077,5 +1076,9 @@
   "个人": "Personal",
   "工作": "Work",
   "默认使用 ⌥1～9 切换当前视图从上到下的前 9 个分组，⌥` 返回全部内容。未分组是筛选条件，不占编号。分组顺序改变后，编号同步更新。": "Use ⌥1–9 for the first nine groups in the current view and ⌥` for all content. Ungrouped is a filter and has no group number. Numbers follow the displayed group order.",
-  "全局唤起恢复为 ⌘⇧V，打开内容恢复为空格，搜索恢复为 ⌘F，分组切换恢复为 ⌥1～9，全部内容恢复为 ⌥`。": "Restore ⌘⇧V to open the panel, Space to open content, ⌘F to search, ⌥1–9 to switch groups, and ⌥` for all content."
+  "全局唤起恢复为 ⌘⇧V，打开内容恢复为空格，搜索恢复为 ⌘F，分组切换恢复为 ⌥1～9，全部内容恢复为 ⌥`。": "Restore ⌘⇧V to open the panel, Space to open content, ⌘F to search, ⌥1–9 to switch groups, and ⌥` for all content.",
+  "左侧": "Left",
+  "右侧": "Right",
+  "分组栏位置": "Group Sidebar Position",
+  "分组栏可放在左侧或右侧；↑↓ 选择内容，←→ 切换分组，搜索输入时保留文字编辑操作。": "Place the group sidebar on the left or right. Use ↑↓ to select content and ←→ to switch groups; text editing remains available while searching."
 }

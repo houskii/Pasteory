@@ -131,7 +131,8 @@ struct GroupSidebarDivider: View {
             .overlay { Color.clear.frame(width: 7).contentShape(Rectangle()).gesture(DragGesture(minimumDistance: 1)
                 .onChanged { value in
                     if start == nil { start = settings.groupPresentation.sidebarWidth }
-                    settings.groupPresentation.sidebarWidth = min(320, max(180, (start ?? 224) + value.translation.width))
+                    let direction = settings.quickTabLayout == .right ? -1.0 : 1.0
+                    settings.groupPresentation.sidebarWidth = min(320, max(180, (start ?? 224) + direction * value.translation.width))
                 }.onEnded { _ in start = nil }) }
             .help(L10n.tr("拖动调整分组栏宽度"))
             .accessibilityLabel(L10n.tr("分组栏宽度"))

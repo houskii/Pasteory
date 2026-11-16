@@ -175,6 +175,28 @@ private func searchClip(_ text: String, timestamp: TimeInterval) throws -> Clip 
     }
 }
 
+@Test @MainActor func switchingSidebarSidePreservesContentNavigationAndGroupOrder() async throws {
+    try await withSearchState { state, repository in
+        let clip = try searchClip("Sidebar positioning sample", timestamp: 300)
+        try await repository.save(clip); await state.refreshQuick(); await state.refreshLibrary()
+        state.quickQuery = "positioning"; state.libraryQuery = "sample"
+        state.quickSelectionID = clip.id; state.selectedClipID = clip.id
+        state.quickScrollAnchor = .clip(clip.id); state.libraryScrollAnchor = .clip(clip.id)
+        let scopes = state.quickTabs.map(\.scope)
+        for position in [QuickTabLayout.right, .left] {
+            state.settings.quickTabLayout = position
+            #expect(state.settings.groupSidebarWidth == 224)
+            #expect(state.quickQuery == "positioning" && state.libraryQuery == "sample")
+            #expect(state.quickSelectionID == clip.id && state.selectedClipID == clip.id)
+            #expect(state.quickScrollAnchor == .clip(clip.id) && state.libraryScrollAnchor == .clip(clip.id))
+            #expect(state.quickTabs.map(\.scope) == scopes)
+        }
+        state.settings.groupPresentation.profile = .minimal
+        #expect(state.settings.groupSidebarWidth == 0)
+        #expect(try await repository.aiState().usage.isEmpty)
+    }
+}
+
 @Test @MainActor func startupWithoutMaintenanceLoadsPersistedAIGroups() async throws {
     try await withSearchState { state, repository in
         let clip = try searchClip("Saved AI topic member", timestamp: 200)

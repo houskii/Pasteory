@@ -157,11 +157,15 @@ struct QuickPanelView: View {
 
     private var panelSurface: some View {
         HStack(spacing: 0) {
-            if state.settings.groupSidebarWidth > 0 {
+            if state.settings.groupSidebarWidth > 0, state.settings.quickTabLayout == .left {
                 groupSidebar
                 GroupSidebarDivider(settings: state.settings)
             }
             panelContent
+            if state.settings.groupSidebarWidth > 0, state.settings.quickTabLayout == .right {
+                GroupSidebarDivider(settings: state.settings)
+                groupSidebar
+            }
         }
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -193,13 +197,6 @@ struct QuickPanelView: View {
     private var panelContent: some View {
         VStack(spacing: 0) {
             header
-            if state.settings.quickTabLayout == .horizontal && state.settings.groupPresentation.profile != .minimal {
-                HStack(spacing: 8) {
-                    GroupViewPicker(state: state, quick: true)
-                    Spacer(minLength: 0)
-                    GroupSearchButton(state: state, quick: true)
-                }.padding(.horizontal, 10).padding(.bottom, 8)
-            }
             if state.intelligence.running || state.intelligence.pending != nil || state.organizationResultsWaiting {
                 HStack(spacing: 7) {
                     if state.intelligence.running { ProgressView().controlSize(.mini); Text(state.intelligence.status).lineLimit(1) }
@@ -208,7 +205,6 @@ struct QuickPanelView: View {
                     if state.intelligence.pending != nil { Button(L10n.tr("检查整理建议")) { state.intelligence.showingReview = true } }
                 }.font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.bottom, 8)
             }
-            if state.settings.quickTabLayout == .horizontal && state.settings.groupPresentation.profile != .minimal { groupTabs }
             Divider()
             if state.quickMultiSelectActive { multiSelectionBar }
             else if !state.quickQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -342,73 +338,6 @@ struct QuickPanelView: View {
         }
     }
 
-    private var groupTabs: some View {
-        VStack(spacing: 4) {
-            HStack(spacing: 4) {
-                ScrollViewReader { proxy in
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            ForEach(state.quickTabs) { tab in
-                                if sectionTitle(for: tab) != nil { Divider().frame(height: 20) }
-                                quickTabButton(tab)
-                                    .modifier(QuickTabDragModifier(tab: tab, state: state))
-                                    .id(tab.scope)
-                            }
-                            Color.clear
-                                .frame(width: 14, height: 28)
-                                .dropDestination(for: String.self) { identifiers, _ in
-                                    guard let raw = identifiers.first, let id = UUID(uuidString: raw) else { return false }
-                                    Task { await state.moveCollectionToEnd(id: id) }
-                                    return true
-                                }
-                        }
-                        .padding(.leading, 10)
-                        .padding(.trailing, 4)
-                    }
-                    .onChange(of: state.quickScope) { _, value in
-                        withAnimation(.easeOut(duration: 0.12)) { proxy.scrollTo(value, anchor: .center) }
-                    }
-                }
-                Rectangle()
-                    .fill(Color(nsColor: .separatorColor).opacity(0.7))
-                    .frame(width: 1, height: 20)
-                collectionManagerButton
-                .padding(.trailing, 8)
-            }
-
-            HStack(spacing: 8) {
-                Text(L10n.tr("当前：\(currentQuickGroupTitle)"))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .help(currentQuickGroupTitle)
-                Spacer(minLength: 8)
-                Text(currentQuickGroupPosition)
-                    .monospacedDigit()
-                    .fixedSize()
-            }
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
-            .padding(.horizontal, 10)
-            .accessibilityElement(children: .combine)
-        }
-        .padding(.bottom, 8)
-    }
-
-    private var currentQuickGroupTitle: String {
-        if state.quickScope == .ungrouped { return L10n.tr("未分组") }
-        guard case .collection(let id) = state.quickScope,
-              let collection = state.collections.first(where: { $0.id == id }) else { return L10n.tr("全部内容") }
-        return collection.name
-    }
-
-    private var currentQuickGroupPosition: String {
-        guard case .collection(let id) = state.quickScope,
-              let index = state.collections.firstIndex(where: { $0.id == id }) else {
-            return L10n.tr("共 \(state.collections.count) 个分组")
-        }
-        return L10n.tr("第 \(index + 1) / \(state.collections.count) 个分组")
-    }
-
     private func directionKeycap(_ symbol: String) -> some View {
         Image(systemName: symbol)
             .font(.system(size: 9, weight: .semibold))
@@ -442,7 +371,7 @@ struct QuickPanelView: View {
                 Text(tab.title)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .frame(maxWidth: state.settings.quickTabLayout == .sidebar ? .infinity : 160, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 if case .collection(let id) = tab.scope { GroupNewContentBadge(state: state, id: id) }
                 GroupShortcutHint(text: tabShortcutHint(tab))
             }
@@ -704,9 +633,7 @@ struct QuickPanelView: View {
                 .monospacedDigit()
                 .help(L10n.tr("按本机时区的自然日统计：今日从 0 点开始，近 7 日包含今天；不包含废纸篓"))
             Spacer(minLength: 12)
-            Text(state.settings.quickTabLayout == .sidebar
-                 ? L10n.tr("↑↓ 内容　长按 Command 提示")
-                 : L10n.tr("↑↓ 内容　←→ 分组　长按 Command 提示"))
+            Text(L10n.tr("↑↓ 内容　长按 Command 提示"))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .font(.caption2)

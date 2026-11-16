@@ -242,8 +242,8 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
         window.center()
         window.isReleasedWhenClosed = false
         debugQuickWindow = window
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        if ProcessInfo.processInfo.arguments.contains("--debug-background-snapshot") { window.orderBack(nil) }
+        else { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
         Task {
             await state.prepareQuickPanel()
             if ProcessInfo.processInfo.arguments.contains("--debug-quick-actions") {
@@ -876,6 +876,9 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
 
     private func activateAndShow(_ window: NSWindow?) {
         guard let window else { return }
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--debug-background-snapshot") { window.orderBack(nil); return }
+#endif
         NSApplication.shared.activate(ignoringOtherApps: true); window.makeKeyAndOrderFront(nil)
     }
 }

@@ -252,7 +252,7 @@ struct SettingsView: View {
                 .accessibilityIdentifier("settings.language")
             }
             Section(L10n.tr("快捷面板")) {
-                Picker(L10n.tr("分组 Tab 位置"), selection: $settings.quickTabLayout) {
+                Picker(L10n.tr("分组栏位置"), selection: $settings.quickTabLayout) {
                     ForEach(QuickTabLayout.allCases) { layout in
                         Text(layout.title).tag(layout)
                     }
@@ -265,7 +265,7 @@ struct SettingsView: View {
                     Text(L10n.tr("分组栏宽度"))
                 }
                 Toggle(L10n.tr("紧凑分组行高"), isOn: $settings.groupPresentation.compact)
-                Text(L10n.tr("两种布局均用 ↑↓ 选择内容、←→ 切换分组；搜索输入时保留文字编辑操作。"))
+                Text(L10n.tr("分组栏可放在左侧或右侧；↑↓ 选择内容，←→ 切换分组，搜索输入时保留文字编辑操作。"))
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section(L10n.tr("外观")) {

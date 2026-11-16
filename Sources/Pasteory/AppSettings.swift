@@ -172,18 +172,17 @@ struct FileCommandExecution: Identifiable, Equatable {
 }
 
 enum QuickTabLayout: String, CaseIterable, Identifiable {
-    case horizontal
-    case sidebar
+    case left
+    case right
 
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .horizontal: L10n.tr("搜索框下方横排")
-        case .sidebar: L10n.tr("左侧竖排")
+        case .left: L10n.tr("左侧")
+        case .right: L10n.tr("右侧")
         }
     }
 
-    var sidebarWidth: CGFloat { self == .sidebar ? 140 : 0 }
 }
 
 @MainActor
@@ -195,7 +194,7 @@ final class AppSettings: ObservableObject {
         didSet { if let data = try? JSONEncoder().encode(groupPresentation) { defaults.set(data, forKey: "groupPresentationV1") } }
     }
     var groupSidebarWidth: CGFloat {
-        groupPresentation.profile != .minimal && quickTabLayout == .sidebar ? min(320, max(180, groupPresentation.sidebarWidth)) : 0
+        groupPresentation.profile != .minimal ? min(320, max(180, groupPresentation.sidebarWidth)) : 0
     }
     @Published var aiConfiguration: AIConfiguration {
         didSet { if let data = try? JSONEncoder().encode(aiConfiguration) { defaults.set(data, forKey: "aiOrganizationConfiguration.v1") } }
@@ -320,7 +319,9 @@ final class AppSettings: ObservableObject {
         linkResolutionEnabled = defaults.object(forKey: Key.linkResolutionEnabled) as? Bool ?? false
         automaticWebCacheCleanup = defaults.object(forKey: Key.automaticWebCacheCleanup) as? Bool ?? true
         lastWebCacheCleanup = defaults.object(forKey: Key.lastWebCacheCleanup) as? Date
-        quickTabLayout = QuickTabLayout(rawValue: defaults.string(forKey: Key.quickTabLayout) ?? "") ?? .horizontal
+        let resolvedTabLayout = QuickTabLayout(rawValue: defaults.string(forKey: Key.quickTabLayout) ?? "") ?? .left
+        quickTabLayout = resolvedTabLayout
+        defaults.set(resolvedTabLayout.rawValue, forKey: Key.quickTabLayout)
         themeColor = PasteoryThemeColor(rawValue: defaults.string(forKey: Key.themeColor) ?? "") ?? .blueViolet
         browserBundleIdentifier = defaults.string(forKey: Key.browserBundleIdentifier) ?? ""
         codeEditorBundleIdentifier = defaults.string(forKey: Key.codeEditorBundleIdentifier) ?? ""

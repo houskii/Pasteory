@@ -93,11 +93,16 @@ import Testing
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
     let settings = AppSettings(defaults: defaults)
-    #expect(settings.quickTabLayout == .horizontal)
-    settings.quickTabLayout = .sidebar
-    #expect(AppSettings(defaults: defaults).quickTabLayout == .sidebar)
-    settings.quickTabLayout = .horizontal
-    #expect(AppSettings(defaults: defaults).quickTabLayout == .horizontal)
-    defaults.set("unknown-layout", forKey: "quickTabLayout")
-    #expect(AppSettings(defaults: defaults).quickTabLayout == .horizontal)
+    #expect(QuickTabLayout.allCases == [.left, .right])
+    #expect(settings.quickTabLayout == .left)
+    settings.quickTabLayout = .right
+    #expect(AppSettings(defaults: defaults).quickTabLayout == .right)
+    #expect(settings.groupSidebarWidth == 224)
+    settings.quickTabLayout = .left
+    #expect(AppSettings(defaults: defaults).quickTabLayout == .left)
+    for legacy in ["horizontal", "sidebar", "unknown-layout"] {
+        defaults.set(legacy, forKey: "quickTabLayout")
+        #expect(AppSettings(defaults: defaults).quickTabLayout == .left)
+        #expect(defaults.string(forKey: "quickTabLayout") == "left")
+    }
 }

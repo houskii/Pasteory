@@ -23,11 +23,15 @@ struct LibraryView: View {
     var body: some View {
         GeometryReader { geometry in
             HStack(spacing: 0) {
-                if state.settings.groupPresentation.profile != .minimal {
+                if state.settings.groupPresentation.profile != .minimal, state.settings.quickTabLayout == .left {
                     sidebar.frame(width: min(320, max(180, state.settings.groupPresentation.sidebarWidth)))
                     GroupSidebarDivider(settings: state.settings)
                 }
                 content.frame(minWidth: 430, maxWidth: .infinity, maxHeight: .infinity)
+                if state.settings.groupPresentation.profile != .minimal, state.settings.quickTabLayout == .right {
+                    GroupSidebarDivider(settings: state.settings)
+                    sidebar.frame(width: min(320, max(180, state.settings.groupPresentation.sidebarWidth)))
+                }
                 if geometry.size.width >= 1_050 {
                     LibraryDivider(axis: .vertical)
                     inspector.frame(width: 336).frame(maxHeight: .infinity).clipped()
