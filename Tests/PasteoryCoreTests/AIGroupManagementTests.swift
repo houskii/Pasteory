@@ -111,15 +111,19 @@ private func groupManagementDates(_ url: URL) throws -> [String: [Double?]] {
 private actor RegroupTransport: AIChatTransport {
     var batches = [[UUID]]()
     var planningCalls = 0
+    var invalidPlanningAttempts = 0
     var delayAfterFirstBatch: Bool
-    init(delayAfterFirstBatch: Bool = false) { self.delayAfterFirstBatch = delayAfterFirstBatch }
+    init(delayAfterFirstBatch: Bool = false, invalidPlanningAttempts: Int = 0) {
+        self.delayAfterFirstBatch = delayAfterFirstBatch; self.invalidPlanningAttempts = invalidPlanningAttempts
+    }
     func resumeImmediately() { delayAfterFirstBatch = false }
     func completion(body: Data, configuration: AIConfiguration, credential: String) async throws -> Data {
         let request = try JSONDecoder().decode(JSONValue.self, from: body), messages = try #require(request["messages"].array)
         let message: AIChatMessage
         if messages.last?["role"].string == "tool" { message = .init(role: "assistant", content: "Complete") }
         else {
-            let payload = try JSONDecoder().decode(JSONValue.self, from: Data(try #require(messages.last?["content"].string).utf8))
+            let content = request["tools"].array == nil ? messages.first(where: { $0["role"].string == "user" })?["content"].string : messages.last?["content"].string
+            let payload = try JSONDecoder().decode(JSONValue.self, from: Data(try #require(content).utf8))
             if request["tools"].array == nil {
                 planningCalls += 1
                 let examples = try #require(payload["examples"].array), existing = try #require(payload["existing_themes"].array)
@@ -129,6 +133,7 @@ private actor RegroupTransport: AIChatTransport {
                 for (name, start) in [("主题一", 0), ("主题二", 3)] {
                     themes.append(.object(["group_id": .null, "name": .string(name), "definition": .string(name + " synthetic"), "support_ids": .array(try examples[start..<start+3].map { .string(try #require($0["id"].string)) })]))
                 }
+                if invalidPlanningAttempts > 0 { invalidPlanningAttempts -= 1; themes = [] }
                 message = .init(role: "assistant", content: JSONValue.object(["themes": .array(themes)]).encoded)
             } else {
                 let docs = try #require(payload["current_batch"].array)
@@ -213,4 +218,38 @@ private actor RegroupTransport: AIChatTransport {
     #expect(controller.error == nil)
     #expect(controller.state.groups.count == 8)
     #expect(controller.state.groups.mapValues(\.definition) == definitions)
+}
+
+@Test @MainActor func invalidThemePlanRetriesThenPersistsVisibleFailureAndResumesWithoutChangingGroups() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("AIPlanFailure-" + UUID().uuidString)
+    let dirs = try AppDirectories(root: root); defer { try? FileManager.default.removeItem(at: root) }
+    let suite = "AIPlanFailure." + UUID().uuidString, defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let repo = try SQLiteClipRepository(databaseURL: dirs.databaseFile), settings = AppSettings(defaults: defaults)
+    settings.aiConfiguration.enabled = true; settings.aiConfiguration.model = "synthetic-model"
+    let clips = try (0..<6).map { try managementClip("Plan failure synthetic \($0)") }; try await repo.saveBatch(clips)
+    let groupID = try await addManagementGroup(clips, name: "Original", repo: repo)
+    let transport = RegroupTransport(invalidPlanningAttempts: 3)
+    let controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic" })
+    try await controller.reload()
+    let original = controller.state.groups, scope = AIGroupSelection(groups: Array(original.values))
+    #expect(controller.regroupGroups(scope)); await controller.waitUntilIdle()
+    #expect(!controller.running && controller.needsAttention)
+    #expect(await transport.planningCalls == 3)
+    #expect(controller.error?.contains("theme plan") == true)
+    let checkpoint = try #require(controller.state.checkpoint)
+    #expect(checkpoint.cursor == 0 && checkpoint.failureMessage == controller.error)
+    #expect(controller.pending == nil && controller.state.groups == original)
+    #expect(controller.state.usage.count == 3)
+    controller.analyze(all: true)
+    #expect(!controller.running && controller.state.checkpoint == checkpoint)
+    #expect(await transport.planningCalls == 3)
+    let reopened = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic" })
+    try await reopened.reload()
+    #expect(!reopened.running && reopened.error == checkpoint.failureMessage && reopened.needsAttention)
+    reopened.analyze(resume: true); await reopened.waitUntilIdle()
+    #expect(reopened.error == nil && reopened.state.checkpoint == nil)
+    #expect(reopened.pending?.inputCount == 6)
+    #expect(reopened.state.groups[groupID] == original[groupID])
+    #expect(await transport.planningCalls == 4)
 }

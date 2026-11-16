@@ -67,6 +67,7 @@ final class AIOrganizationController: ObservableObject {
         guard let job = state.checkpoint else { return "" }
         return "\(job.cursor) / \(job.clipIDs.count)"
     }
+    var needsAttention: Bool { running || pending != nil || state.checkpoint != nil || error != nil }
 
     func bootstrap(deferMaintenance: Bool = false) async {
         if deferMaintenance { lastLifecycleRefresh = clock() }
@@ -83,6 +84,7 @@ final class AIOrganizationController: ObservableObject {
 
     func reload() async throws {
         state = try await repository.aiState()
+        if !running, error == nil, let failure = state.checkpoint?.failureMessage { error = failure }
         // Establish a baseline for an existing library once, so upgrading does
         // not label historical material as new. Later additions stay unread.
         if state.automation.viewedGroupMembers == nil {
@@ -265,6 +267,12 @@ final class AIOrganizationController: ObservableObject {
         guard !storageBusy else { return }
         guard settings.aiConfiguration.enabled else { error = L10n.tr("请先在 AI 整理设置中启用模型连接"); return }
         if pending != nil && !(["new", "idle"].contains(trigger) && settings.aiConfiguration.applyMode == .appendExisting && pending?.isThemeReview == true) { showingReview = true; return }
+        if !resume, let saved = state.checkpoint,
+           !["new", "idle", "review"].contains(saved.organization?.trigger ?? "") {
+            error = L10n.tr("上次整理尚未完成，请先继续整理，或放弃保存的任务后重新开始。")
+            status = L10n.tr("上次整理进度：\(checkpointProgress)")
+            return
+        }
         running = true; error = nil; status = L10n.tr("正在准备分析范围")
         work = Task { [weak self] in
             guard let self else { return }
@@ -278,11 +286,18 @@ final class AIOrganizationController: ObservableObject {
             do { try await self.runAnalysis(all: all, resume: resume, groupID: groupID, trigger: trigger, contentIDs: contentIDs, groupSelection: groupSelection) }
             catch is CancellationError { self.status = L10n.tr("分析已暂停，可以继续上次任务") }
             catch {
-                self.error = error.localizedDescription
+                if Task.isCancelled {
+                    self.status = L10n.tr("分析已暂停，可以继续上次任务")
+                } else {
+                    self.error = error.localizedDescription
+                    let message = error.localizedDescription
+                    try? await self.repository.updateAIState { $0.checkpoint?.failureMessage = message }
+                    self.status = L10n.tr("整理未完成，进度已保存")
+                }
                 if case AIError.http(let code, _) = error, code == 401 || code == 403 { self.automaticPaused = true }
                 if case AIError.budget = error, ["idle", "review"].contains(self.state.checkpoint?.organization?.trigger ?? "") {
                     let now = self.clock()
-                    try? await self.repository.updateAIState { $0.automation.lastNightlyDate = now }
+                    try? await self.repository.updateAIState { $0.automation.lastNightlyDate = now; $0.checkpoint?.failureMessage = nil }
                     self.error = nil; self.status = L10n.tr("夜间整理已保存进度，将在下个闲时窗口继续")
                 }
             }
@@ -333,7 +348,11 @@ final class AIOrganizationController: ObservableObject {
     func waitUntilIdle() async { await queueWrite?.value; await work?.value }
     func discardCheckpoint() async {
         guard !running else { return }
-        do { try await repository.updateAIState { $0.checkpoint = nil }; try await reload() }
+        do {
+            try await repository.updateAIState { $0.checkpoint = nil }
+            error = nil; status = L10n.tr("已放弃保存的整理任务")
+            try await reload()
+        }
         catch { self.error = error.localizedDescription }
     }
 
@@ -391,6 +410,7 @@ final class AIOrganizationController: ObservableObject {
         if resume {
             guard let saved = state.checkpoint else { throw AIError.invalid("No resumable analysis") }
             job = saved
+            job.failureMessage = nil
             // Batch size and budget edits do not discard already analyzed IDs or draft work.
             job.batchSize = min(20, config.batchSize); job.configurationFingerprint = AIHash.fingerprint(config)
             if let organization = job.organization {
@@ -426,6 +446,7 @@ final class AIOrganizationController: ObservableObject {
         if selection != nil { rules.allowNewGroups = false }
         let checkpoint = job
         try await repository.updateAIState { s in s.checkpoint = checkpoint; if !trigger.hasPrefix("manual") { s.lastAutomaticRunAt = Date() } }
+        state.checkpoint = checkpoint
         let repository = repository
         if nightly {
             let now = clock(), day = Calendar.current.startOfDay(for: clock())

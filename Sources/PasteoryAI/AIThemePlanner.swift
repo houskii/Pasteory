@@ -97,38 +97,55 @@ public actor AIThemePlanner {
                      "protected": .bool(protectedIDs.contains(group.id)), "member_count": .number(Double(group.memberIDs.count))])
         }
         let payload: JSONValue = .object(["target_count": .number(Double(policy.targetGroupCount)), "existing_themes": .array(catalog),
-                                          "examples": try .value(Array(examples)), "candidate_themes": try .value(Array(candidates.prefix(20)))])
-        let prompt = Self.planningInstructions
-        let fields: [String: JSONValue] = ["model": .string(configuration.model), "messages": try .value([AIChatMessage(role: "system", content: prompt), AIChatMessage(role: "user", content: payload.encoded)]),
-                                          "response_format": .object(["type": .string("json_object")]), "max_tokens": .number(Double(configuration.maxOutputTokens)), "stream": .bool(false)]
-        let body = try JSONEncoder.sorted.encode(JSONValue.object(fields))
-        let input = max(1, body.count / 2)
+                                          "examples": try .value(Array(examples)), "candidate_themes": try .value(Array(candidates.prefix(20))),
+                                          "user_preferences": .string(configuration.prompt)])
+        var messages = [AIChatMessage(role: "system", content: Self.planningInstructions), AIChatMessage(role: "user", content: payload.encoded)]
         let today = Calendar.current.startOfDay(for: Date())
-        let spent = ledger.filter { $0.date >= today }.reduce(0) { $0 + $1.totalTokens }
-        guard input <= configuration.maxInputTokens, spent + input + configuration.maxOutputTokens <= configuration.dailyTokenLimit else { throw AIError.budget }
-        let response: AIChatResponse
-        do { response = try JSONDecoder().decode(AIChatResponse.self, from: await transport.completion(body: body, configuration: configuration, credential: credential)) }
-        catch {
-            try await onUsage(AIUsageRecord(runID: runID, requestedModel: configuration.model, inputTokens: input, outputTokens: configuration.maxOutputTokens, estimated: true, succeeded: false, trigger: trigger))
-            throw error
-        }
-        let usage = response.usage
-        try await onUsage(AIUsageRecord(runID: runID, requestedModel: configuration.model, inputTokens: usage?.prompt_tokens ?? input,
+        var spent = ledger.filter { $0.date >= today }.reduce(0) { $0 + $1.totalTokens }
+        // Repair invalid plans with the same evidence and constraints. Transport
+        // failures still stop immediately, and every attempt consumes its budget.
+        for attempt in 0..<3 {
+            try Task.checkCancellation()
+            let fields: [String: JSONValue] = ["model": .string(configuration.model), "messages": try .value(messages),
+                                              "response_format": .object(["type": .string("json_object")]), "max_tokens": .number(Double(configuration.maxOutputTokens)), "stream": .bool(false)]
+            let body = try JSONEncoder.sorted.encode(JSONValue.object(fields))
+            let input = max(1, body.count / 2)
+            guard input <= configuration.maxInputTokens, spent + input + configuration.maxOutputTokens <= configuration.dailyTokenLimit else { throw AIError.budget }
+            let response: AIChatResponse
+            do { response = try JSONDecoder().decode(AIChatResponse.self, from: await transport.completion(body: body, configuration: configuration, credential: credential)) }
+            catch {
+                try await onUsage(AIUsageRecord(runID: runID, requestedModel: configuration.model, inputTokens: input, outputTokens: configuration.maxOutputTokens, estimated: true, succeeded: false, trigger: trigger))
+                throw error
+            }
+            let usage = response.usage
+            let record = AIUsageRecord(runID: runID, requestedModel: configuration.model, inputTokens: usage?.prompt_tokens ?? input,
                                        outputTokens: usage?.completion_tokens ?? configuration.maxOutputTokens,
                                        estimated: usage?.prompt_tokens == nil || usage?.completion_tokens == nil, succeeded: true, trigger: trigger,
-                                       servedModel: response.model, cachedInputTokens: usage?.prompt_tokens_details?.cached_tokens ?? usage?.prompt_cache_hit_tokens))
-        guard let text = response.choices.first?.message.content, let data = text.data(using: .utf8) else { throw AIError.invalid("The theme planner returned no JSON") }
-        let result = try JSONDecoder().decode(AIThemePlan.self, from: data)
-        var draft = try result.changeSet(groups: groups, documents: documents, protectedIDs: protectedIDs, policy: policy, supportingIDs: Set(examples.map(\.id)))
-        // Retirement needs revisions for all old members, while new-theme evidence
-        // must come from examples the planner actually received.
-        for group in groups where !result.themes.compactMap(\.group_id).contains(group.id) {
-            for member in group.memberIDs {
-                guard let document = documents.first(where: { $0.id == member }) else { throw AIError.invalid("A retiring theme contains excluded content") }
-                draft.clipRevisions[member] = document.revision
+                                       servedModel: response.model, cachedInputTokens: usage?.prompt_tokens_details?.cached_tokens ?? usage?.prompt_cache_hit_tokens)
+            try await onUsage(record); spent += record.totalTokens
+            let text = response.choices.first?.message.content ?? ""
+            do {
+                guard let data = text.data(using: .utf8), !text.isEmpty else { throw AIError.invalid("The theme planner returned no JSON") }
+                let result = try JSONDecoder().decode(AIThemePlan.self, from: data)
+                var draft = try result.changeSet(groups: groups, documents: documents, protectedIDs: protectedIDs, policy: policy, supportingIDs: Set(examples.map(\.id)))
+                for group in groups where !result.themes.compactMap(\.group_id).contains(group.id) {
+                    for member in group.memberIDs {
+                        guard let document = documents.first(where: { $0.id == member }) else { throw AIError.invalid("A retiring theme contains excluded content") }
+                        draft.clipRevisions[member] = document.revision
+                    }
+                }
+                draft.planningInputIDs = Set(examples.map(\.id))
+                return draft
+            } catch {
+                guard attempt < 2 else { throw error }
+                let feedback: String
+                if case AIError.invalid(let reason) = error { feedback = reason }
+                else if error is DecodingError { feedback = "Return a JSON object matching the themes schema exactly." }
+                else { throw error }
+                messages.append(AIChatMessage(role: "assistant", content: text))
+                messages.append(AIChatMessage(role: "user", content: "The plan failed validation: " + feedback + " Correct the plan using only the original supplied examples, stable IDs, and protected theme definitions. Return the complete corrected JSON."))
             }
         }
-        draft.planningInputIDs = Set(examples.map(\.id))
-        return draft
+        throw AIError.invalid("The theme plan could not be validated")
     }
 }

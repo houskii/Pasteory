@@ -1115,5 +1115,19 @@
   "正在规划所选内容的主题": "Planning Themes for Selected Content",
   "本地操作": "Local Operation",
   "移除 {0} 条成员归属，原始内容继续保留。": "Remove {0} memberships while keeping the original content.",
-  "当前模型：{0}": "Current model: {0}"
+  "当前模型：{0}": "Current model: {0}",
+  "整理未完成，进度已保存": "Organization stopped; progress has been saved",
+  "已放弃保存的整理任务": "Discarded the saved organization task",
+  "整理方案已生成，应用后更新分组": "Organization plan is ready; apply it to update groups",
+  "整理已暂停：{0}": "Organization paused: {0}",
+  "整理未完成：{0}": "Organization incomplete: {0}",
+  "继续整理": "Continue organizing",
+  "加载更多": "Load more",
+  "已加载 {0} 个结果": "{0} results loaded",
+  "已加载 {0} 条": "{0} items loaded",
+  "上次整理尚未完成，请先继续整理，或放弃保存的任务后重新开始。": "An unfinished task is saved. Continue organizing, or discard the saved task to start again.",
+  "上次整理进度：{0}": "Saved organization progress: {0}",
+  "放弃任务": "Discard task",
+  "放弃这次未完成的整理？": "Discard this unfinished organization task?",
+  "仅放弃未应用的整理进度，原有分组和内容保持不变。之后可以重新开始整理。": "Only unapplied progress will be discarded. Your existing groups and content will be kept, and you can start again."
 }

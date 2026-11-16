@@ -36,7 +36,8 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
         onOpenLibrary: { [weak self] in self?.openLibrary() },
         onOpenSettings: { [weak self] in self?.openSettings() },
         onOpenUpdate: { [weak self] in self?.updateService.checkForUpdates() },
-        onCreateTextClip: { [weak self] in self?.createManualTextClip() }
+        onCreateTextClip: { [weak self] in self?.createManualTextClip() },
+        prepareClipboard: { [weak self] in await self?.monitor.flushPendingCapture() }
     )
 
     init(state: AppState, settings: AppSettings, attachments: AttachmentStore, defaults: UserDefaults = .standard) {
@@ -176,6 +177,18 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
                 guard let self else { return }
                 if ProcessInfo.processInfo.arguments.contains("--debug-seed") || ProcessInfo.processInfo.arguments.contains("--debug-readme-seed") { await seedDebugData() }
                 try? await Task.sleep(for: .milliseconds(600)); quickPanel.show()
+                if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "--debug-snapshot-path"),
+                   ProcessInfo.processInfo.arguments.indices.contains(index + 1) {
+                    await quickPanel.waitForPresentation()
+                    if ProcessInfo.processInfo.arguments.contains("--debug-repeat-quick-presentation") {
+                        for _ in 0..<2 {
+                            quickPanel.close(restoreTargetApplication: false)
+                            quickPanel.show(); await quickPanel.waitForPresentation()
+                        }
+                    }
+                    try? await Task.sleep(for: .milliseconds(300))
+                    saveDebugSnapshot(of: quickPanel.debugWindow, to: ProcessInfo.processInfo.arguments[index + 1])
+                }
                 if ProcessInfo.processInfo.arguments.contains("--debug-open-metadata-editor") {
                     state.quickSelectionID = state.quickClips.first(where: {
                         $0.source.bundleIdentifier == "com.google.Chrome"
@@ -318,6 +331,12 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
             "textLabel": ClipKind.text.displayName,
             "editMenuTitle": NSApp.mainMenu?.items.dropFirst().first?.submenu?.title ?? "",
             "windowTitle": window.title,
+            "quickLoadedCount": state.quickClips.count,
+            "libraryLoadedCount": state.clips.count,
+            "quickHasMore": state.quickHasMore,
+            "libraryHasMore": state.libraryHasMore,
+            "organizationRunning": state.intelligence.running,
+            "organizationProgress": state.intelligence.checkpointProgress,
             "sampleTitles": state.quickClips.map(\.title)
         ]
         if let metadataData = try? JSONSerialization.data(withJSONObject: metadata, options: [.prettyPrinted, .sortedKeys]) {

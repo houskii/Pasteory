@@ -197,12 +197,14 @@ struct QuickPanelView: View {
     private var panelContent: some View {
         VStack(spacing: 0) {
             header
-            if state.intelligence.running || state.intelligence.pending != nil || state.organizationResultsWaiting {
+            if state.intelligence.needsAttention {
+                AIOrganizationStatusView(controller: state.intelligence)
+                    .padding(.horizontal, 12).padding(.bottom, 8)
+            }
+            if state.organizationResultsWaiting {
                 HStack(spacing: 7) {
-                    if state.intelligence.running { ProgressView().controlSize(.mini); Text(state.intelligence.status).lineLimit(1) }
                     Spacer(minLength: 0)
                     if state.organizationResultsWaiting { Button(L10n.tr("显示新整理结果")) { Task { await state.showOrganizationResults() } } }
-                    if state.intelligence.pending != nil { Button(L10n.tr("检查整理建议")) { state.intelligence.showingReview = true } }
                 }.font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.bottom, 8)
             }
             Divider()
@@ -459,6 +461,20 @@ struct QuickPanelView: View {
                             .id(entry.id)
                         }
                     }
+                    if state.quickHasMore {
+                        Button {
+                            Task { await state.loadMoreQuick() }
+                        } label: {
+                            HStack {
+                                if state.quickLoadingMore { ProgressView().controlSize(.mini) }
+                                Text(L10n.tr("加载更多"))
+                            }.frame(maxWidth: .infinity).padding(.vertical, 10)
+                        }
+                        .buttonStyle(.plain).font(.caption).foregroundStyle(.secondary)
+                        .disabled(state.quickLoadingMore)
+                        .id(state.quickClips.count)
+                        .onAppear { Task { await state.loadMoreQuick() } }
+                    }
                 }
                 .scrollTargetLayout()
                 .padding(.horizontal, 10)
@@ -498,7 +514,7 @@ struct QuickPanelView: View {
 
     private var aggregationSearchBar: some View {
         HStack(spacing: 8) {
-            Text(L10n.tr("找到 \(state.quickTopLevelResultCount) 个结果"))
+            Text(state.quickHasMore ? L10n.tr("已加载 \(state.quickTopLevelResultCount) 个结果") : L10n.tr("找到 \(state.quickTopLevelResultCount) 个结果"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 8)

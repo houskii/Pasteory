@@ -589,6 +589,13 @@ extension AppState {
         parentInScope: (ClipAggregation) -> Bool,
         showAllMembersForParent: (ClipAggregation) -> Bool
     ) -> [AggregationListEntry] {
+        if aggregations.isEmpty {
+            return candidates.sorted {
+                if $0.isPinned != $1.isPinned { return $0.isPinned }
+                if $0.lastUsedAt != $1.lastUsedAt { return $0.lastUsedAt > $1.lastUsedAt }
+                return $0.id.uuidString < $1.id.uuidString
+            }.map { AggregationListEntry(content: .clip($0, parentAggregationID: nil)) }
+        }
         struct TopLevel {
             let entry: AggregationListEntry
             let pinned: Bool
@@ -596,8 +603,7 @@ extension AppState {
             let children: [Clip]
         }
 
-        let candidateByID = Dictionary(uniqueKeysWithValues: candidates.map { ($0.id, $0) })
-        let candidateIDs = Set(candidateByID.keys)
+        let candidateIDs = Set(candidates.map(\.id))
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         var suppressed = Set<UUID>()
         var top = [TopLevel]()

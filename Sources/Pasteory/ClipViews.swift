@@ -77,7 +77,8 @@ struct ClipRowView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .clipped()
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             Spacer(minLength: 4)
             VStack(alignment: .trailing, spacing: 0) {
                 if !ClipTypeMarkerPreview.overlaysSourceIcon {

@@ -40,15 +40,23 @@ final class AppState: ObservableObject {
         var libraryAggregation: UUID?
         var quickAnchor: AggregationListEntryID?
         var libraryAnchor: AggregationListEntryID?
+        var quickCount: Int
+        var libraryCount: Int
     }
     private var viewPositions: [GroupViewProfile: ViewPosition] = [:]
     private var groupViewTask: Task<Void, Never>?
-    @Published var quickScrollAnchor: AggregationListEntryID?
-    @Published var libraryScrollAnchor: AggregationListEntryID?
+    // Scroll bookkeeping must not invalidate every observed card on each row.
+    // Profile restoration publishes restoringGroupView after restoring these values.
+    var quickScrollAnchor: AggregationListEntryID?
+    var libraryScrollAnchor: AggregationListEntryID?
     @Published private(set) var restoringGroupView = false
     @Published private(set) var organizationResultsWaiting = false
     @Published var clips: [Clip] = []
     @Published var quickClips: [Clip] = []
+    @Published private(set) var quickHasMore = false
+    @Published private(set) var libraryHasMore = false
+    @Published private(set) var quickLoadingMore = false
+    @Published private(set) var libraryLoadingMore = false
     @Published var collections: [ClipCollection] = []
     @Published var libraryFilter: ClipFilter = .all
     @Published var libraryQuery = ""
@@ -120,6 +128,10 @@ final class AppState: ObservableObject {
     private let authenticatedLinkResolver: AuthenticatedLinkResolver
     private var quickSearchTask: Task<Void, Never>?
     private var librarySearchTask: Task<Void, Never>?
+    private let quickListLoader: ClipListLoader
+    private let libraryListLoader: ClipListLoader
+    private var quickLoadGeneration = UUID()
+    private var libraryLoadGeneration = UUID()
     private var appliedQuickQuery = ""
     private var appliedQuickScope: QuickScope = .all
     private var appliedLibraryQuery = ""
@@ -141,6 +153,8 @@ final class AppState: ObservableObject {
         linkResolutionService: LinkResolutionService
     ) {
         self.repository = repository
+        self.quickListLoader = ClipListLoader(repository: repository)
+        self.libraryListLoader = ClipListLoader(repository: repository)
         self.attachments = attachments
         self.quickTextActions = QuickTextActionCoordinator(repository: repository, attachments: attachments)
         self.archive = archive
@@ -209,7 +223,8 @@ final class AppState: ObservableObject {
         viewPositions[previous] = ViewPosition(quickScope: quickScope, libraryFilter: libraryFilter, quickQuery: quickQuery, libraryQuery: libraryQuery,
                                                quickSelection: quickSelectionID, librarySelection: selectedClipID,
                                                quickAggregation: quickSelectedAggregationID, libraryAggregation: selectedAggregationID,
-                                               quickAnchor: quickScrollAnchor, libraryAnchor: libraryScrollAnchor)
+                                               quickAnchor: quickScrollAnchor, libraryAnchor: libraryScrollAnchor,
+                                               quickCount: quickClips.count, libraryCount: clips.count)
         let position = viewPositions[profile]
         restoringGroupView = true; settings.groupPresentation.profile = profile
         quickScope = position?.quickScope ?? .all; libraryFilter = position?.libraryFilter ?? .all
@@ -223,7 +238,8 @@ final class AppState: ObservableObject {
         appliedQuickQuery = quickQuery; appliedLibraryQuery = libraryQuery
         groupViewTask?.cancel()
         groupViewTask = Task {
-            await refreshQuick(); await refreshLibrary()
+            await refreshQuick(minimumCount: position?.quickCount ?? ClipListLoader.pageSize)
+            await refreshLibrary(minimumCount: position?.libraryCount ?? ClipListLoader.pageSize)
             guard !Task.isCancelled, settings.groupPresentation.profile == profile else { return }
             quickScrollAnchor = position?.quickAnchor; libraryScrollAnchor = position?.libraryAnchor
             await Task.yield(); restoringGroupView = false
@@ -324,18 +340,16 @@ final class AppState: ObservableObject {
             intelligence.synchronize(stored)
             intelligence.contentChanged(stored.id)
             replaceLocal(stored)
-            quickClips.removeAll { $0.id == stored.id }
-            quickClips.insert(stored, at: 0)
-            if quickClips.count > 500 { quickClips.removeLast(quickClips.count - 500) }
-            quickClips = SearchRanker.rank(quickClips, query: quickQuery)
-            await refreshLibrary()
-            await refreshQuickStats()
-            if !settings.aiConfiguration.lifecycleEnabled, try await repository.activeClipCount() > RetentionPolicy.default.maximumHotClips {
-                Task.detached(priority: .utility) { [archive] in _ = try? await archive.run() }
-            }
+            await refreshQuick()
             Task { [weak self, linkResolutionService] in
-                await linkResolutionService.resolve(clip: stored, allowNetwork: false)
                 guard let self else { return }
+                await self.refreshLibrary()
+                await self.refreshQuickStats()
+                if !self.settings.aiConfiguration.lifecycleEnabled,
+                   (try? await self.repository.activeClipCount()) ?? 0 > RetentionPolicy.default.maximumHotClips {
+                    Task.detached(priority: .utility) { [archive = self.archive] in _ = try? await archive.run() }
+                }
+                await linkResolutionService.resolve(clip: stored, allowNetwork: false)
                 await self.refreshLibrary()
                 await self.refreshQuick()
                 await self.refreshLinkResolutionData()
@@ -613,32 +627,23 @@ final class AppState: ObservableObject {
         } catch { show(error) }
     }
 
-    func refreshQuick(debounce: Bool = false, resetSelection: Bool = false) async {
+    func refreshQuick(debounce: Bool = false, resetSelection: Bool = false, minimumCount: Int = ClipListLoader.pageSize) async {
         quickSearchTask?.cancel()
         let query = quickQuery, scope = quickScope
+        let generation = UUID()
+        quickLoadGeneration = generation; quickLoadingMore = false
+        let searchChanged = query != appliedQuickQuery || scope != appliedQuickScope
+        let limit = resetSelection || searchChanged ? minimumCount : max(minimumCount, quickClips.count)
+        let request = quickListRequest
         quickSearchTask = Task { [weak self] in
             if debounce { try? await Task.sleep(for: .milliseconds(180)) }
             guard !Task.isCancelled, let self else { return }
             do {
-                let result: [Clip]
-                switch scope {
-                case .all:
-                    result = try await repository.list(filter: .all, query: query, limit: 500)
-                case .favorite:
-                    result = try await repository.list(filter: .favorite, query: query, limit: 500)
-                case .ungrouped:
-                    result = try await repository.list(filter: .ungrouped, query: query, limit: 500)
-                case .collection(let id):
-                    if let collection = collections.first(where: { $0.id == id }), collection.kind == .smart, let rules = collection.ruleSet {
-                        let candidates = try await repository.list(filter: .all, query: query, limit: 10_000)
-                        result = try SmartRuleEngine().matchingItems(in: candidates, ruleSet: rules)
-                    } else {
-                        result = try await repository.list(filter: .collection(id), query: query, limit: 500)
-                    }
-                }
+                let page = try await quickListLoader.page(request, generation: generation, limit: limit)
                 guard !Task.isCancelled, query == quickQuery, scope == quickScope else { return }
                 let searchChanged = query != appliedQuickQuery || scope != appliedQuickScope
-                quickClips = SearchRanker.rank(result, query: query)
+                quickClips = page.clips
+                quickHasMore = page.hasMore
                 appliedQuickQuery = query
                 appliedQuickScope = scope
                 let entries = quickListEntries
@@ -658,18 +663,19 @@ final class AppState: ObservableObject {
                 if resetSelection || searchChanged {
                     quickListResetID = UUID()
                 }
-            } catch { show(error) }
+            } catch is CancellationError { return }
+            catch { if generation == quickLoadGeneration { show(error) } }
         }
         await quickSearchTask?.value
     }
 
     func prepareQuickPanel() async {
-        intelligence.refreshRecommendations()
+        quickScrollAnchor = nil
         await refreshCollections()
-        await refreshQuick(resetSelection: true)
         await refreshAggregations()
-        if let first = quickListEntries.first { selectQuickEntry(first) }
+        await refreshQuick(resetSelection: true)
         await refreshQuickStats()
+        intelligence.refreshRecommendations()
         quickPresentationID = UUID()
     }
 
@@ -725,6 +731,7 @@ final class AppState: ObservableObject {
         } ?? 0
         let next = min(max(current + offset, 0), entries.count - 1)
         selectQuickEntry(entries[next])
+        if offset > 0, next >= entries.count - 10 { Task { await loadMoreQuick() } }
 #if DEBUG
         print("quick-selection-index=\(next)")
 #endif
@@ -767,25 +774,23 @@ final class AppState: ObservableObject {
         quickMetadataEditorDismissRequestID = nil
     }
 
-    func refreshLibrary(debounce: Bool = false) async {
+    func refreshLibrary(debounce: Bool = false, minimumCount: Int = ClipListLoader.pageSize) async {
         librarySearchTask?.cancel()
         let query = libraryQuery, filter = libraryFilter
+        let generation = UUID()
+        libraryLoadGeneration = generation; libraryLoadingMore = false
+        let searchChanged = query != appliedLibraryQuery || filter != appliedLibraryFilter
+        let limit = searchChanged ? minimumCount : max(minimumCount, clips.count)
+        let request = libraryListRequest
         librarySearchTask = Task { [weak self] in
             if debounce { try? await Task.sleep(for: .milliseconds(180)) }
             guard !Task.isCancelled, let self else { return }
             do {
-                let result: [Clip]
-                if case .collection(let id) = filter,
-                   let collection = collections.first(where: { $0.id == id }), collection.kind == .smart,
-                   let ruleSet = collection.ruleSet {
-                    let candidates = try await repository.list(filter: .all, query: query, limit: 100_000)
-                    result = try SmartRuleEngine().matchingItems(in: candidates, ruleSet: ruleSet)
-                } else {
-                    result = try await repository.list(filter: filter, query: query, limit: query.isEmpty ? 10_000 : 500)
-                }
+                let page = try await libraryListLoader.page(request, generation: generation, limit: limit)
                 guard !Task.isCancelled, query == libraryQuery, filter == libraryFilter else { return }
                 let searchChanged = query != appliedLibraryQuery || filter != appliedLibraryFilter
-                clips = SearchRanker.rank(result, query: query)
+                clips = page.clips
+                libraryHasMore = page.hasMore
                 appliedLibraryQuery = query
                 appliedLibraryFilter = filter
                 let entries = libraryListEntries
@@ -805,9 +810,61 @@ final class AppState: ObservableObject {
                 if searchChanged {
                     libraryListResetID = UUID()
                 }
-            } catch { show(error) }
+            } catch is CancellationError { return }
+            catch { if generation == libraryLoadGeneration { show(error) } }
         }
         await librarySearchTask?.value
+    }
+
+    private func listRequest(filter: ClipFilter, query: String) -> ClipListRequest {
+        if case .collection(let id) = filter,
+           let collection = collections.first(where: { $0.id == id }), collection.kind == .smart,
+           let rules = collection.ruleSet {
+            return ClipListRequest(filter: .all, query: query, rules: rules)
+        }
+        return ClipListRequest(filter: filter, query: query)
+    }
+
+    private var quickListRequest: ClipListRequest {
+        let filter: ClipFilter
+        switch quickScope {
+        case .all: filter = .all
+        case .favorite: filter = .favorite
+        case .ungrouped: filter = .ungrouped
+        case .collection(let id): filter = .collection(id)
+        }
+        return listRequest(filter: filter, query: quickQuery)
+    }
+    private var libraryListRequest: ClipListRequest { listRequest(filter: libraryFilter, query: libraryQuery) }
+
+    func loadMoreQuick() async {
+        guard quickHasMore, !quickLoadingMore, quickQuery == appliedQuickQuery, quickScope == appliedQuickScope else { return }
+        let generation = quickLoadGeneration, request = quickListRequest, offset = quickClips.count
+        quickLoadingMore = true
+        defer { if generation == quickLoadGeneration { quickLoadingMore = false } }
+        do {
+            let page = try await quickListLoader.page(request, generation: generation, offset: offset)
+            guard generation == quickLoadGeneration, request == quickListRequest else { return }
+            let existing = Set(quickClips.map(\.id))
+            quickClips += page.clips.filter { !existing.contains($0.id) }
+            quickHasMore = page.hasMore
+        } catch is CancellationError { return }
+        catch { if generation == quickLoadGeneration { show(error) } }
+    }
+
+    func loadMoreLibrary() async {
+        guard libraryHasMore, !libraryLoadingMore, libraryQuery == appliedLibraryQuery, libraryFilter == appliedLibraryFilter else { return }
+        let generation = libraryLoadGeneration, request = libraryListRequest, offset = clips.count
+        libraryLoadingMore = true
+        defer { if generation == libraryLoadGeneration { libraryLoadingMore = false } }
+        do {
+            let page = try await libraryListLoader.page(request, generation: generation, offset: offset)
+            guard generation == libraryLoadGeneration, request == libraryListRequest else { return }
+            let existing = Set(clips.map(\.id))
+            clips += page.clips.filter { !existing.contains($0.id) }
+            libraryHasMore = page.hasMore
+        } catch is CancellationError { return }
+        catch { if generation == libraryLoadGeneration { show(error) } }
     }
 
     func refreshCollections() async {

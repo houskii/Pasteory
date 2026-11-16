@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import PasteoryCore
 import PasteoryAI
 import Testing
@@ -446,5 +447,104 @@ private func searchClip(_ text: String, timestamp: TimeInterval) throws -> Clip 
         #expect(state.libraryListEntries.first?.id == .aggregation(aggregation.id))
         #expect(state.selectedAggregationID == aggregation.id)
         #expect(state.selectedClipID == nil)
+    }
+}
+
+@Test @MainActor func listsLoadOneHundredThenAppendWithoutResettingSelectionAndSearchTheWholeLibrary() async throws {
+    try await withSearchState { state, repository in
+        var clips = try (0..<241).map { try searchClip("Paging commonneedle sample \($0)", timestamp: Double(1000 + $0)) }
+        clips[0].title = "commonneedle"
+        try await repository.saveBatch(clips)
+        await state.refreshQuick(); await state.refreshLibrary()
+        #expect(state.quickClips.count == 100 && state.clips.count == 100)
+        #expect(state.quickHasMore && state.libraryHasMore)
+        state.quickSelectionID = state.quickClips[50].id; state.selectedClipID = state.clips[50].id
+        let quickSelection = state.quickSelectionID, librarySelection = state.selectedClipID
+        let quickReset = state.quickListResetID, libraryReset = state.libraryListResetID
+        await state.loadMoreQuick(); await state.loadMoreLibrary()
+        #expect(state.quickClips.count == 200 && state.clips.count == 200)
+        await state.loadMoreQuick(); await state.loadMoreLibrary()
+        #expect(state.quickClips.count == 241 && state.clips.count == 241)
+        #expect(Set(state.quickClips.map(\.id)).count == 241)
+        #expect(Set(state.clips.map(\.id)).count == 241)
+        #expect(!state.quickHasMore && !state.libraryHasMore)
+        #expect(state.quickSelectionID == quickSelection && state.selectedClipID == librarySelection)
+        #expect(state.quickListResetID == quickReset && state.libraryListResetID == libraryReset)
+        state.quickQuery = "commonneedle"; state.libraryQuery = "commonneedle"
+        await state.refreshQuick(); await state.refreshLibrary()
+        #expect(state.quickClips.count == 100 && state.clips.count == 100)
+        #expect(state.quickClips.first?.id == clips[0].id && state.clips.first?.id == clips[0].id)
+        #expect(state.quickSelectionID == state.quickNumberedClips.first?.id)
+        #expect(state.selectedClipID == state.libraryListEntries.first.flatMap { entry -> UUID? in
+            if case .clip(let clip, _) = entry.content { return clip.id }; return nil
+        })
+        await state.loadMoreQuick(); await state.loadMoreLibrary()
+        #expect(state.quickClips.count == 200 && state.clips.count == 200)
+        state.quickQuery = "sample 1"; await state.refreshQuick()
+        #expect(state.quickClips.count == 100 && state.quickHasMore)
+        await state.loadMoreQuick()
+        #expect(state.quickClips.count == 111 && !state.quickHasMore)
+    }
+}
+
+@Test @MainActor func smartGroupPaginationEvaluatesOlderCandidatesBeforeSlicingResults() async throws {
+    try await withSearchState { state, repository in
+        let clips = try (0..<230).map { try searchClip($0 < 120 ? "needle older \($0)" : "recent other \($0)", timestamp: Double(1000 + $0)) }
+        try await repository.saveBatch(clips)
+        let rules = SmartRuleSet(mode: .all, conditions: [SmartCondition(field: .body, operation: .contains, value: "needle")])
+        let collection = ClipCollection(name: "Older matches", kind: .smart, sortOrder: 0, ruleSet: rules)
+        try await repository.saveCollection(collection); await state.refreshCollections()
+        state.quickScope = .collection(collection.id); state.libraryFilter = .collection(collection.id)
+        await state.refreshQuick(); await state.refreshLibrary()
+        #expect(state.quickClips.count == 100 && state.clips.count == 100)
+        #expect(state.quickClips.allSatisfy { $0.previewText.contains("needle") })
+        await state.loadMoreQuick(); await state.loadMoreLibrary()
+        #expect(state.quickClips.count == 120 && state.clips.count == 120)
+        #expect(!state.quickHasMore && !state.libraryHasMore)
+    }
+}
+
+@Test @MainActor func groupProfilesRestoreSelectionsBeyondTheFirstPage() async throws {
+    try await withSearchState { state, repository in
+        let clips = try (0..<220).map { try searchClip("Profile paging \($0)", timestamp: Double(1000 + $0)) }
+        try await repository.saveBatch(clips); await state.refreshQuick(); await state.refreshLibrary()
+        await state.loadMoreQuick(); await state.loadMoreLibrary()
+        let selected = state.quickClips[170].id
+        state.quickSelectionID = selected; state.selectedClipID = selected
+        state.quickScrollAnchor = .clip(selected); state.libraryScrollAnchor = .clip(selected)
+        state.switchGroupView(.ai); await state.waitForGroupView()
+        state.quickScope = .ungrouped; state.libraryFilter = .ungrouped
+        await state.refreshQuick(); await state.refreshLibrary()
+        #expect(state.quickClips.count == 100)
+        state.switchGroupView(.common); await state.waitForGroupView()
+        #expect(state.quickClips.count == 200 && state.clips.count == 200)
+        #expect(state.quickSelectionID == selected && state.selectedClipID == selected)
+        #expect(state.quickScrollAnchor == .clip(selected) && state.libraryScrollAnchor == .clip(selected))
+    }
+}
+
+@Test @MainActor func panelPreparationResetsTheFirstPageBeforePresentationAndScrollTrackingDoesNotRedrawCards() async throws {
+    try await withSearchState { state, repository in
+        let clips = try (0..<220).map { try searchClip("Opening panel \($0)", timestamp: Double(1000 + $0)) }
+        try await repository.saveBatch(clips); await state.refreshQuick(); await state.loadMoreQuick()
+        state.quickSelectionID = state.quickClips[170].id
+        var invalidations = 0
+        let observation = state.objectWillChange.sink { invalidations += 1 }
+        state.quickScrollAnchor = .clip(clips[0].id); state.libraryScrollAnchor = .clip(clips[1].id)
+        #expect(invalidations == 0)
+        observation.cancel()
+        let presentation = state.quickPresentationID
+        await state.prepareQuickPanel()
+        #expect(state.quickClips.count == 100 && state.quickHasMore)
+        #expect(state.quickSelectionID == clips.last?.id)
+        #expect(state.quickScrollAnchor == nil && state.quickPresentationID != presentation)
+        state.quickQuery = "Opening panel 219"; await state.refreshQuick()
+        let capture = PasteboardCapture(items: [.init(order: 0, representations: [.init(uti: "public.utf8-plain-text", data: Data("A new unrelated copy".utf8))])],
+                                       source: .init(appName: "Tests", confidence: .high))
+        await state.accept(capture)
+        #expect(state.quickClips.count == 1 && state.quickClips.first?.id == clips.last?.id)
+        state.quickQuery = ""; await state.prepareQuickPanel()
+        #expect(state.quickClips.count == 100)
+        #expect(state.quickSelectedClip?.previewText == "A new unrelated copy")
     }
 }

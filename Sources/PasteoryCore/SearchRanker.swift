@@ -3,13 +3,16 @@ import Foundation
 public enum SearchRanker {
     public static func rank(_ clips: [Clip], query: String) -> [Clip] {
         let needle = normalize(query)
-        return clips.sorted { lhs, rhs in
+        // Calculate expensive text scores once per result, rather than twice
+        // on every sorting comparison.
+        let scored = clips.map { (clip: $0, score: needle.isEmpty ? 0 : score($0, needle: needle)) }
+        return scored.sorted { left, right in
+            let lhs = left.clip, rhs = right.clip
             if lhs.isPinned != rhs.isPinned { return lhs.isPinned }
-            if needle.isEmpty { return lhs.lastUsedAt > rhs.lastUsedAt }
-            let lhsScore = score(lhs, needle: needle)
-            let rhsScore = score(rhs, needle: needle)
-            return lhsScore == rhsScore ? lhs.lastUsedAt > rhs.lastUsedAt : lhsScore > rhsScore
-        }
+            if left.score != right.score { return left.score > right.score }
+            if lhs.lastUsedAt != rhs.lastUsedAt { return lhs.lastUsedAt > rhs.lastUsedAt }
+            return lhs.id.uuidString < rhs.id.uuidString
+        }.map(\.clip)
     }
 
     private static func score(_ clip: Clip, needle: String) -> Double {

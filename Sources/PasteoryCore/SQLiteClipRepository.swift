@@ -256,6 +256,10 @@ public actor SQLiteClipRepository: ClipRepository {
     }
 
     public func list(filter: ClipFilter, query: String, limit: Int = 500) throws -> [Clip] {
+        try list(filter: filter, query: query, limit: limit, offset: 0)
+    }
+
+    public func list(filter: ClipFilter, query: String, limit: Int, offset: Int) throws -> [Clip] {
         var clauses = [String]()
         var bindings = [String]()
         switch filter {
@@ -288,7 +292,7 @@ public actor SQLiteClipRepository: ClipRepository {
         let join = ""
         if !trimmed.isEmpty {
             if trimmed.count >= 3 {
-                clauses.append("c.id IN (SELECT id FROM clip_fts WHERE clip_fts MATCH ? ORDER BY rowid DESC LIMIT 2000)")
+                clauses.append("c.id IN (SELECT id FROM clip_fts WHERE clip_fts MATCH ?)")
                 bindings.append(ftsQuery(trimmed))
             } else {
                 clauses.append("(c.title LIKE ? ESCAPE '\\' OR c.note LIKE ? ESCAPE '\\' OR c.preview_text LIKE ? ESCAPE '\\' OR c.source_name LIKE ? ESCAPE '\\')")
@@ -297,12 +301,13 @@ public actor SQLiteClipRepository: ClipRepository {
             }
         }
         let whereSQL = clauses.isEmpty ? "1" : clauses.joined(separator: " AND ")
-        let ordering = "c.pinned DESC, c.last_used_at DESC"
-        let sql = "SELECT c.payload_json FROM clips c \(join) WHERE \(whereSQL) ORDER BY \(ordering) LIMIT ?;"
+        let ordering = "c.pinned DESC, c.last_used_at DESC, c.id ASC"
+        let sql = "SELECT c.payload_json FROM clips c \(join) WHERE \(whereSQL) ORDER BY \(ordering) LIMIT ? OFFSET ?;"
         let statement = try prepare(sql)
         defer { sqlite3_finalize(statement) }
         for (index, value) in bindings.enumerated() { bind(value, at: Int32(index + 1), to: statement) }
         sqlite3_bind_int(statement, Int32(bindings.count + 1), Int32(max(1, min(limit, 100_000))))
+        sqlite3_bind_int64(statement, Int32(bindings.count + 2), Int64(max(0, offset)))
         var clips = [Clip]()
         while sqlite3_step(statement) == SQLITE_ROW { clips.append(try decodeClip(statement, column: 0)) }
         return clips

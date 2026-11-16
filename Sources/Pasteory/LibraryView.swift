@@ -204,7 +204,7 @@ struct LibraryView: View {
                 .buttonStyle(.plain)
                 }
                 Spacer()
-                Text(L10n.tr("\(state.clips.count) 条"))
+                Text(state.libraryHasMore ? L10n.tr("已加载 \(state.clips.count) 条") : L10n.tr("\(state.clips.count) 条"))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.tertiary)
             }
@@ -395,7 +395,7 @@ struct LibraryView: View {
                         .help(aggregationShortcutHelp)
                         .quickActionShortcut(state.settings.quickShortcut(for: .aggregateContent))
                     }
-                    Text(L10n.tr("\(state.libraryTopLevelResultCount) 个结果"))
+                    Text(state.libraryHasMore ? L10n.tr("已加载 \(state.libraryTopLevelResultCount) 个结果") : L10n.tr("\(state.libraryTopLevelResultCount) 个结果"))
                         .font(.caption.weight(.medium).monospacedDigit())
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 10)
@@ -423,15 +423,7 @@ struct LibraryView: View {
                 if case .collection(let id) = state.libraryFilter, let group = state.intelligence.state.groups[id] {
                     AIGroupPromptCard(group: group) { editingNormalCollection = state.collections.first { $0.id == id } }
                 }
-                if state.intelligence.running {
-                    HStack(spacing: 8) {
-                        ProgressView().controlSize(.small)
-                        Text(state.intelligence.status).font(.caption).lineLimit(1)
-                        Spacer(); Button(L10n.tr("暂停分析")) { state.intelligence.pause() }.font(.caption)
-                    }
-                } else if let error = state.intelligence.error {
-                    Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled)
-                }
+                AIOrganizationStatusView(controller: state.intelligence)
             }
             .padding(.horizontal, 20)
             .padding(.top, 18)
@@ -490,6 +482,20 @@ struct LibraryView: View {
                             .simultaneousGesture(TapGesture(count: 2).onEnded { onPaste(clip, false, true) })
                             .contextMenu { contextMenu(for: clip, parentAggregationID: parentID) }
                         }
+                    }
+                    if state.libraryHasMore {
+                        Button {
+                            Task { await state.loadMoreLibrary() }
+                        } label: {
+                            HStack {
+                                if state.libraryLoadingMore { ProgressView().controlSize(.mini) }
+                                Text(L10n.tr("加载更多"))
+                            }.frame(maxWidth: .infinity).padding(.vertical, 10)
+                        }
+                        .buttonStyle(.plain).font(.caption).foregroundStyle(.secondary)
+                        .disabled(state.libraryLoadingMore)
+                        .id(state.clips.count)
+                        .onAppear { Task { await state.loadMoreLibrary() } }
                     }
                 }
                 .scrollTargetLayout()

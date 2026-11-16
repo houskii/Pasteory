@@ -656,3 +656,21 @@ private func textClip(_ value: String, date: Date = Date(), source: String = "ap
     #expect(try await repository.recentClipCount(since: now.addingTimeInterval(-86_400)) == 1)
     #expect(try await repository.recentClipCount(since: now.addingTimeInterval(-7 * 86_400)) == 1)
 }
+
+@Test func searchPaginationDoesNotDropMatchesBeyondTheOldTwoThousandCandidateCutoff() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("FTSPaging-" + UUID().uuidString)
+    let directories = try AppDirectories(root: root); defer { try? FileManager.default.removeItem(at: root) }
+    let repository = try SQLiteClipRepository(databaseURL: directories.databaseFile)
+    let clips = (0..<2105).map { index in
+        Clip(createdAt: Date(timeIntervalSince1970: Double(index)), updatedAt: Date(timeIntervalSince1970: Double(index)),
+             lastCopiedAt: Date(timeIntervalSince1970: Double(index)), primaryKind: .text,
+             source: ClipSource(appName: "Paging Tests", confidence: .high), previewText: "globalmatch \(index)",
+             contentHash: "globalmatch-\(index)", byteSize: 20, items: [])
+    }
+    try await repository.saveBatch(clips)
+    let first = try await repository.list(filter: .all, query: "globalmatch", limit: 100, offset: 0)
+    let tail = try await repository.list(filter: .all, query: "globalmatch", limit: 200, offset: 2000)
+    #expect(first.count == 100 && tail.count == 105)
+    #expect(tail.contains { $0.id == clips[0].id })
+    #expect(Set(first.map(\.id)).isDisjoint(with: Set(tail.map(\.id))))
+}

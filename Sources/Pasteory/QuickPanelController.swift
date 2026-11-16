@@ -19,6 +19,8 @@ final class QuickPanelController: NSObject {
     private let onOpenLibrary: () -> Void
     private let onOpenSettings: () -> Void
     private let onCreateTextClip: () -> Void
+    private let prepareClipboard: @MainActor () async -> Void
+    private var presentationTask: Task<Void, Never>?
     private let panel: PasteoryPanel
     private var commandHelpPanel: NSPanel?
     private var commandHelpArmed = false
@@ -41,7 +43,8 @@ final class QuickPanelController: NSObject {
         onOpenLibrary: @escaping () -> Void,
         onOpenSettings: @escaping () -> Void,
         onOpenUpdate: @escaping () -> Void,
-        onCreateTextClip: @escaping () -> Void
+        onCreateTextClip: @escaping () -> Void,
+        prepareClipboard: @escaping @MainActor () async -> Void = {}
     ) {
         self.state = state; self.pasteCoordinator = pasteCoordinator; self.targetProvider = targetProvider
         self.clipOpenCoordinator = ClipOpenCoordinator(
@@ -65,6 +68,7 @@ final class QuickPanelController: NSObject {
         )
         self.onOpenLibrary = onOpenLibrary; self.onOpenSettings = onOpenSettings
         self.onCreateTextClip = onCreateTextClip
+        self.prepareClipboard = prepareClipboard
 #if DEBUG
         let isDebugUIQA = ProcessInfo.processInfo.arguments.contains("--debug-ui-qa")
         let panelStyleMask: NSWindow.StyleMask = isDebugUIQA
@@ -141,7 +145,12 @@ final class QuickPanelController: NSObject {
         panel.title = L10n.tr("Pasteory 快捷面板")
     }
 
-    func toggle() { panel.isVisible ? close() : show() }
+    func toggle() { panel.isVisible || presentationTask != nil ? close() : show() }
+
+#if DEBUG
+    var debugWindow: NSWindow { panel }
+    func waitForPresentation() async { await presentationTask?.value }
+#endif
 
     private func showQuickActions() {
         state.quickCommandKeyDown = false
@@ -151,6 +160,10 @@ final class QuickPanelController: NSObject {
     }
 
     func show() {
+#if DEBUG
+        let preparationStarted = ContinuousClock.now
+#endif
+        presentationTask?.cancel()
         activatedApplicationForQuickPanel = false
         state.quickCommandKeyDown = false
         state.quickSearchFocused = false
@@ -172,35 +185,51 @@ final class QuickPanelController: NSObject {
             panel.setFrameOrigin(NSPoint(x: panel.frame.minX, y: visible.maxY - panel.frame.height - 8))
         }
 #endif
-        // A non-activating panel cannot reliably become key while another app is active.
-        // Activate while the panel is still hidden so AppKit never exposes an intermediate frame.
-        if !NSApp.isActive {
-            activatedApplicationForQuickPanel = true
-            NSApp.activate(ignoringOtherApps: true)
-        }
-        let frameBeforeShow = panel.frame
-        panel.makeKeyAndOrderFront(nil)
-        panel.makeFirstResponder(nil)
+        presentationTask = Task { [weak self] in
+            guard let self else { return }
+            // Capture the external app's clipboard and finish the initial page
+            // while hidden. Showing cached rows first caused visible jumps.
+            await prepareClipboard()
+            guard !Task.isCancelled else { return }
+            await state.prepareQuickPanel()
+            guard !Task.isCancelled else { return }
+            presentationTask = nil
 #if DEBUG
-        DispatchQueue.main.async { [weak panel] in
-            print("quick-panel-is-key=\(panel?.isKeyWindow == true)")
-            if ProcessInfo.processInfo.arguments.contains("--debug-panel-frame"), let panel {
-                print("quick-panel-frame-stable=\(panel.frame == frameBeforeShow) before=\(NSStringFromRect(frameBeforeShow)) after=\(NSStringFromRect(panel.frame))")
+            let backgroundSnapshot = ProcessInfo.processInfo.arguments.contains("--debug-background-snapshot")
+            let elapsed = preparationStarted.duration(to: .now)
+            let milliseconds = Double(elapsed.components.seconds) * 1000 + Double(elapsed.components.attoseconds) / 1e15
+            print("quick-panel-preparation-ms=\(milliseconds) loaded=\(state.quickClips.count)")
+#else
+            let backgroundSnapshot = false
+#endif
+            if !backgroundSnapshot, !NSApp.isActive {
+                activatedApplicationForQuickPanel = true
+                NSApp.activate(ignoringOtherApps: true)
             }
-        }
-#endif
-        installKeyMonitor()
-        installOutsideClickMonitor()
-        Task { await state.prepareQuickPanel() }
+            let frameBeforeShow = panel.frame
+            if backgroundSnapshot { panel.orderBack(nil) }
+            else { panel.makeKeyAndOrderFront(nil); panel.makeFirstResponder(nil) }
 #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("--debug-command-help") {
-            state.quickCommandKeyDown = true
-            showCommandHelp()
-        }
+            DispatchQueue.main.async { [weak panel] in
+                print("quick-panel-is-key=\(panel?.isKeyWindow == true)")
+                if ProcessInfo.processInfo.arguments.contains("--debug-panel-frame"), let panel {
+                    print("quick-panel-frame-stable=\(panel.frame == frameBeforeShow) before=\(NSStringFromRect(frameBeforeShow)) after=\(NSStringFromRect(panel.frame))")
+                }
+            }
 #endif
+            installKeyMonitor()
+            installOutsideClickMonitor()
+#if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--debug-command-help") {
+                state.quickCommandKeyDown = true
+                showCommandHelp()
+            }
+#endif
+        }
     }
 
     func close(restoreTargetApplication: Bool = true) {
+        presentationTask?.cancel(); presentationTask = nil
         state.quickCommandKeyDown = false
         state.quickSearchFocused = false
         state.quickQuery = ""
