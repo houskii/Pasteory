@@ -197,6 +197,28 @@ private func searchClip(_ text: String, timestamp: TimeInterval) throws -> Clip 
     }
 }
 
+@Test @MainActor func clearingTheCurrentAIGroupReturnsBothViewsToAValidScope() async throws {
+    try await withSearchState { state, repository in
+        let clip = try searchClip("Selected group cleanup", timestamp: 300); try await repository.save(clip)
+        let id = UUID(); var draft = AIChangeSet(); draft.clipRevisions[clip.id] = clip.aiRevision
+        draft.commands = [.init(kind: .createGroup, targetID: id, name: "Selected", definition: "Visible prompt"), .init(kind: .addItems, targetID: id, clipIDs: [clip.id])]
+        try await repository.applyAIChangeSet(draft)
+        await state.refreshCollections(); try await state.intelligence.reload()
+        state.switchGroupView(.ai); await state.waitForGroupView()
+        state.quickScope = .collection(id); state.libraryFilter = .collection(id)
+        await state.refreshQuick(); await state.refreshLibrary()
+        state.switchGroupView(.common); await state.waitForGroupView()
+        state.quickScope = .collection(id); state.libraryFilter = .collection(id)
+        let selection = AIGroupSelection(groups: [try #require(state.intelligence.state.groups[id])])
+        #expect(await state.intelligence.cleanupGroups(selection))
+        await state.organizationApplied(automatically: false)
+        #expect(state.quickScope == .all && state.libraryFilter == .all)
+        #expect(state.quickClips.map(\.id) == [clip.id] && state.clips.map(\.id) == [clip.id])
+        state.switchGroupView(.ai); await state.waitForGroupView()
+        #expect(state.quickScope == .all && state.libraryFilter == .all)
+    }
+}
+
 @Test @MainActor func startupWithoutMaintenanceLoadsPersistedAIGroups() async throws {
     try await withSearchState { state, repository in
         let clip = try searchClip("Saved AI topic member", timestamp: 200)

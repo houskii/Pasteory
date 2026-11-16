@@ -125,6 +125,8 @@ public struct AIJobOrganization: Codable, Equatable, Sendable {
     public var review = false
     public var semanticFingerprint: String?
     public var requiresThemePlan: Bool?
+    public var groupSelection: AIGroupSelection?
+    public var groupCleanup: AIChangeSet?
     public init(trigger: String, revisions: [UUID: String], protectedGroupIDs: Set<UUID> = [], review: Bool = false) {
         self.trigger = trigger; self.revisions = revisions; self.protectedGroupIDs = protectedGroupIDs; self.review = review
     }

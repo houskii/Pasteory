@@ -213,6 +213,9 @@ final class AppState: ObservableObject {
         let position = viewPositions[profile]
         restoringGroupView = true; settings.groupPresentation.profile = profile
         quickScope = position?.quickScope ?? .all; libraryFilter = position?.libraryFilter ?? .all
+        let validGroups = Set(collections.map(\.id))
+        if case .collection(let id) = quickScope, !validGroups.contains(id) { quickScope = .all }
+        if case .collection(let id) = libraryFilter, !validGroups.contains(id) { libraryFilter = .all }
         quickQuery = position?.quickQuery ?? ""; libraryQuery = position?.libraryQuery ?? ""
         quickSelectionID = position?.quickSelection; selectedClipID = position?.librarySelection
         quickSelectedAggregationID = position?.quickAggregation; selectedAggregationID = position?.libraryAggregation
@@ -232,6 +235,9 @@ final class AppState: ObservableObject {
         let deferLibrary = automatically && libraryFilter == .ungrouped
         organizationResultsWaiting = deferQuick || deferLibrary
         await refreshCollections()
+        let ids = Set(collections.map(\.id))
+        if case .collection(let id) = quickScope, !ids.contains(id) { quickScope = .all }
+        if case .collection(let id) = libraryFilter, !ids.contains(id) { libraryFilter = .all }
         if !deferLibrary { await refreshLibrary() }
         if !deferQuick { await refreshQuick() }
         await refreshAggregations()

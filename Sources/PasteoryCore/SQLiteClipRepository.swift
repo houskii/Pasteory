@@ -1777,14 +1777,20 @@ extension SQLiteClipRepository {
             if let stored = state.changes.first(where: { $0.id == proposed.id }) {
                 if stored.isThemeReview == true, proposed.commands != stored.commands { throw AIError.invalid("Apply the theme review as one complete operation") }
                 guard proposed.commands.allSatisfy({ stored.commands.contains($0) }),
-                      proposed.clipRevisions == stored.clipRevisions, proposed.groupRevisions == stored.groupRevisions else {
+                      proposed.clipRevisions == stored.clipRevisions, proposed.groupRevisions == stored.groupRevisions,
+                      proposed.userSelectedGroupIDs == stored.userSelectedGroupIDs, proposed.isThemeReview == stored.isThemeReview else {
                     throw AIError.invalid("Only an unchanged subset of the recorded draft may be applied")
                 }
             }
             let currentClips = try allClips()
             var clipsByID = Dictionary(uniqueKeysWithValues: currentClips.map { ($0.id, $0) })
+            let selectedGroups = proposed.userSelectedGroupIDs ?? []
+            let clearedGroups = Set(proposed.commands.filter { $0.kind == .clearGroup }.map(\.targetID))
+            guard selectedGroups == clearedGroups, selectedGroups.isSubset(of: Set(proposed.groupRevisions.keys)),
+                  selectedGroups.isEmpty || proposed.isThemeReview == true else { throw AIError.invalid("Cleanup requires an explicit, complete AI-group selection") }
+            let cleanupMembers = selectedGroups.reduce(into: Set<UUID>()) { $0.formUnion(state.groups[$1]?.memberIDs ?? []) }
             for (id, version) in proposed.clipRevisions {
-                guard let clip = clipsByID[id], clip.mayParticipateInAI, clip.aiRevision == version else { throw AIError.conflict(id.uuidString) }
+                guard let clip = clipsByID[id], clip.mayParticipateInAI || cleanupMembers.contains(id), clip.aiRevision == version else { throw AIError.conflict(id.uuidString) }
             }
             for (id, version) in proposed.groupRevisions {
                 guard state.groups[id]?.revision == version else { throw AIError.conflict(id.uuidString) }
@@ -1899,6 +1905,25 @@ extension SQLiteClipRepository {
                     undo.retiredCollections = undo.retiredCollections ?? [:]; undo.retiredCollections?[profile.id] = collection
                     try removeCollection(id: profile.id); state.groups.removeValue(forKey: profile.id)
                     changedGroups.remove(profile.id)
+                case .clearGroup:
+                    guard selectedGroups.contains(cmd.targetID), let profile = state.groups[cmd.targetID],
+                          proposed.groupRevisions[profile.id] != nil,
+                          let collection = try collections().first(where: { $0.id == profile.id }), collection.kind == .normal else {
+                        throw AIError.invalid("Only explicitly selected AI groups can be cleared")
+                    }
+                    let attached = Set(clipsByID.values.filter { $0.collectionIDs.contains(profile.id) }.map(\.id))
+                    guard attached == profile.memberIDs else { throw AIError.conflict("Group membership changed; refresh the selection") }
+                    undo.beforeGroups[profile.id] = profile
+                    undo.retiredCollections = undo.retiredCollections ?? [:]
+                    undo.retiredCollections?[profile.id] = collection
+                    for id in attached {
+                        guard proposed.clipRevisions[id] != nil, var clip = clipsByID[id] else { throw AIError.invalid("Unversioned content in cleanup") }
+                        if undo.beforeMemberships[id] == nil { undo.beforeMemberships[id] = clip.collectionIDs }
+                        clip.collectionIDs.remove(profile.id); clipsByID[id] = clip; changedClips.insert(id)
+                    }
+                    try Self.execute(database, "DELETE FROM collections WHERE id=?;", bindings: [profile.id.uuidString])
+                    state.groups.removeValue(forKey: profile.id)
+                    changedGroups.remove(profile.id)
                 }
             }
             for id in changedGroups {
@@ -1911,6 +1936,10 @@ extension SQLiteClipRepository {
             for id in changedClips {
                 guard let clip = clipsByID[id] else { continue }
                 try save(clip, preservingTimestamps: true); undo.afterMemberships[id] = clip.collectionIDs
+            }
+            if !clearedGroups.isEmpty {
+                state.automation.requestedGroupReviews?.subtract(clearedGroups)
+                try rebuildSearchIndex()
             }
             for aggregation in undo.createdAggregations { _ = try saveAggregation(aggregation) }
             var applied = proposed; applied.isApplied = true

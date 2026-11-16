@@ -163,6 +163,7 @@ public struct AICommand: Codable, Equatable, Identifiable, Sendable {
         case createGroup = "groups.create", addItems = "groups.add_items", removeItems = "groups.remove_items"
         case updateOverview = "groups.update_overview", createAggregation = "aggregations.create", setSummary = "summaries.set"
         case renameGroup = "groups.rename", retireGroup = "groups.retire"
+        case clearGroup = "groups.clear_selected"
     }
     public var id: UUID
     public var kind: Kind
@@ -195,6 +196,7 @@ public struct AIChangeSet: Codable, Equatable, Identifiable, Sendable {
     public var protectedGroupIDs: Set<UUID>?
     public var isThemeReview: Bool?
     public var planningInputIDs: Set<UUID>?
+    public var userSelectedGroupIDs: Set<UUID>?
     public init() {}
     public var appendOnly: Bool { commands.allSatisfy { $0.kind == .addItems || $0.kind == .updateOverview } }
     public var fingerprint: String { AIHash.fingerprint(commands) }

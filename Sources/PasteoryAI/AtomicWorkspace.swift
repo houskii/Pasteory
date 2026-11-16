@@ -354,6 +354,8 @@ public struct AtomicWorkspace: Sendable {
         case .retireGroup:
             guard let group = groups[command.targetID], group.memberIDs.isEmpty else { throw AIError.invalid("Only empty themes can be retired") }
             groups.removeValue(forKey: command.targetID)
+        case .clearGroup:
+            throw AIError.invalid("User-selected cleanup is applied outside the model workspace")
         }
     }
     private static func normalized(_ s: String) -> String { s.trimmingCharacters(in: .whitespacesAndNewlines).folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX")) }

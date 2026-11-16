@@ -47,11 +47,14 @@ struct AIReviewView: View {
             Toggle("", isOn: Binding(get: { selected.contains(command.id) }, set: { enabled in toggle(command, enabled: enabled, in: pending) }))
                 .toggleStyle(.checkbox).labelsHidden().disabled(pending.isThemeReview == true)
             VStack(alignment: .leading, spacing: 7) {
-                HStack { Text(commandTitle(command)).font(.callout.weight(.semibold)); Spacer(); Text(command.kind.rawValue).font(.caption2.monospaced()).foregroundStyle(.secondary) }
+                HStack { Text(commandTitle(command)).font(.callout.weight(.semibold)); Spacer(); Text(command.kind == .clearGroup ? L10n.tr("本地操作") : command.kind.rawValue).font(.caption2.monospaced()).foregroundStyle(.secondary) }
                 if ![.createGroup, .createAggregation].contains(command.kind) {
                     Text(targetName(command, in: pending)).font(.caption.weight(.medium))
                 }
                 if !command.reason.isEmpty { Text(command.reason).font(.caption).foregroundStyle(.secondary) }
+                if command.kind == .clearGroup, let group = controller.state.groups[command.targetID] {
+                    Text(L10n.tr("移除 \(group.memberIDs.count) 条成员归属，原始内容继续保留。")).font(.caption).foregroundStyle(.secondary)
+                }
                 if !command.definition.isEmpty { Text(command.definition).font(.caption) }
                 if !command.overview.isEmpty { Text(command.overview).font(.caption).textSelection(.enabled) }
                 if !command.clipIDs.isEmpty {
@@ -83,6 +86,7 @@ struct AIReviewView: View {
         case .setSummary: L10n.tr("保存带依据的归纳")
         case .renameGroup: L10n.tr("调整低活跃主题") + " · " + command.name
         case .retireGroup: L10n.tr("合并或移除旧主题入口")
+        case .clearGroup: L10n.tr("清理所选 AI 分组，保留原始内容")
         }
     }
     private func toggle(_ command: AICommand, enabled: Bool, in draft: AIChangeSet) {

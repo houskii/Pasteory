@@ -16,6 +16,9 @@ struct LibraryView: View {
     @State private var availableWidth: CGFloat = 0
     @State private var showingCompactInspector = false
     @State private var pendingAggregationDraft: AggregationDraft?
+    @State private var showingAIGroupManager = false
+    @State private var suppressingManagerReview = false
+    @State private var managedGroupIDs = Set<UUID>()
 
     private var accentColor: Color { state.settings.themeColor.accentColor }
     private var brandGradient: LinearGradient { state.settings.themeColor.gradient }
@@ -82,8 +85,11 @@ struct LibraryView: View {
         .sheet(isPresented: $showNewNormalCollection) { CollectionNameEditor(state: state, existing: nil) }
         .sheet(item: $editingNormalCollection) { CollectionNameEditor(state: state, existing: $0) }
         .sheet(item: $editingSmartCollection) { SmartCollectionEditor(state: state, existing: $0) }
-        .sheet(isPresented: Binding(get: { state.intelligence.showingReview }, set: { state.intelligence.showingReview = $0 })) {
+        .sheet(isPresented: Binding(get: { state.intelligence.showingReview && !suppressingManagerReview }, set: { state.intelligence.showingReview = $0 })) {
             AIReviewView(controller: state.intelligence)
+        }
+        .sheet(isPresented: $showingAIGroupManager, onDismiss: { suppressingManagerReview = false }) {
+            AIGroupManagementView(state: state, preselected: managedGroupIDs)
         }
         .sheet(item: $state.libraryAggregationDraft) { draft in
             LibraryAggregationEditor(state: state, draft: draft) { state.libraryAggregationDraft = nil }
@@ -93,8 +99,20 @@ struct LibraryView: View {
             await state.refreshLibrary()
             state.intelligence.refreshRecommendations()
             openRequestedCollectionEditor()
+#if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--debug-ai-group-prompt"), let first = state.orderedAICollections.first {
+                state.libraryFilter = .collection(first.id); await state.refreshLibrary()
+            }
+            if ProcessInfo.processInfo.arguments.contains("--debug-ai-group-manager") { openAIGroupManager() }
+#endif
         }
         .onChange(of: state.requestedCollectionEditorID) { _, _ in openRequestedCollectionEditor() }
+    }
+
+    private func openAIGroupManager() {
+        if case .collection(let id) = state.libraryFilter, state.intelligence.state.groups[id] != nil { managedGroupIDs = [id] }
+        else { managedGroupIDs = [] }
+        suppressingManagerReview = true; showingAIGroupManager = true
     }
 
     private var sidebar: some View {
@@ -363,6 +381,8 @@ struct LibraryView: View {
                     } label: { Text(L10n.tr("AI 整理")) }
                     .menuStyle(.borderlessButton).fixedSize()
                     .disabled(state.intelligence.storageBusy)
+                    Button(L10n.tr("管理 AI 分组")) { openAIGroupManager() }
+                        .buttonStyle(.bordered).controlSize(.small)
                     if !state.libraryQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Button {
                             Task { state.libraryAggregationDraft = await state.makeLibraryAggregationDraft() }
@@ -400,6 +420,18 @@ struct LibraryView: View {
                 .frame(height: 38)
                 .background(LibraryTheme.inputBackground, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).stroke(.separator.opacity(0.45), lineWidth: 1))
+                if case .collection(let id) = state.libraryFilter, let group = state.intelligence.state.groups[id] {
+                    AIGroupPromptCard(group: group) { editingNormalCollection = state.collections.first { $0.id == id } }
+                }
+                if state.intelligence.running {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text(state.intelligence.status).font(.caption).lineLimit(1)
+                        Spacer(); Button(L10n.tr("暂停分析")) { state.intelligence.pause() }.font(.caption)
+                    }
+                } else if let error = state.intelligence.error {
+                    Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled)
+                }
             }
             .padding(.horizontal, 20)
             .padding(.top, 18)
@@ -1271,7 +1303,7 @@ struct CollectionNameEditor: View {
                 Text("\(name.count)/40").font(.caption2).foregroundStyle(.tertiary).frame(maxWidth: .infinity, alignment: .trailing)
             }
             if let existing, let profile = state.intelligence.state.groups[existing.id] {
-                Text(L10n.tr("主题定义")).font(.caption.weight(.semibold))
+                Text(L10n.tr("分组 Prompt（主题定义）")).font(.caption.weight(.semibold))
                 TextEditor(text: $definition).frame(height: 110).padding(5)
                     .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.secondary.opacity(0.2)))
                 Text(L10n.tr("这段定义是此分组的分类要求，与全局整理偏好一起发送给 AI。可写明收录范围和排除项；用户编辑的定义优先。")).font(.caption).foregroundStyle(.secondary)

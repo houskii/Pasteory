@@ -742,7 +742,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
                 try? await Task.sleep(for: .milliseconds(200))
                 window.makeFirstResponder(nil)
                 saveDebugSnapshot(
-                    of: arguments.contains("--debug-edit-smart-rules") ? (window.attachedSheet ?? window) : window,
+                    of: (arguments.contains("--debug-edit-smart-rules") || arguments.contains("--debug-snapshot-sheet")) ? (window.attachedSheet ?? window) : window,
                     to: arguments[index + 1]
                 )
             }

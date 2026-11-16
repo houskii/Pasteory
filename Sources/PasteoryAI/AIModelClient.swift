@@ -147,10 +147,7 @@ public actor AIAnalyzer {
             "candidate_themes": try .value(draft.candidates ?? []),
             "scope": .string("Only current_batch IDs may be assigned or removed; historical reads are context only. Use clips_get if a provided excerpt is insufficient.")
         ])
-        let classification = rules == nil ? "" : """
-
-        This job is CLASSIFICATION ONLY: no aggregations or summaries. Use clips_classify to record a result and a concise reason for EVERY current_batch ID. Empty group_ids is a valid result for unrelated or ambiguous content. Prefer one batch call. Use themes_propose for small or new topics; candidates do not create groups. Use concise Chinese theme names (normally 4–8 characters; preserve product names). Never rename or reorganize protected themes. Do not update unrelated groups. A full-library theme cap applies across all batches.
-        """
+        let classification = rules == nil ? "" : Self.classificationPrompt
         var messages = [AIChatMessage(role: "system", content: Self.systemPrompt + classification), AIChatMessage(role: "user", content: payload.encoded)]
         var calls = [AIUsageRecord]()
         for _ in 0..<configuration.maxToolRounds {
@@ -225,6 +222,13 @@ public actor AIAnalyzer {
         _ = try await analyze(documents: [doc], batchIDs: [id], groups: [], configuration: configuration,
                               credential: credential, ledger: ledger, trigger: "test", onUsage: onUsage)
     }
+
+    public static var classificationInstructions: String { systemPrompt + classificationPrompt }
+
+    private static let classificationPrompt = """
+
+    This job is CLASSIFICATION ONLY: no aggregations or summaries. Use clips_classify to record a result and a concise reason for EVERY current_batch ID. Empty group_ids is a valid result for unrelated or ambiguous content. Prefer one batch call. Use themes_propose for small or new topics; candidates do not create groups. Use concise Chinese theme names (normally 4–8 characters; preserve product names). Never rename or reorganize protected themes. Do not update unrelated groups. A full-library theme cap applies across all batches.
+    """
 
     private static let systemPrompt = """
     You organize a clipboard library using ONLY the listed atomic tools. Tool writes stage explicit commands in a working copy; they do not commit the application database. There is no apply_plan tool. Finish with a short message when the required tools have been called.

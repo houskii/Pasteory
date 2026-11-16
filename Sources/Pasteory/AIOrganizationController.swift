@@ -31,7 +31,7 @@ final class AIOrganizationController: ObservableObject {
     var clock: () -> Date = Date.init
     private var sleeping = false
     private var workspaceObservers = Set<AnyCancellable>()
-    private var queuedManual: (all: Bool, groupID: UUID?, trigger: String)?
+    private var queuedManual: (all: Bool, groupID: UUID?, trigger: String, contentIDs: [UUID]?, selection: AIGroupSelection?)?
     @Published private(set) var recommendedIDs: [UUID] = []
     @Published private(set) var presentationGroupOrder: [UUID] = []
     private var configurationFingerprint = ""
@@ -257,9 +257,9 @@ final class AIOrganizationController: ObservableObject {
         } catch { self.error = error.localizedDescription; try? await reload() }
     }
 
-    func analyze(all: Bool = false, resume: Bool = false, groupID: UUID? = nil, trigger: String = "manual", contentIDs: [UUID]? = nil) {
+    func analyze(all: Bool = false, resume: Bool = false, groupID: UUID? = nil, trigger: String = "manual", contentIDs: [UUID]? = nil, groupSelection: AIGroupSelection? = nil) {
         if running {
-            if trigger.hasPrefix("manual"), !resume { queuedManual = (all, groupID, trigger); status = L10n.tr("当前批次完成后优先执行手动任务") }
+            if trigger.hasPrefix("manual"), !resume { queuedManual = (all, groupID, trigger, contentIDs, groupSelection); status = L10n.tr("当前批次完成后优先执行手动任务") }
             return
         }
         guard !storageBusy else { return }
@@ -272,10 +272,10 @@ final class AIOrganizationController: ObservableObject {
                 self.running = false; self.work = nil
                 if let request = self.queuedManual {
                     self.queuedManual = nil
-                    self.analyze(all: request.all, groupID: request.groupID, trigger: request.trigger)
+                    self.analyze(all: request.all, groupID: request.groupID, trigger: request.trigger, contentIDs: request.contentIDs, groupSelection: request.selection)
                 }
             }
-            do { try await self.runAnalysis(all: all, resume: resume, groupID: groupID, trigger: trigger, contentIDs: contentIDs) }
+            do { try await self.runAnalysis(all: all, resume: resume, groupID: groupID, trigger: trigger, contentIDs: contentIDs, groupSelection: groupSelection) }
             catch is CancellationError { self.status = L10n.tr("分析已暂停，可以继续上次任务") }
             catch {
                 self.error = error.localizedDescription
@@ -289,6 +289,46 @@ final class AIOrganizationController: ObservableObject {
             try? await self.reload()
         }
     }
+    func regroupGroups(_ selection: AIGroupSelection) -> Bool {
+        guard !running, !storageBusy else { return false }
+        guard pending == nil, state.checkpoint == nil else { error = L10n.tr("请先处理整理建议或继续、放弃已保存的任务"); return false }
+        guard settings.aiConfiguration.enabled else { error = L10n.tr("请先在 AI 整理设置中启用模型连接"); return false }
+        do {
+            try settings.aiConfiguration.validate(); try selection.validate(in: state.groups)
+            guard selection.memberIDs.contains(where: { clipIndex[$0]?.mayParticipateInAI == true }) else {
+                error = L10n.tr("所选组没有可分析内容，可以使用清理分组"); return false
+            }
+            analyze(trigger: "manual-regroup", groupSelection: selection)
+            return running
+        } catch { self.error = error.localizedDescription; return false }
+    }
+
+    func cleanupGroups(_ selection: AIGroupSelection) async -> Bool {
+        guard !running, !storageBusy else { return false }
+        guard pending == nil, state.checkpoint == nil else { error = L10n.tr("请先处理整理建议或继续、放弃已保存的任务"); return false }
+        storageBusy = true; error = nil
+        defer { storageBusy = false }
+        var draftID: UUID?
+        do {
+            await queueWrite?.value; try await reload()
+            let draft = try AIGroupManagement.cleanup(selection, state: state, clips: Array(clipIndex.values))
+            draftID = draft.id
+            try await repository.updateAIState { $0.changes.append(draft) }
+            try await repository.applyAIChangeSet(draft)
+            try await reload(); refreshRecommendations(); onApplied?(false)
+            status = L10n.tr("已清理 \(selection.groupIDs.count) 个 AI 分组，可以撤销")
+            return true
+        } catch {
+            self.error = error.localizedDescription
+            if let id = draftID {
+                try? await repository.updateAIState { s in
+                    if let index = s.changes.firstIndex(where: { $0.id == id && !$0.isApplied }) { s.changes[index].isRejected = true }
+                }
+            }
+            try? await reload(); return false
+        }
+    }
+
     func pause() { work?.cancel() }
     func waitUntilIdle() async { await queueWrite?.value; await work?.value }
     func discardCheckpoint() async {
@@ -307,7 +347,7 @@ final class AIOrganizationController: ObservableObject {
         try await reload()
     }
 
-    private func runAnalysis(all: Bool, resume: Bool, groupID: UUID?, trigger requestedTrigger: String, contentIDs: [UUID]?) async throws {
+    private func runAnalysis(all: Bool, resume: Bool, groupID: UUID?, trigger requestedTrigger: String, contentIDs: [UUID]?, groupSelection: AIGroupSelection?) async throws {
         await queueWrite?.value
         let config = settings.aiConfiguration, policy = settings.aiConfiguration.organizationPolicy
         try config.validate(); try await reload()
@@ -316,13 +356,18 @@ final class AIOrganizationController: ObservableObject {
         let trigger = resume ? state.checkpoint?.organization?.trigger ?? requestedTrigger : requestedTrigger
         let nightly = ["idle", "review"].contains(trigger)
         let review = trigger == "review" || trigger == "manual-review"
-        let protected = protectedGroups
+        let selection = resume ? state.checkpoint?.organization?.groupSelection : groupSelection
+        try selection?.validate(in: state.groups)
+        let replacedIDs = selection?.groupIDs ?? []
+        let catalogGroups = Array(state.groups.values.filter { !replacedIDs.contains($0.id) })
+        let protected = selection == nil ? protectedGroups : Set(catalogGroups.map(\.id))
         let eligible = clipIndex.values.filter(\.mayParticipateInAI).sorted {
             $0.lastCopiedAt == $1.lastCopiedAt ? $0.id.uuidString < $1.id.uuidString : $0.lastCopiedAt > $1.lastCopiedAt
         }
         let catalog = AIThemeCatalog.fingerprint(Array(state.groups.values)), prompt = AIHash.fingerprint(config.prompt)
         let focus: [Clip]
-        if let ids = contentIDs { let selected = Set(ids); focus = eligible.filter { selected.contains($0.id) } }
+        if let selection { focus = eligible.filter { selection.memberIDs.contains($0.id) } }
+        else if let ids = contentIDs { let selected = Set(ids); focus = eligible.filter { selected.contains($0.id) } }
         else if review {
             let cold = Set(state.groups.keys).subtracting(protected)
             let ungrouped = eligible.filter { $0.collectionIDs.isEmpty && !$0.isArchived && state.automation.decisions[$0.id]?.revision != $0.aiContentRevision }
@@ -362,16 +407,25 @@ final class AIOrganizationController: ObservableObject {
             job.organization = AIJobOrganization(trigger: trigger, revisions: Dictionary(uniqueKeysWithValues: focus.map { ($0.id, $0.aiContentRevision) }), protectedGroupIDs: protected, review: review)
             job.organization?.semanticFingerprint = AIThemeCatalog.configurationFingerprint(config)
             job.organization?.requiresThemePlan = review || (trigger.hasPrefix("manual") && state.groups.isEmpty && focus.count >= 18)
+            if let selection {
+                job.organization?.groupSelection = selection
+                job.organization?.groupCleanup = try AIGroupManagement.cleanup(selection, state: state, clips: Array(clipIndex.values))
+                job.organization?.requiresThemePlan = catalogGroups.count < policy.maximumGroupCount && focus.count >= policy.minimumThemeMembers
+            }
         }
         let scope = Set(job.clipIDs)
-        let documents = eligible.filter { scope.contains($0.id) }.map { $0.aiDocument(includeNotes: config.includeNotes, includeSource: config.includeSource) }
+        let documents = eligible.filter { scope.contains($0.id) }.map { clip -> AIClipDocument in
+            var document = clip.aiDocument(includeNotes: config.includeNotes, includeSource: config.includeSource)
+            document.groupIDs.removeAll { replacedIDs.contains($0) }; return document
+        }
         var rules = AIAnalysisRules(); rules.protectedGroupIDs = job.organization?.protectedGroupIDs ?? protected
         rules.allowOverviewRefresh = nightly
         if let groupID { rules.protectedGroupIDs.remove(groupID) }
         rules.allowReassignment = review || groupID != nil
         rules.allowNewGroups = trigger.hasPrefix("manual") && !review && state.groups.count < 6 && job.draft.isThemeReview != true
+        if selection != nil { rules.allowNewGroups = false }
         let checkpoint = job
-        try await repository.updateAIState { s in s.checkpoint = checkpoint; if trigger != "manual" && trigger != "manual-review" { s.lastAutomaticRunAt = Date() } }
+        try await repository.updateAIState { s in s.checkpoint = checkpoint; if !trigger.hasPrefix("manual") { s.lastAutomaticRunAt = Date() } }
         let repository = repository
         if nightly {
             let now = clock(), day = Calendar.current.startOfDay(for: clock())
@@ -381,10 +435,10 @@ final class AIOrganizationController: ObservableObject {
             state = try await repository.aiState()
         }
         if job.organization?.requiresThemePlan == true {
-            status = L10n.tr("正在统一规划 6～8 个主题")
+            status = selection == nil ? L10n.tr("正在统一规划 6～8 个主题") : L10n.tr("正在规划所选内容的主题")
             var planningConfiguration = config
             if nightly { planningConfiguration.dailyTokenLimit = min(config.dailyTokenLimit, todayTokens + max(0, policy.nightlyTokenLimit - nightlyTokens)) }
-            job.draft = try await themePlanner.plan(documents: documents, groups: Array(state.groups.values), protectedIDs: protected,
+            job.draft = try await themePlanner.plan(documents: documents, groups: catalogGroups, protectedIDs: protected,
                                                     candidates: state.automation.candidates, configuration: planningConfiguration, credential: credential,
                                                     ledger: state.usage, runID: job.id, trigger: trigger,
                                                     onUsage: { record in try await repository.updateAIState { $0.usage.append(record) } })
@@ -398,7 +452,7 @@ final class AIOrganizationController: ObservableObject {
             state = try await repository.aiState()
         }
         let initialCursor = job.cursor
-        let names = Set(try await repository.collections().map(\.name))
+        let names = Set(try await repository.collections().filter { !replacedIDs.contains($0.id) }.map(\.name))
         while job.cursor < job.clipIDs.count {
             try Task.checkCancellation()
             if queuedManual != nil { status = L10n.tr("已保存后台进度，准备手动任务"); return }
@@ -421,7 +475,9 @@ final class AIOrganizationController: ObservableObject {
                 end = boundary
             }
             let ids = Array(job.clipIDs[job.cursor..<end])
-            let fullDocuments = try await repository.aiContext(ids: ids, includeNotes: config.includeNotes, includeSource: config.includeSource)
+            let fullDocuments = try await repository.aiContext(ids: ids, includeNotes: config.includeNotes, includeSource: config.includeSource).map { original -> AIClipDocument in
+                var document = original; document.groupIDs.removeAll { replacedIDs.contains($0) }; return document
+            }
             let fullByID = Dictionary(uniqueKeysWithValues: fullDocuments.map { ($0.id, $0) })
             let liveIDs = ids.filter { fullByID[$0] != nil }
             if liveIDs.isEmpty { job.cursor = end }
@@ -430,7 +486,7 @@ final class AIOrganizationController: ObservableObject {
                 let current = Set(ids), context = documents.filter { !current.contains($0.id) } + fullDocuments
                 var bounded = config
                 if nightly { bounded.dailyTokenLimit = min(config.dailyTokenLimit, todayTokens + max(0, policy.nightlyTokenLimit - nightlyTokens)) }
-                let result = try await analyzer.analyze(documents: context, batchIDs: liveIDs, groups: Array(state.groups.values),
+                let result = try await analyzer.analyze(documents: context, batchIDs: liveIDs, groups: catalogGroups,
                                                         reservedNames: names, continuing: job.draft, configuration: bounded,
                                                         credential: credential, ledger: state.usage, trigger: trigger, runID: job.id, rules: rules,
                                                         onUsage: { record in try await repository.updateAIState { $0.usage.append(record) } })
@@ -446,6 +502,10 @@ final class AIOrganizationController: ObservableObject {
             state = try await repository.aiState()
         }
         var result = job.draft
+        if let cleanup = job.organization?.groupCleanup {
+            result = try AIGroupManagement.combining(cleanup: cleanup, analysis: result)
+            result.inputCount = job.clipIDs.count
+        }
         result.promptFingerprint = prompt; result.policyFingerprint = config.lifecycle.fingerprint
         result.protectedGroupIDs = rules.protectedGroupIDs
         var decisions = result.decisions ?? [:]
@@ -482,6 +542,7 @@ final class AIOrganizationController: ObservableObject {
         var proposed = original
         proposed.commands = original.commands.filter { selectedIDs.contains($0.id) }
         guard !proposed.commands.isEmpty else { return }
+        error = nil
         do { try await repository.applyAIChangeSet(proposed); try await reload(); onApplied?(false); status = L10n.tr("整理已应用，可以撤销") }
         catch { self.error = error.localizedDescription }
     }
