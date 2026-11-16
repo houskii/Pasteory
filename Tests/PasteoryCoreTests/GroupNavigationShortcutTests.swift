@@ -21,7 +21,9 @@ private func withGroupShortcutSettings(_ body: (AppSettings, UserDefaults) throw
         for (index, profile) in GroupViewProfile.allCases.enumerated() {
             #expect(settings.groupNavigationAction(keyCode: codes[index], modifiers: UInt32(controlKey | optionKey)) == .profile(profile))
         }
-        #expect(settings.groupNavigationAction(keyCode: 29, modifiers: UInt32(optionKey)) == .allContent)
+        #expect(settings.groupNavigationAction(keyCode: 50, modifiers: UInt32(optionKey)) == .allContent)
+        #expect(settings.groupNavigationAction(keyCode: 29, modifiers: UInt32(optionKey)) == nil)
+        #expect(settings.groupNavigationAction(keyCode: 50, modifiers: UInt32(optionKey | shiftKey)) == nil)
         #expect(settings.groupNavigationAction(keyCode: 18, modifiers: UInt32(cmdKey)) == nil)
     }
 }

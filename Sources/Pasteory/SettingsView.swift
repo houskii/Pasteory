@@ -489,7 +489,7 @@ struct SettingsView: View {
             Section(L10n.tr("按位置切换分组")) {
                 groupShortcutSettingRow(.allContent)
                 ForEach(GroupNavigationAction.groups) { action in groupShortcutSettingRow(action) }
-                Text(L10n.tr("默认使用 ⌥1～9 切换当前视图从上到下的前 9 个分组，⌥0 返回全部内容。未分组是筛选条件，不占编号。分组顺序改变后，编号同步更新。"))
+                Text(L10n.tr("默认使用 ⌥1～9 切换当前视图从上到下的前 9 个分组，⌥` 返回全部内容。未分组是筛选条件，不占编号。分组顺序改变后，编号同步更新。"))
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section(L10n.tr("分组视图切换")) {
@@ -510,7 +510,7 @@ struct SettingsView: View {
                         shortcutError = nil
                     }
                 }
-                Text(L10n.tr("全局唤起恢复为 ⌘⇧V，打开内容恢复为空格，搜索恢复为 ⌘F，分组切换恢复为 ⌥0～9。"))
+                Text(L10n.tr("全局唤起恢复为 ⌘⇧V，打开内容恢复为空格，搜索恢复为 ⌘F，分组切换恢复为 ⌥1～9，全部内容恢复为 ⌥`。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

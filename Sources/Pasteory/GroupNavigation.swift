@@ -27,7 +27,7 @@ enum GroupNavigationAction: Hashable, CaseIterable, Identifiable {
             guard let index = GroupViewProfile.allCases.firstIndex(of: profile), Self.numberKeys.indices.contains(index) else { return nil }
             return PasteoryShortcut(keyCode: Self.numberKeys[index], modifiers: UInt32(controlKey | optionKey))
         }
-        if self == .allContent { return PasteoryShortcut(keyCode: 29, modifiers: UInt32(optionKey)) }
+        if self == .allContent { return PasteoryShortcut(keyCode: 50, modifiers: UInt32(optionKey)) }
         return PasteoryShortcut(keyCode: Self.numberKeys[Self.groups.firstIndex(of: self)!], modifiers: UInt32(optionKey))
     }
     private static let numberKeys: [UInt32] = [18, 19, 20, 21, 23, 22, 26, 28, 25]

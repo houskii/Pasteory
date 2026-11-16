@@ -1060,7 +1060,6 @@
   "当前批次完成后优先执行手动任务": "The manual task will run after the current batch.",
   "显示新整理结果": "Show Organized Results",
   "按位置切换分组": "Switch Groups by Position",
-  "默认使用 ⌥1～9 切换当前视图从上到下的前 9 个分组，⌥0 返回全部内容。未分组是筛选条件，不占编号。分组顺序改变后，编号同步更新。": "Use ⌥1–9 for the first nine groups in the current view and ⌥0 for all content. Ungrouped is a filter and has no group number. Numbers follow the displayed group order.",
   "第 {0} 个分组": "Group {0}",
   "分类时会同时读取每个 AI 分组的主题定义。可在分组的编辑页面设置收录范围与排除项。": "Classification also reads each AI group’s topic definition. Edit a group to specify what belongs and what to exclude.",
   "仅查看未分组内容": "Show Only Ungrouped Content",
@@ -1069,7 +1068,6 @@
   "分组视图与筛选": "Group Views and Filters",
   "未分组筛选": "Ungrouped Filter",
   "未分组表示没有 AI 主题归属，不占用分组切换位置。": "Ungrouped means content has no AI topic assignment. It does not occupy a group switching position.",
-  "全局唤起恢复为 ⌘⇧V，打开内容恢复为空格，搜索恢复为 ⌘F，分组切换恢复为 ⌥0～9。": "Restore ⌘⇧V to open the panel, Space to open content, ⌘F to search, and ⌥0–9 to switch groups.",
   "分组视图切换": "Switch Group Views",
   "切换到“{0}”视图": "Switch to {0} View",
   "Profile 默认使用 ⌃⌥1～9，按视图标识保存配置；超过 9 个时可另设组合键。页面只显示分组项的快捷键提示。": "Profiles use ⌃⌥1–9 by default, with settings saved by profile ID. Assign other combinations beyond nine profiles. Only group item shortcuts appear in the main interface.",
@@ -1077,5 +1075,7 @@
   "自上次打开后新增 {0} 条内容": "{0} items added since you last opened this group",
   "全部视图": "All Views",
   "个人": "Personal",
-  "工作": "Work"
+  "工作": "Work",
+  "默认使用 ⌥1～9 切换当前视图从上到下的前 9 个分组，⌥` 返回全部内容。未分组是筛选条件，不占编号。分组顺序改变后，编号同步更新。": "Use ⌥1–9 for the first nine groups in the current view and ⌥` for all content. Ungrouped is a filter and has no group number. Numbers follow the displayed group order.",
+  "全局唤起恢复为 ⌘⇧V，打开内容恢复为空格，搜索恢复为 ⌘F，分组切换恢复为 ⌥1～9，全部内容恢复为 ⌥`。": "Restore ⌘⇧V to open the panel, Space to open content, ⌘F to search, ⌥1–9 to switch groups, and ⌥` for all content."
 }
