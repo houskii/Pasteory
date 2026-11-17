@@ -2300,7 +2300,8 @@ extension SQLiteClipRepository {
         let removed = state.changes.filter { $0.clipRevisions[id] != nil }.map(\.id)
         state.changes.removeAll { $0.clipRevisions[id] != nil }
         for change in removed { try Self.execute(database, "DELETE FROM intelligence_undo WHERE id=?;", bindings: [change.uuidString]) }
-        if state.checkpoint?.clipIDs.contains(id) == true || state.checkpoint?.draft.clipRevisions[id] != nil { state.checkpoint = nil }
+        // The next batch removes this item and its dependent draft results;
+        // deleting one clip must not discard the rest of a saved analysis.
         try writeAIState(state)
     }
 

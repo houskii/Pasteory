@@ -355,7 +355,9 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
         let metadata: [String: Any] = [
             "language": settings.appLanguage.rawValue,
             "textLabel": ClipKind.text.displayName,
-            "editMenuTitle": NSApp.mainMenu?.items.dropFirst().first?.submenu?.title ?? "",
+            "editMenuTitle": NSApp.mainMenu?.items.compactMap(\.submenu).first(where: { menu in
+                menu.items.contains { $0.action == #selector(NSText.copy(_:)) }
+            })?.title ?? "",
             "windowTitle": window.title,
             "quickLoadedCount": state.quickClips.count,
             "libraryLoadedCount": state.clips.count,

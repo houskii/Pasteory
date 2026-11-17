@@ -238,6 +238,9 @@ public struct AIJobCheckpoint: Codable, Equatable, Sendable {
     public var configurationFingerprint: String
     public var organization: AIJobOrganization?
     public var failureMessage: String?
+    public var requeuedIDs: Set<UUID>?
+    public var skippedIDs: Set<UUID>?
+    public var retryCounts: [UUID: Int]?
     public init(clipIDs: [UUID], batchSize: Int, configurationFingerprint: String) {
         self.clipIDs = clipIDs; self.batchSize = batchSize; self.configurationFingerprint = configurationFingerprint
     }

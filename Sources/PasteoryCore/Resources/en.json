@@ -1183,5 +1183,7 @@
   "等待后台 OCR，识别成功后会追加到备注末尾。": "Waiting for background OCR. Recognized text will be appended to the note.",
   "macOS Vision · 准确（中英文）": "macOS Vision · Accurate (Chinese and English)",
   "macOS Vision · 快速（英文等西文）": "macOS Vision · Fast (English and Western languages)",
-  "无法读取图片中的文字": "Unable to read text from the image"
+  "无法读取图片中的文字": "Unable to read text from the image",
+  "资料更新后补算 {0} 条，跳过 {1} 条；其余进度已保留。": "Reanalyzing {0} updated items and skipping {1} items. Other saved progress is preserved.",
+  "已保留整理进度，变化的资料已重新入队，可继续整理。": "Saved progress has been preserved. Updated items are queued again; you can resume organization."
 }

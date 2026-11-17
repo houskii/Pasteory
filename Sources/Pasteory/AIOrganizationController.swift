@@ -77,6 +77,10 @@ final class AIOrganizationController: ObservableObject {
         guard let job = state.checkpoint else { return "" }
         return "\(job.cursor) / \(job.clipIDs.count)"
     }
+    var checkpointRecovery: String? {
+        guard let job = state.checkpoint, !(job.requeuedIDs ?? []).isEmpty || !(job.skippedIDs ?? []).isEmpty else { return nil }
+        return L10n.tr("资料更新后补算 \(job.requeuedIDs?.count ?? 0) 条，跳过 \(job.skippedIDs?.count ?? 0) 条；其余进度已保留。")
+    }
     var needsAttention: Bool { running || pending != nil || state.checkpoint != nil || error != nil }
     var libraryContentCount: Int { clipIndex.values.filter { $0.deletedAt == nil }.count }
     var groupedContentCount: Int {
@@ -90,7 +94,7 @@ final class AIOrganizationController: ObservableObject {
 
     func bootstrap(deferMaintenance: Bool = false) async {
         if deferMaintenance { lastLifecycleRefresh = clock() }
-        do { try await reload(); reconfigure(); if state.automation.recommendedIDs.isEmpty { refreshRecommendations() } }
+        do { try await recoverSavedContentChanges(); reconfigure(); if state.automation.recommendedIDs.isEmpty { refreshRecommendations() } }
         catch { self.error = error.localizedDescription }
         guard polling == nil else { return }
         polling = Task { [weak self] in
@@ -425,6 +429,34 @@ final class AIOrganizationController: ObservableObject {
     }
 
     func pause() { work?.cancel() }
+    private func reloadForAnalysis() async throws {
+        while true {
+            try Task.checkCancellation()
+            let generation = reloadGeneration + 1
+            try await reload()
+            if generation == reloadGeneration, metadataRevision != nil { return }
+        }
+    }
+    func recoverSavedContentChanges() async throws {
+        try await reloadForAnalysis()
+        guard !running, let saved = state.checkpoint,
+              saved.failureMessage?.contains("Content changed; review or discard the saved task") == true else { return }
+        if let fingerprint = saved.organization?.semanticFingerprint,
+           fingerprint != AIThemeCatalog.configurationFingerprint(settings.aiConfiguration) { return }
+        var recovered = saved
+        let deferred = try AIJobRecovery.reconcile(&recovered, clips: clipIndex, groups: state.groups, eligibleIDs: eligibleClipIDs,
+                                                  minimumThemeMembers: settings.aiConfiguration.organizationPolicy.minimumThemeMembers)
+        recovered.failureMessage = nil
+        let updated = recovered, deferredClips = deferred.compactMap { clipIndex[$0] }
+        try await repository.updateAIState { s in
+            guard s.checkpoint == saved else { return }
+            s.checkpoint = updated
+            for clip in deferredClips { s.automation.enqueue(id: clip.id, revision: clip.aiContentRevision) }
+        }
+        error = nil
+        try await reload()
+        status = L10n.tr("已保留整理进度，变化的资料已重新入队，可继续整理。")
+    }
     func waitUntilIdle() async { await queueWrite?.value; await work?.value }
     func discardCheckpoint() async {
         guard !running else { return }
@@ -449,14 +481,14 @@ final class AIOrganizationController: ObservableObject {
     private func runAnalysis(all: Bool, resume: Bool, groupID: UUID?, trigger requestedTrigger: String, contentIDs: [UUID]?, groupSelection: AIGroupSelection?) async throws {
         await queueWrite?.value
         let config = settings.aiConfiguration, policy = settings.aiConfiguration.organizationPolicy
-        try config.validate(); try await reload()
+        try config.validate(); try await reloadForAnalysis()
         if !resume, requestedTrigger.hasPrefix("manual") { try await deferAutomaticJob() }
         let credential = try credentialProvider()
         let trigger = resume ? state.checkpoint?.organization?.trigger ?? requestedTrigger : requestedTrigger
         let nightly = ["idle", "review"].contains(trigger)
         let review = trigger == "review" || trigger == "manual-review"
-        let selection = resume ? state.checkpoint?.organization?.groupSelection : groupSelection
-        try selection?.validate(in: state.groups)
+        var selection = resume ? state.checkpoint?.organization?.groupSelection : groupSelection
+        if !resume { try selection?.validate(in: state.groups) }
         let replacedIDs = selection?.groupIDs ?? []
         let catalogGroups = Array(state.groups.values.filter { !replacedIDs.contains($0.id) })
         let protected = selection == nil ? protectedGroups : Set(catalogGroups.map(\.id))
@@ -490,6 +522,7 @@ final class AIOrganizationController: ObservableObject {
             status = L10n.tr("没有需要整理的内容"); return
         }
         var job: AIJobCheckpoint
+        var initiallyDeferred = [Clip]()
         if resume {
             guard let saved = state.checkpoint else { throw AIError.invalid("No resumable analysis") }
             job = saved
@@ -500,15 +533,18 @@ final class AIOrganizationController: ObservableObject {
                 if let fingerprint = organization.semanticFingerprint, fingerprint != AIThemeCatalog.configurationFingerprint(config) {
                     throw AIError.conflict("The model, prompt or content-sharing scope changed; start a separate analysis")
                 }
-                for (id, revision) in organization.revisions {
-                    guard clipIndex[id]?.aiContentRevision == revision else { throw AIError.conflict("Content changed; review or discard the saved task") }
-                }
             }
+            let deferred = try AIJobRecovery.reconcile(&job, clips: clipIndex, groups: state.groups, eligibleIDs: allowedIDs,
+                                                       minimumThemeMembers: policy.minimumThemeMembers)
+            initiallyDeferred = deferred.compactMap { clipIndex[$0] }
+            selection = job.organization?.groupSelection
+            try selection?.validate(in: state.groups)
         } else {
             guard state.checkpoint == nil else { throw AIError.invalid("Resume or discard the saved task first") }
             job = AIJobCheckpoint(clipIDs: focus.map(\.id), batchSize: min(20, config.batchSize), configurationFingerprint: AIHash.fingerprint(config))
             job.organization = AIJobOrganization(trigger: trigger, revisions: Dictionary(uniqueKeysWithValues: focus.map { ($0.id, $0.aiContentRevision) }), protectedGroupIDs: protected, review: review)
             job.organization?.semanticFingerprint = AIThemeCatalog.configurationFingerprint(config)
+            job.organization?.groupSnapshots = state.groups
             job.organization?.requiresThemePlan = review || (trigger.hasPrefix("manual") && state.groups.isEmpty && focus.count >= 18)
             if ["manual-regroup-all", "manual-regroup-recent"].contains(trigger), focus.count >= policy.minimumThemeMembers { job.organization?.requiresThemePlan = true }
             if let selection {
@@ -518,7 +554,7 @@ final class AIOrganizationController: ObservableObject {
             }
         }
         let scope = Set(job.clipIDs)
-        let documents = eligible.filter { scope.contains($0.id) }.map { clip -> AIClipDocument in
+        var documents = eligible.filter { scope.contains($0.id) }.map { clip -> AIClipDocument in
             var document = clip.aiDocument(includeNotes: config.includeNotes, includeSource: config.includeSource, includeImageText: config.includeImageText == true)
             document.groupIDs.removeAll { replacedIDs.contains($0) }; return document
         }
@@ -528,8 +564,12 @@ final class AIOrganizationController: ObservableObject {
         rules.allowReassignment = review || groupID != nil
         rules.allowNewGroups = trigger.hasPrefix("manual") && !review && state.groups.count < 6 && job.draft.isThemeReview != true
         if selection != nil { rules.allowNewGroups = false }
-        let checkpoint = job
-        try await repository.updateAIState { s in s.checkpoint = checkpoint; if !trigger.hasPrefix("manual") { s.lastAutomaticRunAt = Date() } }
+        let checkpoint = job, deferredClips = initiallyDeferred
+        try await repository.updateAIState { s in
+            s.checkpoint = checkpoint
+            for clip in deferredClips { s.automation.enqueue(id: clip.id, revision: clip.aiContentRevision) }
+            if !trigger.hasPrefix("manual") { s.lastAutomaticRunAt = Date() }
+        }
         state.checkpoint = checkpoint
         let repository = repository
         if nightly {
@@ -556,10 +596,24 @@ final class AIOrganizationController: ObservableObject {
             rules.allowNewGroups = false
             state = try await repository.aiState()
         }
-        let initialCursor = job.cursor
         let names = Set(try await repository.collections().filter { !replacedIDs.contains($0.id) }.map(\.name))
-        while job.cursor < job.clipIDs.count {
+        while true {
             try Task.checkCancellation()
+            try await reloadForAnalysis()
+            let deferred = try AIJobRecovery.reconcile(&job, clips: clipIndex, groups: state.groups, eligibleIDs: eligibleClipIDs,
+                                                      minimumThemeMembers: policy.minimumThemeMembers)
+            let scope = Set(job.clipIDs)
+            documents = clipIndex.values.filter { scope.contains($0.id) }.map { clip in
+                var document = clip.aiDocument(includeNotes: config.includeNotes, includeSource: config.includeSource, includeImageText: config.includeImageText == true)
+                document.groupIDs.removeAll { replacedIDs.contains($0) }; return document
+            }
+            let refreshed = job, deferredClips = deferred.compactMap { clipIndex[$0] }
+            try await repository.updateAIState { s in
+                s.checkpoint = refreshed
+                for clip in deferredClips { s.automation.enqueue(id: clip.id, revision: clip.aiContentRevision) }
+            }
+            state.checkpoint = job
+            guard job.cursor < job.clipIDs.count else { break }
             if queuedManual != nil { status = L10n.tr("已保存后台进度，准备手动任务"); return }
             if nightly && (sleeping || !policy.isIdleWindow(at: clock()) || idleTime() < policy.idleSeconds ||
                            state.automation.nightlyBudget?.exhausted(policy: policy, now: clock(), tokens: nightlyTokens) == true) {
@@ -584,6 +638,12 @@ final class AIOrganizationController: ObservableObject {
                 var document = original; document.groupIDs.removeAll { replacedIDs.contains($0) }; return document
             }
             let fullByID = Dictionary(uniqueKeysWithValues: fullDocuments.map { ($0.id, $0) })
+            let missing = Set(ids).subtracting(fullByID.keys)
+            if !missing.isEmpty {
+                try AIJobRecovery.reconcile(&job, clips: clipIndex, groups: state.groups, eligibleIDs: eligibleClipIDs.subtracting(missing),
+                                            minimumThemeMembers: policy.minimumThemeMembers)
+                continue
+            }
             let liveIDs = ids.filter { fullByID[$0] != nil }
             if liveIDs.isEmpty { job.cursor = end }
             else {
@@ -599,7 +659,7 @@ final class AIOrganizationController: ObservableObject {
                 guard let last = result.analyzedIDs.last, let position = ids.firstIndex(of: last) else { throw AIError.invalid("Analysis made no progress") }
                 job.cursor += position + 1
             }
-            let checkpoint = job, processed = Set(job.clipIDs[initialCursor..<job.cursor])
+            let checkpoint = job, processed = Set(job.clipIDs.prefix(job.cursor))
             try await repository.updateAIState { s in
                 s.checkpoint = checkpoint
                 if nightly { s.automation.nightlyBudget?.processedIDs.formUnion(processed) }

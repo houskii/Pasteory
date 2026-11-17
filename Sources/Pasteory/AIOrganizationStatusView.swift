@@ -32,6 +32,9 @@ struct AIOrganizationStatusView: View {
                 if !controller.running, let error = controller.error {
                     Text(error).foregroundStyle(.red).lineLimit(3).textSelection(.enabled).help(error)
                 }
+                if let recovery = controller.checkpointRecovery {
+                    Text(recovery).font(.caption2)
+                }
             }
             .font(.caption)
             .foregroundStyle(.secondary)
