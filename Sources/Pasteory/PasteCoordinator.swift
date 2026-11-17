@@ -8,16 +8,19 @@ final class PasteCoordinator {
     enum Result: Equatable { case pasted, copied, copiedFallback, copiedPermissionRequired }
 
     private let attachments: AttachmentStore
+    private let pasteboard: NSPasteboard
     weak var monitor: ClipboardMonitor?
 
-    init(attachments: AttachmentStore) { self.attachments = attachments }
+    init(attachments: AttachmentStore, pasteboard: NSPasteboard = .general) {
+        self.attachments = attachments
+        self.pasteboard = pasteboard
+    }
 
     func perform(_ clip: Clip, plainText: Bool, paste: Bool, target: NSRunningApplication?) async throws -> Result {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
         if plainText {
-            guard let text = try await plainTextValue(for: clip) else { throw PasteError.noPlainText }
-            pasteboard.setString(text, forType: .string)
+            guard let text = try await ClipPlainTextReader.read(clip, attachments: attachments) else { throw PasteError.noPlainText }
+            pasteboard.clearContents()
+            guard pasteboard.setString(text, forType: .string) else { throw PasteError.writeFailed }
         } else {
             var objects = [NSPasteboardItem]()
             for clipItem in clip.items.sorted(by: { $0.order < $1.order }) {
@@ -28,7 +31,9 @@ final class PasteCoordinator {
                 }
                 objects.append(item)
             }
-            guard !objects.isEmpty, pasteboard.writeObjects(objects) else { throw PasteError.writeFailed }
+            guard !objects.isEmpty else { throw PasteError.writeFailed }
+            pasteboard.clearContents()
+            guard pasteboard.writeObjects(objects) else { throw PasteError.writeFailed }
         }
         monitor?.markOwnWrite(changeCount: pasteboard.changeCount)
         guard paste else { return .copied }
@@ -65,18 +70,6 @@ final class PasteCoordinator {
 
     func accessibilityTrusted() -> Bool {
         AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": false] as CFDictionary)
-    }
-
-    private func plainTextValue(for clip: Clip) async throws -> String? {
-        let preferred = ["public.utf8-plain-text", "public.utf16-plain-text", "public.text", "NSStringPboardType", "public.url"]
-        for uti in preferred {
-            for item in clip.items {
-                guard let representation = item.representations.first(where: { $0.uti == uti }) else { continue }
-                let data = try await attachments.data(for: representation)
-                if let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .utf16) { return text }
-            }
-        }
-        return clip.previewText.isEmpty ? nil : clip.previewText
     }
 
     private func postCommandV() -> Bool {

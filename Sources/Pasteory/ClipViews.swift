@@ -5,6 +5,10 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 enum ClipRowMetrics {
+    static let footerHeight: CGFloat = 16
+    static let footerBottomInset: CGFloat = 8
+    static let footerSpacing: CGFloat = 3
+    static var footerReservedHeight: CGFloat { footerHeight + footerBottomInset + footerSpacing }
     static func height(for clip: Clip, compact: Bool) -> CGFloat {
         switch clip.primaryKind {
         case .code: compact ? 96 : 104
@@ -37,71 +41,46 @@ struct ClipRowView: View {
     @State private var fileIsMissing = false
 
     private var rowHeight: CGFloat { ClipRowMetrics.height(for: clip, compact: compact) }
+    private var sourceSpacing: CGFloat { ClipSourceLayout.usesVerticalIdentity ? 6 : 10 }
+    private var footerLeadingInset: CGFloat {
+        (ClipSourceLayout.usesVerticalIdentity ? (compact ? 54 : 60) : (compact ? 38 : 46)) + sourceSpacing
+    }
+    private var trailingWidth: CGFloat {
+        ClipTypeMarkerPreview.overlaysSourceIcon ? (compact ? 34 : 38) : (compact ? 54 : 58)
+    }
 
     var body: some View {
-        HStack(
-            alignment: .center,
-            spacing: ClipSourceLayout.usesVerticalIdentity ? 6 : 10
-        ) {
-            leadingArea
-            VStack(alignment: .leading, spacing: 3) {
+        ZStack(alignment: .bottomLeading) {
+            HStack(alignment: .center, spacing: sourceSpacing) {
+                leadingArea
+                    .padding(.bottom, clip.primaryKind == .image ? ClipRowMetrics.footerReservedHeight : 0)
                 mainContent
-                HStack(spacing: 7) {
-                    if !ClipSourceLayout.usesVerticalIdentity {
-                        Text(String(clip.source.appName.prefix(40)))
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                            .layoutPriority(1)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: rowHeight - ClipRowMetrics.footerReservedHeight, alignment: .bottom)
+                    .clipped()
+                    .padding(.bottom, ClipRowMetrics.footerReservedHeight)
+                Spacer(minLength: 4)
+                VStack(alignment: .trailing, spacing: 0) {
+                    if !ClipTypeMarkerPreview.overlaysSourceIcon {
+                        ClipKindLabel(clip: clip)
                     }
-                    Text(timestamp)
-                        .monospacedDigit()
-                        .fixedSize()
-                        .layoutPriority(2)
-                    if clip.primaryKind != .file, clip.items.count > 1 {
-                        Text(L10n.tr("\(clip.items.count) 项"))
+                    Spacer(minLength: 0)
+                    if let shortcutNumber {
+                        Text("⌘ \(shortcutNumber)")
+                            .font(.caption)
+                            .foregroundStyle(.primary)
+                            .fixedSize()
                     }
-                    if clip.primaryKind == .code,
-                       let lineCount = clip.codeMetadata?.totalLineCount,
-                       lineCount > 1 {
-                        Text(L10n.tr("\(lineCount) 行")).fixedSize()
-                    }
-                    usageCount
-                        .fixedSize()
-                        .layoutPriority(2)
-                        .help(L10n.tr("复制 \(clip.copyCount) 次，通过 Pasteory 粘贴 \(clip.recordedPasteCount) 次"))
-                        .accessibilityLabel(L10n.tr("复制 \(clip.copyCount) 次，通过 Pasteory 粘贴 \(clip.recordedPasteCount) 次"))
-                    if clip.isPinned { Image(systemName: "pin.fill").foregroundStyle(pasteoryAccentColor).help(L10n.tr("已置顶")) }
-                    if clip.isFavorite { Image(systemName: "star.fill").foregroundStyle(.yellow) }
-                    if clip.priority > 0 { Text("P\(clip.priority)").font(.caption2.bold()).foregroundStyle(pasteoryAccentColor) }
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .clipped()
+                .frame(width: trailingWidth, height: max(56, rowHeight - 16), alignment: .trailing)
+                .padding(.trailing, 4)
+                .padding(.bottom, 4)
             }
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-            Spacer(minLength: 4)
-            VStack(alignment: .trailing, spacing: 0) {
-                if !ClipTypeMarkerPreview.overlaysSourceIcon {
-                    ClipKindLabel(clip: clip)
-                }
-                Spacer(minLength: 0)
-                if let shortcutNumber {
-                    Text("⌘ \(shortcutNumber)")
-                        .font(.caption)
-                        .foregroundStyle(.primary)
-                        .fixedSize()
-                }
-            }
-            .frame(
-                width: ClipTypeMarkerPreview.overlaysSourceIcon ? (compact ? 34 : 38) : (compact ? 54 : 58),
-                height: max(56, rowHeight - 16),
-                alignment: .trailing
-            )
-            .padding(.trailing, 4)
-            .padding(.bottom, 4)
+            footer
+                .frame(height: ClipRowMetrics.footerHeight, alignment: .leading)
+                .padding(.leading, footerLeadingInset)
+                .padding(.trailing, trailingWidth + 8)
+                .padding(.bottom, ClipRowMetrics.footerBottomInset)
         }
         .saturation(fileIsMissing ? 0 : 1)
         .opacity(fileIsMissing ? 0.5 : 1)
@@ -114,6 +93,42 @@ struct ClipRowView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await refreshFileAvailability() }
         }
+    }
+
+    private var footer: some View {
+        HStack(spacing: 7) {
+            if !ClipSourceLayout.usesVerticalIdentity {
+                Text(String(clip.source.appName.prefix(40)))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .layoutPriority(1)
+            }
+            Text(timestamp)
+                .monospacedDigit()
+                .fixedSize()
+                .layoutPriority(2)
+            if clip.primaryKind != .file, clip.items.count > 1 {
+                Text(L10n.tr("\(clip.items.count) 项"))
+            }
+            if clip.primaryKind == .code,
+               let lineCount = clip.codeMetadata?.totalLineCount,
+               lineCount > 1 {
+                Text(L10n.tr("\(lineCount) 行")).fixedSize()
+            }
+            usageCount
+                .fixedSize()
+                .layoutPriority(2)
+                .help(L10n.tr("复制 \(clip.copyCount) 次，通过 Pasteory 粘贴 \(clip.recordedPasteCount) 次"))
+                .accessibilityLabel(L10n.tr("复制 \(clip.copyCount) 次，通过 Pasteory 粘贴 \(clip.recordedPasteCount) 次"))
+            if clip.isPinned { Image(systemName: "pin.fill").foregroundStyle(pasteoryAccentColor).help(L10n.tr("已置顶")) }
+            if clip.isFavorite { Image(systemName: "star.fill").foregroundStyle(.yellow) }
+            if clip.priority > 0 { Text("P\(clip.priority)").font(.caption2.bold()).foregroundStyle(pasteoryAccentColor) }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .clipped()
     }
 
     @ViewBuilder
@@ -285,26 +300,23 @@ struct ClipRowView: View {
         let content = ImageCardContent(clip: clip)
         return VStack(alignment: .leading, spacing: 5) {
             if !clip.displayTitle.isEmpty { titleText }
-            HStack(spacing: 6) {
-                if content.recognitionState == .recognized {
-                    Label("OCR", systemImage: "text.viewfinder")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(pasteoryAccentColor)
-                        .padding(.horizontal, 5).padding(.vertical, 2)
-                        .background(pasteoryAccentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 4))
-                        .fixedSize()
-                }
-                PasteoryImageMetadataDetailsView(clip: clip, attachments: attachments, compact: compact, inline: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            PasteoryImageMetadataDetailsView(clip: clip, attachments: attachments, compact: compact, inline: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
             if !content.text.isEmpty {
-                Text(String(content.text.prefix(1_200)))
-                    .font(.system(size: compact ? 12 : 13))
-                    .foregroundStyle(.primary)
-                    .lineLimit(compact ? 2 : 3)
-                    .truncationMode(.tail)
-                    .help(String(content.text.prefix(4_000)))
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "text.viewfinder")
+                        .font(.system(size: compact ? 11 : 12))
+                        .foregroundStyle(pasteoryAccentColor)
+                        .accessibilityLabel("OCR")
+                        .padding(.top, 2)
+                    Text(String(content.text.prefix(1_200)))
+                        .font(.system(size: compact ? 12 : 13))
+                        .foregroundStyle(.primary)
+                        .lineLimit(compact ? 2 : 3)
+                        .truncationMode(.tail)
+                        .help(String(content.text.prefix(4_000)))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             } else {
                 Text(imageRecognitionPlaceholder(content.recognitionState))
                     .font(.system(size: compact ? 11 : 12))
