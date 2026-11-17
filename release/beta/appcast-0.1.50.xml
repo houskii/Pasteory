@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><!-- sparkle-sign-warning:
+IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
+--><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+  <channel>
+    <title>Pasteory Beta</title>
+    <link>https://github.com/houskii/Pasteory/releases</link>
+    <language>en</language>
+    <item>
+      <title>Pasteory 0.1.50</title>
+      <link>https://github.com/houskii/Pasteory/releases/tag/v0.1.50</link>
+      <pubDate>Tue, 17 Nov 2026 10:53:22 +0000</pubDate>
+      <description sparkle:descriptionFormat="plain-text"># Pasteory 0.1.50 Beta
+
+本版本用于验证从 0.1.49 到更高版本的正式应用内升级。功能与资料格式沿用 0.1.49，继续使用相同的更新签名密钥和应用代码签名身份。
+
+已安装 0.1.49 的用户可通过应用内“检查更新”查看本版本，确认后下载、验签、安装并重启。0.1.48 及更早版本仍需先手动安装包含新更新公钥的版本。
+
+适用于 Apple Silicon，macOS 14 及以上。
+
+安装包使用本机生成的 Pasteory Local Build 证书签名，该证书不是 Apple 颁发的开发者证书。安装包未经过 Apple 公证。</description>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/houskii/Pasteory/releases/download/v0.1.50/Pasteory-0.1.50-arm64.dmg" length="11179906" type="application/octet-stream" sparkle:version="55" sparkle:shortVersionString="0.1.50" sparkle:edSignature="eAv2xwC7hgd+FoL6iGT4LZIUSK4FdrhQNXmvpe2It1IEgqRz/Y5iGlHeCplAtoUig6It+/pZ6jNEXwwozjLuBw==" sparkle:os="macos"></enclosure>
+    </item>
+  </channel>
+</rss><!-- sparkle-signatures:
+edSignature: zLK/AuERtvIAvbITKEQnsVLDsmYolVEeRkOiJ5GOm0C99adywyNNYG3fnFFZdLzrsInd/OQsR+hvBB1+mEwJDg==
+length: 1840
+-->
