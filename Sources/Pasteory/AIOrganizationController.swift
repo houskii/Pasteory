@@ -14,6 +14,13 @@ final class AIOrganizationController: ObservableObject {
     @Published var showingReview = false
     @Published private(set) var clipIndex: [UUID: Clip] = [:]
     @Published private(set) var clipActivities: [UUID: ActivityEvaluation] = [:]
+    @Published private(set) var clipActivityPercentiles: [UUID: Int] = [:]
+    @Published private(set) var groupActivityPercentiles: [UUID: Int] = [:]
+    @Published private var cachedGroupActivities: [UUID: GroupActivity] = [:]
+    private var cachedGroupActivityRevisions: [UUID: Int] = [:]
+    private var cachedActivityPolicy: LifecyclePolicy?
+    private var rankingTask: Task<Void, Never>?
+    private var rankingRevision: UInt64 = 0
     private var metadataEligibleIDs = Set<UUID>()
     private var safeImageTextIDs = Set<UUID>()
     var eligibleClipIDs: Set<UUID> {
@@ -161,6 +168,7 @@ final class AIOrganizationController: ObservableObject {
             if !changes.resetsIndex { await refreshActivities() }
             activityPolicyFingerprint = fingerprint
         }
+        refreshActivityRanks()
     }
 
     private func refreshActivities() async {
@@ -169,6 +177,27 @@ final class AIOrganizationController: ObservableObject {
             Dictionary(uniqueKeysWithValues: clips.filter { $0.deletedAt == nil }.map { ($0.id, policy.evaluate($0.activity)) })
         }.value
         if clipActivities != next { clipActivities = next }
+        refreshActivityRanks()
+    }
+
+    private func refreshActivityRanks() {
+        rankingTask?.cancel(); rankingRevision += 1
+        let revision = rankingRevision, evaluations = clipActivities, groups = state.groups
+        let policy = settings.aiConfiguration.lifecycle
+        rankingTask = Task { [weak self] in
+            // A burst of metadata changes produces one background ranking pass.
+            do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+            let ranks = await Task.detached(priority: .utility) {
+                let content = ActivityPercentile.ranks(evaluations.mapValues(\.score))
+                let groupValues = groups.mapValues { policy.group($0.memberIDs.compactMap { evaluations[$0] }) }
+                return (content, ActivityPercentile.ranks(groupValues.mapValues(\.score)), groupValues)
+            }.value
+            guard let self, !Task.isCancelled, revision == self.rankingRevision else { return }
+            if self.clipActivityPercentiles != ranks.0 { self.clipActivityPercentiles = ranks.0 }
+            if self.groupActivityPercentiles != ranks.1 { self.groupActivityPercentiles = ranks.1 }
+            self.cachedGroupActivityRevisions = groups.mapValues(\.revision); self.cachedActivityPolicy = policy
+            if self.cachedGroupActivities != ranks.2 { self.cachedGroupActivities = ranks.2 }
+        }
     }
 
     func contentChanged(_ id: UUID) {
@@ -244,6 +273,7 @@ final class AIOrganizationController: ObservableObject {
         if clipIndex[clip.id] != metadata { clipIndex[clip.id] = metadata }
         if clip.deletedAt == nil { clipActivities[clip.id] = settings.aiConfiguration.lifecycle.evaluate(clip.activity) }
         else { clipActivities.removeValue(forKey: clip.id) }
+        refreshActivityRanks()
     }
     private func reconfigure() {
         let config = settings.aiConfiguration
@@ -437,10 +467,13 @@ final class AIOrganizationController: ObservableObject {
     }
 
     func pause() { work?.cancel() }
-    func openTaskHistory() {
+    func openTaskHistory(taskID: UUID? = nil) {
         guard let directories = taskDirectories else { return }
         try? FileManager.default.createDirectory(at: directories.aiTasks, withIntermediateDirectories: true)
-        NSWorkspace.shared.open(latestTaskDirectory ?? directories.aiTasks)
+        if let taskID {
+            let requested = directories.aiTasks.appendingPathComponent(taskID.uuidString.lowercased() + ".agent")
+            NSWorkspace.shared.open(FileManager.default.fileExists(atPath: requested.path) ? requested : directories.aiTasks)
+        } else { NSWorkspace.shared.open(latestTaskDirectory ?? directories.aiTasks) }
     }
     private func reloadForAnalysis() async throws {
         while true {
@@ -470,7 +503,7 @@ final class AIOrganizationController: ObservableObject {
         try await reload()
         status = L10n.tr("已保留整理进度，变化的资料已重新入队，可继续整理。")
     }
-    func waitUntilIdle() async { await queueWrite?.value; await work?.value }
+    func waitUntilIdle() async { await queueWrite?.value; await work?.value; await rankingTask?.value }
     func discardCheckpoint() async {
         guard !running else { return }
         do {
@@ -567,7 +600,7 @@ final class AIOrganizationController: ObservableObject {
         }
         let input = try await AIFileTaskExporter.input(clips: ordered, taskID: job.id, configuration: config, directories: directories, aliases: aliases)
         let names = Set(try await repository.collections().filter { selection?.groupIDs.contains($0.id) != true }.map(\.name))
-        let workspace = try AIFileTaskWorkspace(input: input, clips: clips, groups: catalog, reservedNames: names, configuration: config, directories: directories)
+        let workspace = try AIFileTaskWorkspace(input: input, clips: clips, groups: catalog, reservedNames: names, configuration: config, directories: directories, trigger: trigger)
         latestTaskDirectory = await workspace.directory
         let prompt = try await workspace.prepare(previousDraft: job.draft, changedIDs: job.requeuedIDs ?? [])
         let repository = repository
@@ -965,7 +998,9 @@ final class AIOrganizationController: ObservableObject {
         } catch { self.error = error.localizedDescription; return false }
     }
     func groupActivity(_ profile: AIGroupProfile) -> GroupActivity {
-        settings.aiConfiguration.lifecycle.group(profile.memberIDs.compactMap { clipActivities[$0] })
+        if cachedActivityPolicy == settings.aiConfiguration.lifecycle,
+           cachedGroupActivityRevisions[profile.id] == profile.revision, let cached = cachedGroupActivities[profile.id] { return cached }
+        return settings.aiConfiguration.lifecycle.group(profile.memberIDs.compactMap { clipActivities[$0] })
     }
     func compress(groupID: UUID?) async {
         guard !running, !storageBusy else { return }

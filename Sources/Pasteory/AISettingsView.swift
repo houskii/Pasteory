@@ -25,6 +25,7 @@ struct AISettingsView: View {
     init(controller: AIOrganizationController) {
         self.controller = controller
         var configuration = controller.settings.aiConfiguration; configuration.batchSize = min(20, configuration.batchSize)
+        configuration.topN = max(100, min(1000, ((configuration.topN + 50) / 100) * 100))
         _draft = State(initialValue: configuration)
         _credential = State(initialValue: (try? AICredentialStore.load()) ?? "")
 #if DEBUG
@@ -135,7 +136,7 @@ struct AISettingsView: View {
     private var analysis: some View {
         VStack(alignment: .leading, spacing: 16) {
             AISettingsCard(title: L10n.tr("分析范围与触发")) {
-                Stepper(value: $draft.topN, in: 1...1000, step: 10) { Text(L10n.tr("最近内容 Top N：\(draft.topN)")) }
+                Stepper(value: $draft.topN, in: 100...1000, step: 100) { Text(L10n.tr("最近内容 Top N：\(draft.topN)")) }
                 Text(L10n.tr("一次任务将全部选定资料写入一个 JSON，Agent 自行决定读取、检索和整理方式。最近内容按 Top N 取不同资料，全库范围包含所有可分析内容。"))
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle(L10n.tr("新增内容后分析"), isOn: $draft.analyzeNew).toggleStyle(.switch)
@@ -146,7 +147,7 @@ struct AISettingsView: View {
                     Stepper(value: $draft.organizationPolicy.idleStartHour, in: 0...22) { Text(L10n.tr("开始：\(draft.organizationPolicy.idleStartHour) 点")) }
                     Stepper(value: $draft.organizationPolicy.idleEndHour, in: 1...23) { Text(L10n.tr("结束：\(draft.organizationPolicy.idleEndHour) 点")) }
                 }
-                Toggle(L10n.tr("每 7 天复核低活跃主题"), isOn: $draft.organizationPolicy.weeklyReviewEnabled).toggleStyle(.switch)
+                Toggle(L10n.tr("每 7 天复核低活跃度主题"), isOn: $draft.organizationPolicy.weeklyReviewEnabled).toggleStyle(.switch)
                 Text(L10n.tr("默认凌晨 1～2 点，设备唤醒并空闲 5 分钟后执行。每晚最多 100 条、10 分钟或 30 万 token；错过时顺延下一晚。近期常用、手动锁定与当前阅读的主题保持稳定。"))
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle(L10n.tr("分析用户备注"), isOn: $draft.includeNotes).toggleStyle(.switch)
@@ -197,7 +198,7 @@ struct AISettingsView: View {
                 })) {
                     ForEach(LifecyclePreset.allCases) { Text(L10n.text($0.title)).tag($0) }
                 }
-                Text(L10n.tr("活跃、留存、归档由内容本身的使用记录计算。分组根据成员活跃系数汇总，不单独计时。"))
+                Text(L10n.tr("内容活跃度根据使用记录计算，并据此进入留存或归档阶段。分组活跃度由成员汇总，不单独计时。"))
                     .font(.caption).foregroundStyle(.secondary)
                 dayStepper(L10n.tr("降权节点"), value: $draft.lifecycle.deprioritizeDays)
                 dayStepper(L10n.tr("压缩候选节点"), value: $draft.lifecycle.compressionDays)
@@ -218,9 +219,9 @@ struct AISettingsView: View {
                         metric(L10n.tr("成功粘贴权重"), value: $draft.lifecycle.pasteWeight, maximum: 5)
                         metric(L10n.tr("显式打开权重"), value: $draft.lifecycle.openWeight, maximum: 5)
                         metric(L10n.tr("用户编辑权重"), value: $draft.lifecycle.editWeight, maximum: 5)
-                        Stepper(value: $draft.lifecycle.topK, in: 1...100) { Text(L10n.tr("分组最活跃成员数量：\(draft.lifecycle.topK)")) }
+                        Stepper(value: $draft.lifecycle.topK, in: 1...100) { Text(L10n.tr("分组高活跃度成员数量：\(draft.lifecycle.topK)")) }
                         metric(L10n.tr("Top K 在分组系数中的权重"), value: $draft.lifecycle.topKWeight)
-                        metric(L10n.tr("活跃分组阈值"), value: $draft.lifecycle.activeThreshold)
+                        metric(L10n.tr("高活跃度分组阈值"), value: $draft.lifecycle.activeThreshold)
                         metric(L10n.tr("归档分组阈值"), value: $draft.lifecycle.archiveThreshold)
                     }.padding(.top, 10)
                 }
@@ -264,16 +265,41 @@ struct AISettingsView: View {
             }
             AISettingsCard(title: L10n.tr("最近调用")) {
                 if controller.state.usage.isEmpty { Text(L10n.tr("尚无模型调用记录")).foregroundStyle(.secondary) }
-                ForEach(controller.state.usage.suffix(30).reversed()) { item in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(item.requestedModel).font(.caption.weight(.medium)).lineLimit(1)
-                            Text(item.date.formatted(date: .abbreviated, time: .shortened) + " · " + item.trigger).font(.caption2).foregroundStyle(.secondary)
+                Text(L10n.tr("按任务归并；同一个任务可包含多次模型调用。展开可查看每次调用的时间、用量和结果。"))
+                    .font(.caption).foregroundStyle(.secondary)
+                ForEach(AIUsageTaskPresentation.grouped(controller.state.usage)) { task in
+                    DisclosureGroup {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text(L10n.tr("任务编号：\(task.id.uuidString)")).font(.caption2.monospaced()).textSelection(.enabled)
+                                Spacer()
+                                Button(L10n.tr("查看任务资料")) { controller.openTaskHistory(taskID: task.id) }.font(.caption)
+                            }
+                            ForEach(task.calls) { item in
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(item.requestedModel).font(.caption.weight(.medium)).lineLimit(1)
+                                        Text(item.date.formatted(date: .abbreviated, time: .standard)).font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    VStack(alignment: .trailing, spacing: 3) {
+                                        Text("\(item.inputTokens) / \(item.outputTokens)").font(.caption.monospacedDigit())
+                                        Text(item.succeeded ? (item.estimated ? L10n.tr("本地估算") : L10n.tr("服务商计量")) : L10n.tr("调用失败"))
+                                            .font(.caption2).foregroundStyle(item.succeeded ? Color.secondary : Color.orange)
+                                    }
+                                }
+                            }
                         }
-                        Spacer()
-                        VStack(alignment: .trailing, spacing: 3) {
-                            Text("\(item.inputTokens) / \(item.outputTokens)").font(.caption.monospacedDigit())
-                            Text(item.estimated ? L10n.tr("本地估算") : L10n.tr("服务商计量")).font(.caption2).foregroundStyle(item.succeeded ? Color.secondary : Color.orange)
+                        .padding(.vertical, 8)
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(task.title).font(.callout.weight(.medium))
+                                Text(task.latestDate.formatted(date: .abbreviated, time: .shortened) + " · " + L10n.tr("\(task.calls.count) 次模型调用"))
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text("\(task.inputTokens) / \(task.outputTokens)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                         }
                     }
                     Divider()

@@ -33,7 +33,7 @@ public struct AIThemePlan: Codable, Sendable {
                     guard theme.name == existing.name, theme.definition == existing.definition else { throw AIError.invalid("An active or manually defined theme cannot be rewritten") }
                 } else if theme.name != existing.name || theme.definition != existing.definition {
                     guard theme.name.count <= 16 else { throw AIError.invalid("Use a concise theme name") }
-                    result.commands.append(AICommand(kind: .renameGroup, targetID: id, name: theme.name, definition: theme.definition, reason: "闲时复核低活跃主题"))
+                    result.commands.append(AICommand(kind: .renameGroup, targetID: id, name: theme.name, definition: theme.definition, reason: "闲时复核低活跃度主题"))
                     result.groupRevisions[id] = existing.revision
                 }
             } else {
@@ -58,7 +58,7 @@ public struct AIThemePlan: Codable, Sendable {
                 retire.append(AICommand(kind: .removeItems, targetID: group.id, clipIDs: batch, reason: "旧主题成员重新归类；无合适主题则保留未分组"))
                 for id in batch { result.clipRevisions[id] = docs[id]!.revision }
             }
-            retire.append(AICommand(kind: .retireGroup, targetID: group.id, reason: "合并低活跃主题，原始内容继续保留"))
+            retire.append(AICommand(kind: .retireGroup, targetID: group.id, reason: "合并低活跃度主题，原始内容继续保留"))
         }
         result.commands = retire + result.commands
         return result

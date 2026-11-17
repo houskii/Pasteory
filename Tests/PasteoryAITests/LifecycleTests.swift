@@ -4,6 +4,16 @@ import Testing
 
 private let lifecycleNow = Date(timeIntervalSince1970: 1_800_000_000)
 
+@Test func activityPercentilesIncludeTiesAndDoNotOverstateEqualScores() {
+    let ids = (0..<100).map { _ in UUID() }
+    let ranks = ActivityPercentile.ranks(Dictionary(uniqueKeysWithValues: ids.enumerated().map { ($0.element, Double(100 - $0.offset)) }))
+    #expect(ranks[ids[0]] == 1 && ranks[ids[49]] == 50 && ranks[ids[99]] == 100)
+    let tied = ActivityPercentile.ranks([ids[0]: 1, ids[1]: 1, ids[2]: 0.5, ids[3]: 0.5])
+    #expect(tied[ids[0]] == 50 && tied[ids[1]] == 50 && tied[ids[2]] == 100)
+    #expect(ActivityPercentile.ranks([ids[0]: 0.5, ids[1]: 0.5]).values.allSatisfy { $0 == 100 })
+    #expect(ActivityPercentile.ranks([ids[0]: .nan]).isEmpty)
+}
+
 @Test func standardPolicyUsesSevenFourteenSixtyDays() throws {
     let policy = LifecyclePolicy.preset(.standard)
     try policy.validate()

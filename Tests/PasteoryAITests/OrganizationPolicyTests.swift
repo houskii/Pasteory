@@ -9,7 +9,9 @@ import Testing
     #expect(restored.organizationPolicy.recommendedCount == 3)
     #expect(restored.organizationPolicy.targetGroupCount == 7)
     #expect(restored.model == configuration.model)
-    #expect(!restored.organizationPolicy.idleEnabled)
+    #expect(restored.organizationPolicy.idleEnabled)
+    configuration.timerEnabled = false
+    #expect(try JSONDecoder().decode(AIConfiguration.self, from: JSONEncoder().encode(configuration)).organizationPolicy.idleEnabled == false)
     #expect(try JSONDecoder().decode(AIOrganizationState.self, from: JSONEncoder().encode(AIOrganizationState())).automation.dirty.isEmpty)
 }
 

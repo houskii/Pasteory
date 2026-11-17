@@ -13,6 +13,10 @@ struct LinkResolutionSettingsView: View {
     let onPrepareChrome: () -> Void
 
     @State private var selectedSection: LinkSettingsSection = .unresolved
+    @State private var dateScope: LinkResolutionDateScope = .all
+    @State private var selectedDay = Date()
+    @State private var issueFilter: LinkResolutionIssueFilter = .all
+    @State private var search = ""
     @State private var editingGroup: LinkFailureGroup?
     @State private var authenticationRequest: LinkAuthenticationRequest?
     @State private var authenticationRuleEditorRequest: AuthenticationRuleEditorRequest?
@@ -22,6 +26,7 @@ struct LinkResolutionSettingsView: View {
     @State private var sessionRevision = UUID()
 
     private enum LinkSettingsSection: String, CaseIterable, Identifiable {
+        case all
         case unresolved
         case resolved
         case rules
@@ -30,7 +35,8 @@ struct LinkResolutionSettingsView: View {
         var id: String { rawValue }
         var title: String {
             switch self {
-            case .unresolved: L10n.tr("未解析")
+            case .all: L10n.tr("全部链接")
+            case .unresolved: L10n.tr("待处理")
             case .resolved: L10n.tr("已解析")
             case .rules: L10n.tr("兜底规则")
             case .connections: L10n.tr("连接")
@@ -41,7 +47,7 @@ struct LinkResolutionSettingsView: View {
     var body: some View {
         VStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
-                Label(L10n.tr("网页标题"), systemImage: "globe")
+                Label(L10n.tr("链接解析"), systemImage: "globe")
                     .font(.headline)
                 SettingsCard {
                     VStack(alignment: .leading, spacing: 10) {
@@ -63,15 +69,18 @@ struct LinkResolutionSettingsView: View {
                     ForEach(LinkSettingsSection.allCases) { section in Text(section.title).tag(section) }
                 }
                 .pickerStyle(.segmented)
+                Button(L10n.tr("刷新记录")) { Task { await state.refreshLinkResolutionData() } }
                 Button(L10n.tr("添加登录解析…")) {
                     authenticationRuleEditorRequest = AuthenticationRuleEditorRequest(group: nil)
                 }
             }
 
+            if selectedSection == .all || selectedSection == .unresolved || selectedSection == .resolved {
+                filters
+            }
             Group {
                 switch selectedSection {
-                case .unresolved: unresolved
-                case .resolved: resolved
+                case .all, .unresolved, .resolved: entriesList
                 case .rules: rules
                 case .connections: connections
                 }
@@ -184,85 +193,115 @@ struct LinkResolutionSettingsView: View {
     }
 
     private var summary: some View {
-        let groups = state.linkFailureGroups
-        let needsLogin = groups.filter {
-            $0.latestRequestState == .needsAuthentication
-                || $0.latestRequestState == .verificationRequired
-                || $0.latestRequestState == .forbidden
-        }.count
-        let generic = groups.filter { $0.latestRequestState == .genericTitle }.count
-        return HStack(spacing: 18) {
-            metric(L10n.tr("待处理路由"), value: groups.count, symbol: "exclamationmark.circle")
-            metric(L10n.tr("需要登录"), value: needsLogin, symbol: "person.crop.circle.badge.exclamationmark")
-            metric(L10n.tr("通用标题"), value: generic, symbol: "text.badge.xmark")
-            metric(L10n.tr("用户规则"), value: state.fallbackRules.count, symbol: "wand.and.stars")
-        }
-        .padding(.vertical, 4)
-    }
-
-    private func metric(_ title: String, value: Int, symbol: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: symbol).foregroundStyle(pasteoryAccentColor)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("\(value)").font(.headline.monospacedDigit())
-                Text(title).font(.caption2).foregroundStyle(.secondary)
+        let entries = state.linkResolutionEntries
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 18) {
+                metric(L10n.tr("解析成功"), value: entries.filter { $0.resource.requestState == .resolved }.count, symbol: "checkmark.circle") {
+                    selectedSection = .resolved; issueFilter = .all
+                }
+                metric(L10n.tr("待处理链接"), value: entries.filter { $0.resource.requestState != .resolved }.count, symbol: "exclamationmark.circle") {
+                    selectedSection = .unresolved; issueFilter = .all
+                }
+                metric(L10n.tr("登录或验证"), value: entries.filter(\.needsLogin).count, symbol: "person.crop.circle.badge.exclamationmark") {
+                    selectedSection = .unresolved; issueFilter = .needsLogin
+                }
+                metric(L10n.tr("无法访问"), value: entries.filter(\.cannotAccess).count, symbol: "link.badge.plus") {
+                    selectedSection = .unresolved; issueFilter = .cannotAccess
+                }
             }
+            Text(L10n.tr("按具体链接统计最新结果。登录、权限、页面不存在和网络失败分别标记；保留旧标题不代表本次访问成功。"))
+                .font(.caption2).foregroundStyle(.secondary)
+        }.padding(.vertical, 4)
+    }
+
+    private func metric(_ title: String, value: Int, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: symbol).foregroundStyle(pasteoryAccentColor)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("\(value)").font(.headline.monospacedDigit()).foregroundStyle(.primary)
+                    Text(title).font(.caption2).foregroundStyle(.secondary)
+                }
+            }.contentShape(Rectangle())
+        }.buttonStyle(.plain)
+    }
+
+    private var filters: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                Picker(L10n.tr("日期"), selection: $dateScope) {
+                    ForEach(LinkResolutionDateScope.allCases, id: \.self) { Text($0.title).tag($0) }
+                }.frame(maxWidth: 170)
+                if dateScope == .selectedDay {
+                    DatePicker(L10n.tr("日期"), selection: $selectedDay, displayedComponents: .date).labelsHidden()
+                }
+                Picker(L10n.tr("状态"), selection: $issueFilter) {
+                    ForEach(LinkResolutionIssueFilter.allCases, id: \.self) { Text($0.title).tag($0) }
+                }.frame(maxWidth: 190)
+                TextField(L10n.tr("搜索网址、标题或采集应用"), text: $search).textFieldStyle(.roundedBorder)
+            }
+            Text(L10n.tr("按最近一次解析日期分组；尚未请求的链接按收录日期分组。"))
+                .font(.caption2).foregroundStyle(.secondary)
         }
     }
 
-    private var unresolved: some View {
+    private var filteredEntries: [LinkResolutionEntry] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        return state.linkResolutionEntries.filter { entry in
+            let stateMatches = selectedSection == .all
+                || (selectedSection == .unresolved && entry.resource.requestState != .resolved)
+                || (selectedSection == .resolved && entry.resource.requestState == .resolved)
+            return stateMatches && issueFilter.includes(entry)
+                && dateScope.contains(entry.activityDate, selectedDay: selectedDay)
+                && (query.isEmpty || ([entry.resource.displayTitle, URLFallbackEngine.redactedDisplayURL(entry.resource.normalizedURL)] + entry.sourceApplications)
+                    .joined(separator: "\n").localizedCaseInsensitiveContains(query))
+        }
+    }
+
+    private var entriesList: some View {
         Group {
-            if state.linkFailureGroups.isEmpty {
-                ContentUnavailableView(
-                    L10n.tr("没有待处理链接"),
-                    systemImage: "checkmark.circle",
-                    description: Text(settings.linkResolutionEnabled ? L10n.tr("新链接解析失败后会按 URL 路由聚合到这里。") : L10n.tr("打开自动解析后，请求失败的链接会出现在这里。"))
-                )
+            if filteredEntries.isEmpty {
+                ContentUnavailableView(L10n.tr("没有符合条件的链接"), systemImage: "link",
+                    description: Text(L10n.tr("可切换日期、状态或搜索条件。新链接的解析结果会出现在这里。")))
             } else {
-                List(state.linkFailureGroups) { group in
-                    let target = URLFallbackEngine.normalizedWebURL(group.sampleURL).flatMap {
-                        LinkAuthenticationTarget.matching(
-                            url: $0,
-                            customRules: settings.authenticatedLinkRules
-                        )
+                List {
+                    ForEach(LinkResolutionDay.grouped(filteredEntries)) { day in
+                        Section {
+                            ForEach(day.entries) { entry in
+                                let group = failureGroup(entry)
+                                let target = URLFallbackEngine.normalizedWebURL(entry.resource.normalizedURL).flatMap {
+                                    LinkAuthenticationTarget.matching(url: $0, customRules: settings.authenticatedLinkRules)
+                                }
+                                LinkResolutionEntryRow(entry: entry,
+                                    isRetrying: state.linkResolutionBusyResourceIDs.contains(entry.id),
+                                    onRetry: { state.reparseResolvedLink(ResolvedLinkSummary(resource: entry.resource, clipCount: entry.clipCount, copyCount: entry.copyCount)) },
+                                    onAuthenticate: target.map { target in
+                                        { authenticationRequest = LinkAuthenticationRequest(target: target, group: group) }
+                                    },
+                                    onConfigureAuthentication: { authenticationRuleEditorRequest = AuthenticationRuleEditorRequest(group: group) },
+                                    onConfigureFallback: { editingGroup = group })
+                            }
+                        } header: {
+                            HStack {
+                                Text(day.id.formatted(Date.FormatStyle(date: .complete, time: .omitted).locale(L10n.language.locale)))
+                                Spacer()
+                                Text(L10n.tr("\(day.entries.count) 个链接"))
+                            }.font(.caption)
+                        }
                     }
-                    LinkFailureGroupRow(
-                        group: group,
-                        isRetrying: state.linkResolutionBusyRouteKeys.contains(group.routeSignature.key),
-                        onRetry: { state.retryLinkResolution(group) },
-                        onAuthenticate: target.map { target in
-                            { authenticationRequest = LinkAuthenticationRequest(target: target, group: group) }
-                        },
-                        onConfigureAuthentication: {
-                            authenticationRuleEditorRequest = AuthenticationRuleEditorRequest(group: group)
-                        },
-                        onConfigureFallback: { editingGroup = group }
-                    )
-                }
-                .listStyle(.inset)
+                }.listStyle(.inset)
             }
         }
     }
 
-    private var resolved: some View {
-        Group {
-            if state.resolvedLinkResources.isEmpty {
-                ContentUnavailableView(
-                    L10n.tr("还没有已解析链接"),
-                    systemImage: "checkmark.circle",
-                    description: Text(L10n.tr("解析出可区分标题的链接会按具体 URL 显示在这里。"))
-                )
-            } else {
-                List(state.resolvedLinkResources) { summary in
-                    ResolvedLinkRow(
-                        summary: summary,
-                        isRetrying: state.linkResolutionBusyResourceIDs.contains(summary.id),
-                        onRetry: { state.reparseResolvedLink(summary) }
-                    )
-                }
-                .listStyle(.inset)
-            }
-        }
+    private func failureGroup(_ entry: LinkResolutionEntry) -> LinkFailureGroup {
+        let resource = entry.resource
+        return LinkFailureGroup(routeSignature: resource.routeSignature, uniqueURLCount: 1,
+            clipCount: entry.clipCount, copyCount: entry.copyCount, attemptCount: resource.attemptCount,
+            failedAttemptCount: resource.failedAttemptCount, latestRequestState: resource.requestState,
+            latestTitleQuality: resource.titleQuality, currentFallbackTitle: resource.fallbackTitle,
+            currentFallbackState: resource.fallbackState, sampleURL: resource.normalizedURL,
+            lastSeenAt: resource.updatedAt, lastAttemptAt: resource.lastAttemptAt)
     }
 
     private var rules: some View {

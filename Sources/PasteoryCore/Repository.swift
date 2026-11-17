@@ -54,6 +54,7 @@ public protocol ClipRepository: Sendable {
     func unresolvedLinkGroups(limit: Int) async throws -> [LinkFailureGroup]
     func unresolvedLinkResources(routeKey: String) async throws -> [LinkResource]
     func resolvedLinkResources(limit: Int) async throws -> [ResolvedLinkSummary]
+    func linkResolutionEntries(limit: Int) async throws -> [LinkResolutionEntry]
     func userFallbackRules() async throws -> [URLFallbackRule]
     func saveFallbackRule(_ rule: URLFallbackRule) async throws
     func removeFallbackRule(id: UUID) async throws

@@ -4,10 +4,28 @@ import SwiftUI
 
 struct AIGroupPromptCard: View {
     let group: AIGroupProfile
+    var activity: GroupActivity? = nil
+    var percentile: Int? = nil
     let edit: () -> Void
     @State private var expanded = true
     var body: some View {
-        DisclosureGroup(isExpanded: $expanded) {
+        VStack(alignment: .leading, spacing: 10) {
+            if let activity {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(L10n.tr("分组活跃度")).font(.caption.weight(.semibold))
+                        if let percentile {
+                            Text(L10n.tr("活跃度前 \(percentile)%")).font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    Text(activity.score.formatted(.percent.precision(.fractionLength(0))))
+                        .font(.title3.weight(.semibold).monospacedDigit())
+                }
+                .help(L10n.tr("由高活跃度成员均值和全部成员均值加权计算；复制等使用行为后更新，时间衰减每 5 分钟重算。"))
+                Divider()
+            }
+            DisclosureGroup(isExpanded: $expanded) {
             ScrollView { Text(group.definition).font(.callout).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
                 .frame(maxHeight: 100)
             Text(L10n.tr("此分组的收录范围与排除项，会和全局整理偏好一起交给 AI。")).font(.caption2).foregroundStyle(.secondary)
@@ -16,6 +34,7 @@ struct AIGroupPromptCard: View {
                 Text(L10n.tr("分组 Prompt（主题定义）")).font(.caption.weight(.semibold))
                 Spacer()
                 Button(L10n.tr("编辑 Prompt"), action: edit).buttonStyle(.plain).font(.caption)
+            }
             }
         }.padding(12).background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
     }

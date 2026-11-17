@@ -48,8 +48,12 @@ PASTEORY_BUILD_VARIANT=production PASTEORY_BUILD_CONFIGURATION=release make veri
 dmg="Pasteory-$version-arm64.dmg"
 phase="准备签名更新索引"
 python3 "$SCRIPT_DIR/prepare_update.py" --tag "$tag" --notes "$notes" --dmg "dist/$dmg"   --tools "${PASTEORY_SPARKLE_TOOLS:-$PWD/.build/artifacts/sparkle/Sparkle/bin}"
-phase="安装已验证的 App"
-PASTEORY_SKIP_EXISTING_MAINTENANCE=1 "$SCRIPT_DIR/install.sh"
+if [[ ${PASTEORY_RELEASE_SKIP_INSTALL:-0} != 1 ]]; then
+  phase="安装已验证的 App"
+  PASTEORY_SKIP_EXISTING_MAINTENANCE=1 "$SCRIPT_DIR/install.sh"
+else
+  print "按要求保留当前已安装版本，仅发布 GitHub 更新。"
+fi
 
 phase="提交源码和最新安装包"
 cp "dist/$dmg" "release/beta/$dmg"

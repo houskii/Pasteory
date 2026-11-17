@@ -15,15 +15,16 @@ public actor AIFileTaskWorkspace: AIFileAgentWorkspace {
     private var groups: [UUID: AIGroupProfile]
     private let reservedNames: Set<String>
     private let configuration: AIConfiguration
+    private let trigger: String
     private let directories: AppDirectories
     private var representations: [UUID: ClipRepresentation]
     private var history: [String: JSONValue]
     private let outputLimit: Int
 
     public init(input: AIFileTaskInput, clips: [Clip], groups: [UUID: AIGroupProfile], reservedNames: Set<String>,
-                configuration: AIConfiguration, directories: AppDirectories) throws {
+                configuration: AIConfiguration, directories: AppDirectories, trigger: String = "manual") throws {
         self.input = input; self.groups = groups; self.reservedNames = reservedNames
-        self.configuration = configuration; self.directories = directories
+        self.configuration = configuration; self.directories = directories; self.trigger = trigger
         self.directory = directories.aiTasks.appendingPathComponent(input.taskID.uuidString.lowercased() + ".agent", isDirectory: true)
         self.representations = Dictionary(clips.flatMap(\.items).flatMap(\.representations).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         self.outputLimit = min(96_000, max(2000, configuration.maxInputTokens))
@@ -41,6 +42,8 @@ public actor AIFileTaskWorkspace: AIFileAgentWorkspace {
         try write(Array(groups.values).sorted { $0.id.uuidString < $1.id.uuidString }, to: "existing/groups.json")
         if let previousDraft { try write(previousDraft, to: "existing/saved-plan.json") }
         let manifest: JSONValue = .object(["task_id": .string(input.taskID.uuidString), "scope_count": .number(Double(input.items.count)),
+            "trigger": .string(trigger), "task_kind": .string(trigger == "new" ? "incremental_classification" : "organization"),
+            "existing_groups_file": .string("existing/groups.json"),
             "model": .string(configuration.model), "reasoning_effort": .string(configuration.reasoning),
             "input_file": .string("items.json"), "resource_reference_mode": .string("original_paths"),
             "allow_original_resource_read": .bool(configuration.allowOriginalResourceRead != false),
@@ -68,6 +71,7 @@ public actor AIFileTaskWorkspace: AIFileAgentWorkspace {
         try write(schema, to: "plan.schema.json")
         let prompt = """
         你负责 Pasteory 的一次完整资料分类任务，任务 ID 为 \(input.taskID.uuidString)。
+        \(trigger == "new" ? "本次是新增内容分析。items.json 只包含新增或正文已变化的待处理资料，不是全库或最近 Top N。existing/groups.json 提供现有分组的名称、定义、概况和成员标识。优先补充到现有分组，保持已有名称、定义、成员关系和概况；不要根据这几条新增内容重新规划整个资料库。结果 groups 仅列出本次实际收录新资料的组，不必列出未涉及的已有组。无法归类的内容可以保留未分组。" : "本次按用户选定的范围整理资料。")
         当前工作目录包含全部 \(input.items.count) 条资料，集中在 items.json。文字和备注没有抽样或截断。自行决定如何读取、检索、比较与整理，可使用 task_exec 编写脚本或其他文件工具；应用不会逐批投喂资料。大文件可按需检索、分页读取。
         用户保存的主题数量设置：目标 \(policy.targetGroupCount) 个，内容充分时保持 6～\(policy.maximumGroupCount) 个，总数不得超过 \(policy.maximumGroupCount) 个。请合并过细的子主题，避免同一项目拆出大量小组。每个新主题至少有 \(policy.minimumThemeMembers) 条不同资料支持；资料不足时可以更少或保留未分组，不创建空组凑数。已有主题也计入总数，优先复用，并保留用户保护的主题。
         目标是按真实项目、任务或知识主题组织资料。不要因为旧草稿只有几个主题就固定沿用其结构；允许重新划分或新增有依据的主题。旧的 saved-plan.json 是未经用户确认的模型草稿，只作参考；其中的未分组结论也可以重做。existing/groups.json 才是实际存在的 AI 分组，已有组的手写名称、定义及排除项保持不变。新组必须使用 existing_group_id: null；不要把草稿 UUID 当作已有组。
@@ -81,6 +85,7 @@ public actor AIFileTaskWorkspace: AIFileAgentWorkspace {
         """
         try Data(prompt.utf8).write(to: directory.appendingPathComponent("PROMPT.md"), options: .atomic)
         history["status"] = .string("running"); history["model"] = .string(configuration.model)
+        history["trigger"] = .string(trigger)
         history["reasoning_effort"] = .string(configuration.reasoning); history["scope_count"] = .number(Double(input.items.count))
         history["input_sha256"] = .string(AIHash.digest(try Data(contentsOf: directory.appendingPathComponent("items.json"))))
         try write(JSONValue.object(history), to: "history.json")
@@ -115,7 +120,9 @@ public actor AIFileTaskWorkspace: AIFileAgentWorkspace {
     public func result() throws -> AIChangeSet {
         let data = try Data(contentsOf: directory.appendingPathComponent("output/plan.json"))
         guard data.count <= 20_000_000 else { throw AIError.invalid("Plan file is too large") }
-        return try AIFileTaskPlan.decode(data).changeSet(input: input, groups: groups, reservedNames: reservedNames, policy: configuration.organizationPolicy)
+        var result = try AIFileTaskPlan.decode(data).changeSet(input: input, groups: groups, reservedNames: reservedNames, policy: configuration.organizationPolicy)
+        if trigger == "new" { result.commands.removeAll { $0.kind == .updateOverview && groups[$0.targetID] != nil } }
+        return result
     }
     public func saveValidatedResult(_ result: AIChangeSet) throws {
         try write(result, to: "output/validated-changes.json")

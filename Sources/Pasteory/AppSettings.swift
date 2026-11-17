@@ -304,8 +304,11 @@ final class AppSettings: ObservableObject {
         self.groupNavigationShortcuts = defaults.data(forKey: "groupNavigationShortcutsV1")
             .flatMap { try? JSONDecoder().decode(GroupNavigationShortcuts.self, from: $0) } ?? GroupNavigationShortcuts()
         self.groupPresentation = defaults.data(forKey: "groupPresentationV1").flatMap { try? JSONDecoder().decode(GroupPresentationSettings.self, from: $0) } ?? GroupPresentationSettings()
-        self.aiConfiguration = defaults.data(forKey: "aiOrganizationConfiguration.v1")
+        var aiConfiguration = defaults.data(forKey: "aiOrganizationConfiguration.v1")
             .flatMap { try? JSONDecoder().decode(AIConfiguration.self, from: $0) } ?? AIConfiguration()
+        aiConfiguration.adoptAnalysisDefaultsIfNeeded()
+        self.aiConfiguration = aiConfiguration
+        if let data = try? JSONEncoder().encode(aiConfiguration) { defaults.set(data, forKey: "aiOrganizationConfiguration.v1") }
         fileCommandLogsDirectory = logsDirectory?.appendingPathComponent("FileCommands", isDirectory: true)
         let initialLanguage = Self.preferredLanguage(in: defaults)
         appLanguage = initialLanguage

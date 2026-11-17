@@ -263,6 +263,12 @@ struct LibraryView: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 4)
+                if let group = state.intelligence.state.groups[collection.id] {
+                    Text(state.intelligence.groupActivity(group).score.formatted(.percent.precision(.fractionLength(0))))
+                        .font(.system(size: 10, weight: .medium)).monospacedDigit()
+                        .foregroundStyle(selected ? Color.white.opacity(0.85) : Color.secondary)
+                        .help(L10n.tr("分组综合活跃度"))
+                }
                 GroupNewContentBadge(state: state, id: collection.id)
                 GroupShortcutHint(text: state.groupNavigationHint(for: collection.id, quick: false))
                 Image(systemName: "line.3.horizontal")
@@ -379,7 +385,7 @@ struct LibraryView: View {
                         Button(L10n.tr("沿用现有主题分析全库")) { state.intelligence.analyze(all: true) }
                         Button(L10n.tr("重新整理最近内容…")) { openAIGroupManager(scope: .recent) }
                         Button(L10n.tr("重新整理全库…")) { openAIGroupManager(scope: .library) }
-                        Button(L10n.tr("复核主题与低活跃分组")) { state.intelligence.analyze(trigger: "manual-review") }
+                        Button(L10n.tr("复核主题与低活跃度分组")) { state.intelligence.analyze(trigger: "manual-review") }
                         if state.intelligence.latestUndoable != nil {
                             Button(L10n.tr("撤销最近一次整理")) { Task { await state.intelligence.undo() } }
                         }
@@ -426,7 +432,9 @@ struct LibraryView: View {
                 .background(LibraryTheme.inputBackground, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).stroke(.separator.opacity(0.45), lineWidth: 1))
                 if case .collection(let id) = state.libraryFilter, let group = state.intelligence.state.groups[id] {
-                    AIGroupPromptCard(group: group) { editingNormalCollection = state.collections.first { $0.id == id } }
+                    AIGroupPromptCard(group: group, activity: state.intelligence.groupActivity(group), percentile: state.intelligence.groupActivityPercentiles[id]) {
+                        editingNormalCollection = state.collections.first { $0.id == id }
+                    }
                 }
                 AIOrganizationStatusView(controller: state.intelligence)
             }
@@ -589,12 +597,20 @@ struct LibraryView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
                         inspectorSection(L10n.tr("生命周期与 AI")) {
+                            let activity = state.intelligence.clipActivities[clip.id] ?? state.settings.aiConfiguration.lifecycle.evaluate(clip.activity)
                             HStack {
-                                let activity = state.settings.aiConfiguration.lifecycle.evaluate(clip.activity)
-                                Text(L10n.text(activity.stage.title)).font(.caption.weight(.semibold))
+                                Text(L10n.tr("活跃度")).font(.caption.weight(.semibold))
                                 Spacer()
                                 Text(activity.score.formatted(.percent.precision(.fractionLength(0)))).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                             }
+                            HStack {
+                                if let percentile = state.intelligence.clipActivityPercentiles[clip.id] {
+                                    Text(L10n.tr("活跃度前 \(percentile)%"))
+                                        .help(L10n.tr("与资料库中未删除的内容比较；同分并列，百分比包含全部同分内容。"))
+                                }
+                                Spacer()
+                                Text(L10n.text(activity.stage.title))
+                            }.font(.caption2).foregroundStyle(.secondary)
                             Toggle(L10n.tr("禁止此内容参与 AI 分析"), isOn: Binding(get: { clip.aiAnalysisExcluded == true }, set: { value in
                                 state.mutate(clip) { $0.aiAnalysisExcluded = value }
                             })).toggleStyle(.switch).font(.caption)

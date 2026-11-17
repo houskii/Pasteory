@@ -5,7 +5,7 @@ public struct AIOrganizationPolicy: Codable, Equatable, Sendable {
     public var targetGroupCount = 7
     public var maximumGroupCount = 8
     public var minimumThemeMembers = 3
-    public var idleEnabled = false
+    public var idleEnabled = true
     public var weeklyReviewEnabled = true
     public var idleStartHour = 1
     public var idleEndHour = 2

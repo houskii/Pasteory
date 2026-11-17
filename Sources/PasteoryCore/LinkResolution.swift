@@ -407,6 +407,24 @@ public struct ResolvedLinkSummary: Hashable, Identifiable, Sendable {
     public var id: UUID { resource.id }
 }
 
+public struct LinkResolutionEntry: Hashable, Identifiable, Sendable {
+    public var resource: LinkResource
+    public var clipCount: Int
+    public var copyCount: Int
+    public var sourceApplications: [String]
+    public var latestAttempt: LinkResolutionAttempt?
+    public var id: UUID { resource.id }
+    public var activityDate: Date { latestAttempt?.finishedAt ?? resource.lastAttemptAt ?? resource.createdAt }
+    public var needsLogin: Bool { [.needsAuthentication, .verificationRequired].contains(resource.requestState) }
+    public var cannotAccess: Bool { [.notFound, .forbidden, .blockedByPolicy].contains(resource.requestState) }
+    public var retainedTitleAfterFailure: Bool { resource.resolvedTitle != nil && resource.requestState.needsAttention }
+
+    public init(resource: LinkResource, clipCount: Int, copyCount: Int, sourceApplications: [String], latestAttempt: LinkResolutionAttempt?) {
+        self.resource = resource; self.clipCount = clipCount; self.copyCount = copyCount
+        self.sourceApplications = sourceApplications; self.latestAttempt = latestAttempt
+    }
+}
+
 public enum LinkCacheRefreshPolicy {
     public static let resolvedCacheLifetime: TimeInterval = 24 * 60 * 60
     public static let scanLimit = 100

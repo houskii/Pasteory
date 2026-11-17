@@ -26,6 +26,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       PASTEORY_RELEASE_VERSION: ${{ inputs.version }}
       PASTEORY_RELEASE_PUBLISH_DIRECTLY: '1'
+      PASTEORY_RELEASE_SKIP_INSTALL: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -70,7 +71,7 @@ jobs:
           python3 -m unittest discover -s scripts/tests -v
           python3 scripts/check_localizations.py
           node --test scripts/tests/test_chrome_popup.cjs
-      - name: Build, verify, install, and publish the Release package
+      - name: Build, verify, and publish the Release package
         if: steps.preflight.outputs.existing == 'false'
         run: make release RELEASE_NOTES="$PWD/docs/releases/v$PASTEORY_RELEASE_VERSION.md"
       - name: Save encrypted recovery archive

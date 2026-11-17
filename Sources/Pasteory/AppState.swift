@@ -112,6 +112,7 @@ final class AppState: ObservableObject {
     @Published var isBusy = false
     @Published var linkFailureGroups: [LinkFailureGroup] = []
     @Published var resolvedLinkResources: [ResolvedLinkSummary] = []
+    @Published var linkResolutionEntries: [LinkResolutionEntry] = []
     @Published var fallbackRules: [URLFallbackRule] = []
     @Published var linkResolutionBusyRouteKeys = Set<String>()
     @Published var linkResolutionBusyResourceIDs = Set<UUID>()
@@ -514,9 +515,11 @@ final class AppState: ObservableObject {
         do {
             async let groups = repository.unresolvedLinkGroups(limit: 500)
             async let resolved = repository.resolvedLinkResources(limit: 500)
+            async let entries = repository.linkResolutionEntries(limit: 100_000)
             async let rules = repository.userFallbackRules()
             linkFailureGroups = try await groups
             resolvedLinkResources = try await resolved
+            linkResolutionEntries = try await entries
             fallbackRules = try await rules
         } catch { show(error) }
     }

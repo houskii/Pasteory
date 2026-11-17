@@ -131,7 +131,7 @@ struct AIReviewView: View {
         case .updateOverview: L10n.tr("更新内容概况")
         case .createAggregation: L10n.tr("创建资料聚合") + " · " + command.name
         case .setSummary: L10n.tr("保存带依据的归纳")
-        case .renameGroup: L10n.tr("调整低活跃主题") + " · " + command.name
+        case .renameGroup: L10n.tr("调整低活跃度主题") + " · " + command.name
         case .retireGroup: L10n.tr("合并或移除旧主题入口")
         case .clearGroup: L10n.tr("清理所选 AI 分组，保留原始内容")
         }

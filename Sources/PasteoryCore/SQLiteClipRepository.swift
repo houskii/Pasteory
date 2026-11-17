@@ -955,6 +955,30 @@ public actor SQLiteClipRepository: ClipRepository {
         return result
     }
 
+    public func linkResolutionEntries(limit: Int = 10_000) throws -> [LinkResolutionEntry] {
+        let stats = try prepare("SELECT cl.link_resource_id,c.source_name,COUNT(*),COALESCE(SUM(c.copy_count),0) FROM clip_links cl JOIN clips c ON c.id=cl.clip_id WHERE c.deleted_at IS NULL GROUP BY cl.link_resource_id,c.source_name;")
+        defer { sqlite3_finalize(stats) }
+        var counts = [String: (clips: Int, copies: Int, apps: [String])]()
+        while sqlite3_step(stats) == SQLITE_ROW {
+            guard let id = sqlite3_column_text(stats, 0) else { continue }
+            let key = String(cString: id), app = sqlite3_column_text(stats, 1).map { String(cString: $0) } ?? ""
+            var item = counts[key] ?? (0, 0, [])
+            item.clips += Int(sqlite3_column_int64(stats, 2)); item.copies += Int(sqlite3_column_int64(stats, 3))
+            if !app.isEmpty { item.apps.append(app) }; counts[key] = item
+        }
+        let rows = try prepare("SELECT lr.payload_json,a.payload_json FROM link_resources lr LEFT JOIN link_resolution_attempts a ON a.id=(SELECT id FROM link_resolution_attempts WHERE link_resource_id=lr.id ORDER BY finished_at DESC,id DESC LIMIT 1) ORDER BY COALESCE(a.finished_at,lr.last_attempt_at,lr.updated_at) DESC;")
+        defer { sqlite3_finalize(rows) }
+        var result = [LinkResolutionEntry]()
+        while sqlite3_step(rows) == SQLITE_ROW, result.count < max(1, min(limit, 100_000)) {
+            let resource = try decode(LinkResource.self, statement: rows, column: 0)
+            guard let stats = counts[resource.id.uuidString], stats.clips > 0 else { continue }
+            let attempt = sqlite3_column_type(rows, 1) == SQLITE_NULL ? nil : try decode(LinkResolutionAttempt.self, statement: rows, column: 1)
+            result.append(LinkResolutionEntry(resource: resource, clipCount: stats.clips, copyCount: stats.copies,
+                                              sourceApplications: stats.apps.sorted(), latestAttempt: attempt))
+        }
+        return result
+    }
+
     public func userFallbackRules() throws -> [URLFallbackRule] {
         let statement = try prepare("SELECT payload_json FROM url_fallback_rules WHERE origin=? ORDER BY priority,updated_at DESC;")
         defer { sqlite3_finalize(statement) }

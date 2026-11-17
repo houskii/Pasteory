@@ -3,7 +3,7 @@ import Foundation
 public enum ContentStage: String, Codable, CaseIterable, Sendable {
     case active, retained, archived
     public var title: String {
-        switch self { case .active: "活跃"; case .retained: "留存"; case .archived: "归档" }
+        switch self { case .active: "活跃度较高"; case .retained: "留存"; case .archived: "归档" }
     }
 }
 
@@ -133,4 +133,21 @@ public struct GroupActivity: Codable, Equatable, Sendable {
     public var score: Double
     public var stage: ContentStage
     public var counts: [ContentStage: Int]
+}
+
+public enum ActivityPercentile {
+    /// The percentage includes all entries tied at the same score.
+    public static func ranks(_ scores: [UUID: Double]) -> [UUID: Int] {
+        let ordered = scores.filter { $0.value.isFinite }.sorted { $0.value > $1.value }
+        guard !ordered.isEmpty else { return [:] }
+        var result = [UUID: Int](), start = 0
+        while start < ordered.count {
+            var end = start + 1
+            while end < ordered.count && ordered[end].value == ordered[start].value { end += 1 }
+            let percent = min(100, max(1, Int(ceil(Double(end) * 100 / Double(ordered.count)))))
+            for index in start..<end { result[ordered[index].key] = percent }
+            start = end
+        }
+        return result
+    }
 }
