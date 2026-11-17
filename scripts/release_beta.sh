@@ -13,7 +13,7 @@ git diff --quiet
 [[ -z "$(git ls-files --others --exclude-standard)" ]]
 git diff --cached --check
 git fetch origin main --tags
-git merge-base --is-ancestor origin/main HEAD
+python3 "$SCRIPT_DIR/check_release_source.py"
 version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Config/Info.plist)
 build=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' Config/Info.plist)
 [[ "$version" =~ '^[0-9]+\.[0-9]+\.[0-9]+$' && "$build" =~ '^[0-9]+$' ]]
@@ -60,7 +60,7 @@ else
   print "按要求保留当前已安装版本，仅发布 GitHub 更新。"
 fi
 
-phase="提交源码和最新安装包"
+phase="提交已合并源码对应的最新安装包"
 cp "dist/$dmg" "release/beta/$dmg"
 cp dist/update/appcast.xml "release/beta/appcast-$version.xml"
 for previous in release/beta/Pasteory-*-arm64.dmg(N); do
