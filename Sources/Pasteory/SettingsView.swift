@@ -57,6 +57,9 @@ struct SettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             settings.reloadSourceCapturePreferences()
         }
+        .onChange(of: settings.aiConfiguration.storyEnabled) { _, enabled in
+            if enabled != true, selectedDestination == .story { selectedDestination = .library }
+        }
 #if DEBUG
         .onAppear(perform: configureDebugSettings)
 #endif
@@ -89,6 +92,9 @@ struct SettingsView: View {
 
 #if DEBUG
     private func configureDebugSettings() {
+        if ProcessInfo.processInfo.arguments.contains("--debug-settings-story"), settings.aiConfiguration.storyEnabled == true {
+            selectedDestination = .story
+        }
         if ProcessInfo.processInfo.arguments.contains("--debug-settings-privacy") { selectedDestination = .privacy }
         if ProcessInfo.processInfo.arguments.contains("--debug-settings-open") { selectedDestination = .openBehavior }
         if ProcessInfo.processInfo.arguments.contains("--debug-settings-file-rules"),
@@ -197,6 +203,7 @@ struct SettingsView: View {
     @ViewBuilder
     private var destinationContent: some View {
         switch selectedDestination {
+        case .story: StoryView(controller: state.story, settings: settings) { selectedDestination = .aiOrganization }
         case .library: EmptyView()
         case .general: general
         case .privacy: privacy
@@ -212,7 +219,7 @@ struct SettingsView: View {
 
     private var destinationGroups: [DestinationGroup] {
         [
-            DestinationGroup(title: "", destinations: [.library]),
+            DestinationGroup(title: "", destinations: Destination.primaryDestinations(storyEnabled: settings.aiConfiguration.storyEnabled == true)),
             DestinationGroup(title: L10n.tr("应用设置"), destinations: [.general, .shortcuts, .openBehavior]),
             DestinationGroup(title: L10n.tr("采集与处理"), destinations: [.privacy, .linkResolution, .aiOrganization]),
             DestinationGroup(title: L10n.tr("数据与支持"), destinations: [.storage, .advanced, .about])

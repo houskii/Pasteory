@@ -16,15 +16,18 @@ public actor AIFileTaskWorkspace: AIFileAgentWorkspace {
     private let reservedNames: Set<String>
     private let configuration: AIConfiguration
     private let trigger: String
+    private let purpose: AIFileTaskPurpose
     private let directories: AppDirectories
     private var representations: [UUID: ClipRepresentation]
     private var history: [String: JSONValue]
     private let outputLimit: Int
 
     public init(input: AIFileTaskInput, clips: [Clip], groups: [UUID: AIGroupProfile], reservedNames: Set<String>,
-                configuration: AIConfiguration, directories: AppDirectories, trigger: String = "manual") throws {
+                configuration: AIConfiguration, directories: AppDirectories, trigger: String = "manual",
+                purpose: AIFileTaskPurpose = .organization) throws {
         self.input = input; self.groups = groups; self.reservedNames = reservedNames
         self.configuration = configuration; self.directories = directories; self.trigger = trigger
+        self.purpose = purpose
         self.directory = directories.aiTasks.appendingPathComponent(input.taskID.uuidString.lowercased() + ".agent", isDirectory: true)
         self.representations = Dictionary(clips.flatMap(\.items).flatMap(\.representations).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         self.outputLimit = min(96_000, max(2000, configuration.maxInputTokens))
@@ -37,6 +40,7 @@ public actor AIFileTaskWorkspace: AIFileAgentWorkspace {
     }
 
     public func prepare(previousDraft: AIChangeSet?, changedIDs: Set<UUID> = []) throws -> String {
+        if case .story(let checkpoint) = purpose { return try prepareStory(checkpoint) }
         let policy = configuration.organizationPolicy
         try write(input, to: "items.json")
         try write(Array(groups.values).sorted { $0.id.uuidString < $1.id.uuidString }, to: "existing/groups.json")
@@ -93,6 +97,33 @@ public actor AIFileTaskWorkspace: AIFileAgentWorkspace {
         return prompt
     }
 
+    private func prepareStory(_ checkpoint: AIStoryCheckpoint) throws -> String {
+        try write(input, to: "items.json")
+        try write(JSONValue.object(["changed_clip_ids": .array([])]), to: "scratch/content-changes.json")
+        try write(Array(groups.values).sorted { $0.id.uuidString < $1.id.uuidString }, to: "existing/groups.json")
+        try write(AIStoryPlan.schema(taskID: input.taskID), to: "plan.schema.json")
+        try write(JSONValue.object([
+            "task_id": .string(input.taskID.uuidString), "task_kind": .string("story"), "trigger": .string("story"),
+            "scope_count": .number(Double(input.items.count)), "input_file": .string("items.json"),
+            "existing_groups_file": .string("existing/groups.json"), "output_file": .string("output/plan.json"),
+            "model": .string(configuration.model), "reasoning_effort": .string(configuration.reasoning),
+            "period_start": .string(ISO8601DateFormatter().string(from: checkpoint.periodStart)),
+            "period_end": .string(ISO8601DateFormatter().string(from: checkpoint.periodEnd)),
+            "resource_reference_mode": .string("original_paths"), "resource_files_copied": .number(0),
+            "allow_original_resource_read": .bool(configuration.allowOriginalResourceRead != false), "application_batch_size": .null
+        ]), to: "task.json")
+        let prompt = AIStoryPlan.prompt(input: input, checkpoint: checkpoint)
+            + (configuration.allowOriginalResourceRead == false ? "\n本次关闭原资源读取，只能使用导出的文字和元数据。" : "")
+        try Data(prompt.utf8).write(to: directory.appendingPathComponent("PROMPT.md"), options: .atomic)
+        history["status"] = .string("running"); history["task_kind"] = .string("story")
+        history["model"] = .string(configuration.model); history["trigger"] = .string("story")
+        history["reasoning_effort"] = .string(configuration.reasoning); history["scope_count"] = .number(Double(input.items.count))
+        history["input_sha256"] = .string(AIHash.digest(try Data(contentsOf: directory.appendingPathComponent("items.json"))))
+        try write(JSONValue.object(history), to: "history.json")
+        try recordSync(event: "task_prepared", details: .object(["task_kind": .string("story"), "items": .number(Double(input.items.count))]))
+        return prompt
+    }
+
     public func loadConversation() throws -> [JSONValue] {
         let url = directory.appendingPathComponent("agent-state.json")
         guard FileManager.default.fileExists(atPath: url.path) else { return [] }
@@ -114,8 +145,20 @@ public actor AIFileTaskWorkspace: AIFileAgentWorkspace {
     }
 
     public func validatePlan() throws -> String? {
-        do { _ = try result(); return nil }
+        do {
+            if case .story = purpose { _ = try storyResult() } else { _ = try result() }
+            return nil
+        }
         catch { return error.localizedDescription }
+    }
+    public func storyResult() throws -> AIStoryReport {
+        guard case .story(let checkpoint) = purpose else { throw AIError.invalid("This task is not a Story") }
+        let data = try Data(contentsOf: directory.appendingPathComponent("output/plan.json"))
+        guard data.count <= 1_000_000 else { throw AIError.invalid("Story output is too large") }
+        return try JSONDecoder().decode(AIStoryPlan.self, from: data).report(input: input, checkpoint: checkpoint)
+    }
+    public func saveValidatedStory(_ story: AIStoryReport) throws {
+        try write(story, to: "output/validated-story.json")
     }
     public func result() throws -> AIChangeSet {
         let data = try Data(contentsOf: directory.appendingPathComponent("output/plan.json"))

@@ -2,12 +2,13 @@ import PasteoryCore
 import Combine
 
 enum SettingsDestination: String, CaseIterable, Identifiable {
-    case library, general, privacy, shortcuts, openBehavior, linkResolution, aiOrganization, storage, advanced, about
+    case story, library, general, privacy, shortcuts, openBehavior, linkResolution, aiOrganization, storage, advanced, about
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .story: "Story"
         case .library: L10n.tr("资料库")
         case .general: L10n.tr("通用")
         case .privacy: L10n.tr("采集与隐私")
@@ -23,6 +24,7 @@ enum SettingsDestination: String, CaseIterable, Identifiable {
 
     var subtitle: String {
         switch self {
+        case .story: L10n.tr("回看最近的事情，也看见自己的进展")
         case .library: L10n.tr("浏览、搜索和整理保存的内容")
         case .general: L10n.tr("外观、启动和应用状态")
         case .privacy: L10n.tr("剪贴板检测、图片文字识别、来源详情和排除应用")
@@ -38,6 +40,7 @@ enum SettingsDestination: String, CaseIterable, Identifiable {
 
     var symbol: String {
         switch self {
+        case .story: "book.pages"
         case .library: "square.stack"
         case .general: "gearshape"
         case .privacy: "hand.raised"
@@ -49,6 +52,10 @@ enum SettingsDestination: String, CaseIterable, Identifiable {
         case .advanced: "stethoscope"
         case .about: "info.circle"
         }
+    }
+
+    static func primaryDestinations(storyEnabled: Bool) -> [Self] {
+        storyEnabled ? [.story, .library] : [.library]
     }
 }
 

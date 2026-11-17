@@ -219,6 +219,9 @@ public actor BackupService {
                     if summary.sourceRevisions.allSatisfy({ clipIndex[$0.key]?.aiContentRevision == $0.value }) { state.summaries[id] = summary }
                 }
                 let known = Set(state.usage.map(\.id)); state.usage += imported.usage.filter { !known.contains($0.id) }
+                let knownStories = Set((state.stories ?? []).map(\.id))
+                let stories = (state.stories ?? []) + (imported.stories ?? []).filter { !knownStories.contains($0.id) }
+                if !stories.isEmpty { state.stories = Array(stories.sorted { $0.generatedAt < $1.generatedAt }.suffix(30)) }
             }
         }
         return clips.count

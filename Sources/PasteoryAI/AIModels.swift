@@ -31,6 +31,7 @@ public struct AIConfiguration: Codable, Equatable, Sendable {
     public enum Provider: String, Codable, CaseIterable, Sendable { case openAICompatible, magpie, ollama }
     public enum ApplyMode: String, Codable, CaseIterable, Sendable { case preview, appendExisting }
     public var enabled = false
+    public var storyEnabled: Bool?
     public var provider: Provider = .magpie
     public var endpoint = "http://127.0.0.1:3425/v1"
     public var model = ""
@@ -264,6 +265,8 @@ public struct AIOrganizationState: Codable, Equatable, Sendable {
     public var schemaVersion = 1
     public var groups: [UUID: AIGroupProfile] = [:]
     public var summaries: [UUID: AISummary] = [:]
+    public var stories: [AIStoryReport]?
+    public var storyCheckpoint: AIStoryCheckpoint?
     public var changes: [AIChangeSet] = []
     public var usage: [AIUsageRecord] = []
     public var checkpoint: AIJobCheckpoint?

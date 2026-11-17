@@ -131,7 +131,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 backup: backup,
                 storageAnalyticsService: storageAnalyticsService,
                 settings: settings,
-                linkResolutionService: linkResolutionService
+                linkResolutionService: linkResolutionService,
+                directories: directories
             )
             let coordinator = AppCoordinator(state: state, settings: settings, attachments: attachments, defaults: settingsDefaults)
             self.coordinator = coordinator

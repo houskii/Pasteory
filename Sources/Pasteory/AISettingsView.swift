@@ -135,6 +135,12 @@ struct AISettingsView: View {
 
     private var analysis: some View {
         VStack(alignment: .leading, spacing: 16) {
+            AISettingsCard(title: "Story") {
+                Toggle(L10n.tr("启用 AI 总结"), isOn: Binding(get: { draft.storyEnabled == true }, set: { draft.storyEnabled = $0 }))
+                    .toggleStyle(.switch)
+                Text(L10n.tr("开启后，设置页的资料库上方显示 Story。手动生成最近 7 天的回顾，看看在做的事情、AI 观察到的进展，以及写给你的一点鼓励。"))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             AISettingsCard(title: L10n.tr("分析范围与触发")) {
                 Stepper(value: $draft.topN, in: 100...1000, step: 100) { Text(L10n.tr("最近内容 Top N：\(draft.topN)")) }
                 Text(L10n.tr("一次任务将全部选定资料写入一个 JSON，Agent 自行决定读取、检索和整理方式。最近内容按 Top N 取不同资料，全库范围包含所有可分析内容。"))

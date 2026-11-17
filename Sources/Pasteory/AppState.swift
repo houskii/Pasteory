@@ -121,6 +121,7 @@ final class AppState: ObservableObject {
 
     let settings: AppSettings
     let intelligence: AIOrganizationController
+    let story: StoryController
     let repository: any ClipRepository
     let attachments: AttachmentStore
     let quickTextActions: QuickTextActionCoordinator
@@ -169,6 +170,7 @@ final class AppState: ObservableObject {
         storageAnalyticsService: StorageAnalyticsService,
         settings: AppSettings,
         linkResolutionService: LinkResolutionService,
+        directories: AppDirectories? = nil,
         imageTextRecognizer: any ImageTextRecognizing = VisionImageTextRecognizer()
     ) {
         self.repository = repository
@@ -182,7 +184,8 @@ final class AppState: ObservableObject {
         self.backup = backup
         self.storageAnalyticsService = storageAnalyticsService
         self.settings = settings
-        self.intelligence = AIOrganizationController(repository: repository, settings: settings)
+        self.intelligence = AIOrganizationController(repository: repository, settings: settings, directories: directories)
+        self.story = StoryController(repository: repository, settings: settings, directories: directories)
         self.linkResolutionService = linkResolutionService
         let cache = WebCacheMaintenance(settings: settings, measure: {
             await storageAnalyticsService.webKitNetworkCacheBytes()
@@ -203,6 +206,7 @@ final class AppState: ObservableObject {
         self.intelligenceObservation = intelligence.objectWillChange.sink { [weak self] in
             Task { @MainActor in self?.objectWillChange.send() }
         }
+        story.onUpdated = { [weak self] in try? await self?.intelligence.reload() }
         intelligence.readingGroupIDs = { [weak self] in
             guard let self else { return [] }
             var ids = Set<UUID>()

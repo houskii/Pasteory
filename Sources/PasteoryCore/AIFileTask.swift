@@ -14,6 +14,8 @@ public struct AIFileResource: Codable, Equatable, Sendable {
 }
 
 public struct AIFileTaskItem: Codable, Equatable, Sendable {
+    public var lastCopiedAt: String?
+    public var lastPastedAt: String?
     public var itemID: String
     public var clipID: UUID
     public var kind: String
@@ -33,6 +35,7 @@ public struct AIFileTaskItem: Codable, Equatable, Sendable {
         case itemID = "item_id", clipID = "clip_id", contentRevision = "content_revision"
         case imageReferences = "image_references", fileReferences = "file_references", sourceDirectories = "source_directories"
         case sharingExcluded = "sharing_excluded", originalHTMLRepresentationID = "original_html_representation_id"
+        case lastCopiedAt = "last_copied_at", lastPastedAt = "last_pasted_at"
     }
 }
 
@@ -152,8 +155,9 @@ public struct AIFileTaskPlan: Codable, Sendable {
 
 public enum AIFileTaskExporter {
     public static func input(clips: [Clip], taskID: UUID, configuration: AIConfiguration, directories: AppDirectories,
-                             aliases: [UUID: String] = [:]) async throws -> AIFileTaskInput {
+                             aliases: [UUID: String] = [:], includeActivityDates: Bool = false) async throws -> AIFileTaskInput {
         let store = AttachmentStore(directories: directories)
+        let timestampFormatter = ISO8601DateFormatter()
         var records = [AIFileTaskItem]()
         let preference = ["public.utf8-plain-text", "public.utf16-plain-text", "public.url", "public.text", "NSStringPboardType", "public.html", "public.rtf"]
         for (index, clip) in clips.enumerated() {
@@ -195,7 +199,9 @@ public enum AIFileTaskExporter {
             if configuration.includeImageText == true, !clip.recognizedImageText.isEmpty { body += "\n\n[Local image OCR]\n" + clip.recognizedImageText }
             let note = configuration.includeNotes ? (configuration.includeImageText == true ? clip.note : clip.noteWithoutAutomaticOCR) : ""
             let excluded = !clip.mayParticipateInAI || !Clip.isSafeAIText(body) || !Clip.isSafeAIText(note)
-            records.append(AIFileTaskItem(itemID: aliases[clip.id] ?? String(format: "c%04d", index + 1), clipID: clip.id, kind: clip.primaryKind.rawValue,
+            records.append(AIFileTaskItem(lastCopiedAt: includeActivityDates && !excluded ? timestampFormatter.string(from: clip.lastCopiedAt) : nil,
+                lastPastedAt: (includeActivityDates && !excluded ? clip.lastPastedAt : nil).map { timestampFormatter.string(from: $0) },
+                itemID: aliases[clip.id] ?? String(format: "c%04d", index + 1), clipID: clip.id, kind: clip.primaryKind.rawValue,
                 title: excluded ? "" : clip.displayTitle, body: excluded ? "[Excluded by content sharing policy]" : body,
                 note: excluded ? "" : note, source: configuration.includeSource && !excluded ? clip.source.appName : "",
                 revision: clip.aiRevision, contentRevision: clip.aiContentRevision, imageReferences: excluded ? [] : images,

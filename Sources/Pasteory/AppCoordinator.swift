@@ -394,6 +394,9 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
             "aiRecentEligibleCount": Set(state.intelligence.recentRegroupIDs).intersection(state.intelligence.eligibleClipIDs).count,
             "localOCRRunning": state.localOCRRunning,
             "localOCRCompleted": state.localOCRCompleted,
+            "storyEntryVisible": settings.aiConfiguration.storyEnabled == true,
+            "storyReportCount": state.story.reports.count,
+            "settingsDestination": settingsNavigation.destination.rawValue,
             "sessionRefreshIntervals": LinkAuthenticationTarget.all(customRules: settings.authenticatedLinkRules)
                 .map { state.linkSessionRefresh.record(for: $0).interval.rawValue },
             "presentationMetrics": quickPanel.presentationMetrics,
@@ -537,6 +540,8 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
         }
         if ProcessInfo.processInfo.arguments.contains("--debug-readme-seed") {
             await seedReadmeData()
+            if ProcessInfo.processInfo.arguments.contains("--debug-story-seed") { await seedStoryData() }
+            if ProcessInfo.processInfo.arguments.contains("--debug-story-empty") { settings.aiConfiguration.storyEnabled = true }
             if ProcessInfo.processInfo.arguments.contains("--debug-image-ocr-seed"),
                var image = state.quickClips.first(where: { $0.primaryKind == .image }) {
                 image.title = ""
@@ -713,6 +718,46 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
             await state.refreshLibrary()
         }
         state.quickSelectionID = state.quickClips.first?.id
+    }
+
+    private func seedStoryData() async {
+        settings.aiConfiguration.storyEnabled = true
+        let english = settings.appLanguage == .english
+        let texts = english ? [
+            "Verify Pasteory updates: check the new version, install it, and confirm clipboard data is retained.",
+            "Image cards should emphasize OCR text. Plain text copy for images and files should use the editable note.",
+            "Activity should start at 100%. Copy and paste increase the reuse coefficient. Review the decay curve first."
+        ] : [
+            "验证 Pasteory 升级：检查更新能发现新版，下载安装后确认版本和剪贴板数据保留。",
+            "图片卡片要突出 OCR 正文；图片与文件的纯文本复制使用备注中的识别文字。",
+            "活跃度新内容从 100% 起算，复制和成功粘贴提高复用系数。先看衰减曲线。"
+        ]
+        do {
+            let clips = try texts.map { text in
+                guard let clip = ClipClassifier.makeClip(from: PasteboardCapture(
+                    items: [.init(order: 0, representations: [.init(uti: "public.utf8-plain-text", data: Data(text.utf8))])],
+                    source: .init(appName: "Story Demo", bundleIdentifier: "test.story.demo"))) else { throw AIError.invalid("Story demo") }
+                return clip
+            }
+            try await state.repository.saveBatch(clips)
+            let titles = english ? ["Verify the update path", "Make OCR easier to use", "Rethink activity scores"] : ["验证升级流程", "让图片文字更好用", "重新设计活跃度"]
+            let sections = zip(clips, titles).map { clip, title in
+                AIStorySection(title: title, text: clip.previewText, evidence: [.init(clipID: clip.id, quote: clip.previewText)])
+            }
+            let story = AIStoryReport(id: UUID(), title: english ? "A week of making your tools feel right" : "这一周，你在把工具变得更顺手",
+                introduction: english ? "You have been working through the small details that shape everyday use: updates, image text, and how useful material stays close at hand."
+                    : "你最近在认真处理那些影响日常使用的小细节：升级能否顺利完成，图片里的文字能否直接使用，常用资料又该怎样留在手边。",
+                recentWork: sections, observations: [AIStorySection(title: english ? "You keep asking how it works in practice" : "你在持续追问实际使用的效果",
+                    text: english ? "Your notes connect visible behavior with repeatable checks, from installing an update to copying recognized text."
+                        : "从安装后的数据保留，到复制出来的文字是否正确，你关注的不只是页面有没有变化，也在核对实际结果。",
+                    evidence: sections[0].evidence + sections[1].evidence)],
+                encouragement: english ? "These changes may look small on their own. Together they can remove friction from the tools you use every day. It is fine to finish one clear improvement at a time."
+                    : "这些调整单独看都很小，放在一起，却能减少每天使用工具时的摩擦。把一件事真正做顺，已经是值得留下的进展。",
+                periodStart: Date().addingTimeInterval(-7 * 86_400), periodEnd: Date(), sourceCount: clips.count,
+                sourceRevisions: Dictionary(uniqueKeysWithValues: clips.map { ($0.id, $0.aiContentRevision) }))
+            try await state.repository.updateAIState { $0.stories = [story] }
+            await state.story.load()
+        } catch { state.show(error) }
     }
 
     private func seedOrganizationDemo() async {

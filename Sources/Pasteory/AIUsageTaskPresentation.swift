@@ -17,6 +17,7 @@ struct AIUsageTaskPresentation: Identifiable {
         case "manual-regroup-recent": L10n.tr("重新整理最近内容")
         case "definition": L10n.tr("按新定义整理分组")
         case "test": L10n.tr("连接测试")
+        case "story": L10n.tr("Story · 最近 7 天总结")
         default: L10n.tr("内容整理")
         }
     }
