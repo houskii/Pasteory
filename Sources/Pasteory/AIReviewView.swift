@@ -11,29 +11,57 @@ struct AIReviewView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(L10n.tr("检查整理建议")).font(.title2.bold())
-                    Text(L10n.tr("原子操作将统一提交，原文和用户备注保持不变。" )).font(.caption).foregroundStyle(.secondary)
+                    Text(L10n.tr("一次整理生成一份方案，检查各组内容后统一应用。原文和备注保持不变。" )).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer(); Button(L10n.tr("关闭")) { dismiss() }
             }
             if let error = controller.error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
             if let pending = controller.pending {
+                let presentation = AIReviewPresentation(draft: pending, catalog: controller.state.groups)
+                let grouped = pending.fileTaskID != nil
+                let requiresRevision = grouped && presentation.requiresRevision(policy: controller.settings.aiConfiguration.organizationPolicy, existingGroupCount: controller.state.groups.count)
                 HStack {
-                    Text(L10n.tr("分析 \(pending.inputCount) 条，选择 \(selected.count) 项操作")).font(.caption)
-                    Spacer(); Button(selected.isEmpty ? L10n.tr("全选") : L10n.tr("取消全选")) {
-                        selected = selected.isEmpty ? Set(pending.commands.map(\.id)) : []
+                    if grouped {
+                        Text(L10n.tr("1 份方案 · \(presentation.groups.count) 个分组")).font(.callout.weight(.semibold))
+                    } else {
+                        Text(L10n.tr("分析 \(pending.inputCount) 条，选择 \(selected.count) 项操作")).font(.caption)
+                        Spacer(); Button(selected.isEmpty ? L10n.tr("全选") : L10n.tr("取消全选")) {
+                            selected = selected.isEmpty ? Set(pending.commands.map(\.id)) : []
+                        }
+                    }
+                }
+                if grouped {
+                    Text(L10n.tr("分析 \(pending.inputCount) 条，\(presentation.assignedCount) 条归类，\(presentation.unassignedCount) 条未分组")).font(.caption).foregroundStyle(.secondary)
+                    Text(L10n.tr("主题设置：目标 \(controller.settings.aiConfiguration.organizationPolicy.targetGroupCount) 个，最多 \(controller.settings.aiConfiguration.organizationPolicy.maximumGroupCount) 个")).font(.caption2).foregroundStyle(.secondary)
+                    if requiresRevision {
+                        Text(L10n.tr("当前方案不符合保存的主题数量设置，请在原会话中继续修正后应用。"))
+                            .font(.caption).foregroundStyle(.orange)
+                    }
+                    if !presentation.replacedGroupIDs.isEmpty {
+                        Text(L10n.tr("应用后替换 \(presentation.replacedGroupIDs.count) 个旧主题，原始内容保留。"))
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {
-                        ForEach(pending.commands) { command in commandRow(command, in: pending) }
+                        if grouped {
+                            ForEach(presentation.groups) { group in groupRow(group) }
+                        } else {
+                            ForEach(pending.commands) { command in commandRow(command, in: pending) }
+                        }
                     }
                 }
                 HStack {
                     Text(L10n.tr("版本变化或引用失效时，整批停止并保留现有数据。")).font(.caption2).foregroundStyle(.secondary)
                     Spacer()
                     Button(L10n.tr("忽略本次")) { Task { await controller.reject(pending); dismiss() } }
-                    Button(L10n.tr("应用所选变更")) { Task { await controller.apply(pending, selectedIDs: selected); if controller.pending == nil { dismiss() } } }
-                        .buttonStyle(.borderedProminent).disabled(selected.isEmpty || controller.running)
+                    if grouped {
+                        Button(L10n.tr("继续修正这份方案")) { Task { if await controller.reviseFilePlan(pending) { dismiss() } } }.disabled(controller.running)
+                    }
+                    Button(grouped ? L10n.tr("应用整份方案") : L10n.tr("应用所选变更")) {
+                        Task { await controller.apply(pending, selectedIDs: grouped ? Set(pending.commands.map(\.id)) : selected); if controller.pending == nil { dismiss() } }
+                    }
+                    .buttonStyle(.borderedProminent).disabled((!grouped && selected.isEmpty) || requiresRevision || controller.running)
                 }
             } else {
                 ContentUnavailableView(L10n.tr("没有待检查的建议"), systemImage: "checkmark.circle")
@@ -41,6 +69,25 @@ struct AIReviewView: View {
         }
         .padding(22).frame(width: 800, height: 650)
         .task(id: controller.pending?.id) { selected = Set(controller.pending?.commands.map(\.id) ?? []) }
+    }
+    private func groupRow(_ group: AIReviewGroupPlan) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(group.name).font(.callout.weight(.semibold))
+                Spacer()
+                Text(group.isNew ? L10n.tr("新建分组") : L10n.tr("沿用已有分组")).font(.caption2).foregroundStyle(.secondary)
+            }
+            if !group.definition.isEmpty { Text(group.definition).font(.caption).foregroundStyle(.secondary) }
+            if !group.overview.isEmpty, group.overview != group.definition { Text(group.overview).font(.caption).textSelection(.enabled) }
+            DisclosureGroup(L10n.tr("\(group.memberIDs.count) 条内容")) {
+                ForEach(group.memberIDs, id: \.self) { id in
+                    Text(controller.clipIndex[id].map { $0.displayTitle.isEmpty ? $0.previewText : $0.displayTitle } ?? L10n.tr("内容已不可用"))
+                        .font(.caption).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }.font(.caption)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14).background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
     }
     private func commandRow(_ command: AICommand, in pending: AIChangeSet) -> some View {
         HStack(alignment: .top, spacing: 12) {

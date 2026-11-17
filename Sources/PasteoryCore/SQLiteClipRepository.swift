@@ -1958,7 +1958,7 @@ extension SQLiteClipRepository {
                 switch cmd.kind {
                 case .createGroup:
                     guard state.groups[cmd.targetID] == nil, !cmd.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                          (proposed.fileTaskID != nil || state.groups.count < 8),
+                          state.groups.count < 8,
                           cmd.name.count <= 40, !cmd.definition.isEmpty,
                           !(try collections()).contains(where: { $0.id == cmd.targetID }) else { throw AIError.invalid("Invalid new group") }
                     let collection = ClipCollection(id: cmd.targetID, name: cmd.name, kind: .normal, sortOrder: try collections().count)

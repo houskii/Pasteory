@@ -884,6 +884,13 @@ final class AIOrganizationController: ObservableObject {
 
     func apply(_ original: AIChangeSet, selectedIDs: Set<UUID>) async {
         guard !running else { return }
+        if original.fileTaskID != nil {
+            let presentation = AIReviewPresentation(draft: original, catalog: state.groups)
+            if presentation.requiresRevision(policy: settings.aiConfiguration.organizationPolicy, existingGroupCount: state.groups.count) {
+                error = L10n.tr("方案未满足保存的主题数量设置，请在原会话中继续修正。")
+                return
+            }
+        }
         if original.isThemeReview == true, selectedIDs != Set(original.commands.map(\.id)) { error = L10n.tr("主题复核需要整体应用；可以保留建议或放弃本次复核。"); return }
         var proposed = original
         proposed.commands = original.commands.filter { selectedIDs.contains($0.id) }
@@ -895,6 +902,45 @@ final class AIOrganizationController: ObservableObject {
             try await reload(); onApplied?(false); status = L10n.tr("整理已应用，可以撤销")
         }
         catch { self.error = error.localizedDescription }
+    }
+    func reviseFilePlan(_ original: AIChangeSet) async -> Bool {
+        guard !running, !storageBusy, pending?.id == original.id,
+              let taskID = original.fileTaskID, let directories = taskDirectories else { return false }
+        do {
+            await queueWrite?.value; try await reloadForAnalysis()
+            guard pending?.id == original.id else { return false }
+            let directory = directories.aiTasks.appendingPathComponent(taskID.uuidString.lowercased() + ".agent")
+            let input = try await Task.detached(priority: .utility) {
+                try JSONDecoder().decode(AIFileTaskInput.self, from: Data(contentsOf: directory.appendingPathComponent("items.json")))
+            }.value
+            let archive = directory.appendingPathComponent("revisions/" + original.id.uuidString.lowercased())
+            try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
+            for name in ["plan.json", "validated-changes.json"] {
+                let source = directory.appendingPathComponent("output/" + name), target = archive.appendingPathComponent(name)
+                if FileManager.default.fileExists(atPath: source.path), !FileManager.default.fileExists(atPath: target.path) { try FileManager.default.copyItem(at: source, to: target) }
+            }
+            var job = AIJobCheckpoint(clipIDs: input.items.map(\.clipID), batchSize: settings.aiConfiguration.batchSize,
+                                      configurationFingerprint: AIHash.fingerprint(settings.aiConfiguration))
+            job.id = taskID; job.fileTaskVersion = 2; job.draft = original
+            job.organization = AIJobOrganization(trigger: "manual-revise", revisions: Dictionary(uniqueKeysWithValues: input.items.map { ($0.clipID, $0.contentRevision) }))
+            job.organization?.semanticFingerprint = fileTaskFingerprint(settings.aiConfiguration)
+            job.organization?.groupSnapshots = state.groups
+            if let selected = original.userSelectedGroupIDs, !selected.isEmpty {
+                let groups = selected.compactMap { state.groups[$0] }
+                guard groups.count == selected.count else { throw AIError.conflict("The selected groups changed; start a new organization task") }
+                job.organization?.groupSelection = AIGroupSelection(groups: groups)
+            }
+            let checkpoint = job, originalID = original.id
+            try await repository.updateAIState { s in
+                guard s.checkpoint == nil, let index = s.changes.firstIndex(where: { $0.id == originalID && !$0.isApplied && !$0.isRejected }) else {
+                    throw AIError.conflict("The organization task changed")
+                }
+                s.changes[index].isRejected = true; s.checkpoint = checkpoint
+            }
+            try AIFileTaskWorkspace.markStatus("revision_requested", taskID: taskID, directories: directories)
+            try await reload(); showingReview = false; analyze(resume: true)
+            return running
+        } catch { self.error = error.localizedDescription; return false }
     }
     func reject(_ original: AIChangeSet) async {
         do {

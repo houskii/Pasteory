@@ -161,7 +161,8 @@ struct AISettingsView: View {
                     Text(L10n.tr("先检查，再应用")).tag(AIConfiguration.ApplyMode.preview)
                     Text(L10n.tr("自动补充已有 AI 分组")).tag(AIConfiguration.ApplyMode.appendExisting)
                 }
-                Text(L10n.tr("主题数量由内容和整理偏好决定。旧草稿仅作参考，新方案会检查成员和引用，主题调整统一预览并可撤销。"))
+                Stepper(value: $draft.organizationPolicy.targetGroupCount, in: 6...8) { Text(L10n.tr("AI 主题目标：\(draft.organizationPolicy.targetGroupCount) 个，上限 8 个")) }
+                Text(L10n.tr("内容充分时整理为 6～8 个主题，优先接近设置的目标数。Agent 自行决定读取方式，分组数量仍遵守此设置。"))
                     .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Spacer()

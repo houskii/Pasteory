@@ -70,7 +70,7 @@ public struct AIFileTaskPlan: Codable, Sendable {
     enum CodingKeys: String, CodingKey { case taskID = "task_id", preserveExistingMemberships = "preserve_existing_memberships", groups, assignments, notes }
 
     public func changeSet(input: AIFileTaskInput, groups catalog: [UUID: AIGroupProfile],
-                          reservedNames: Set<String> = []) throws -> AIChangeSet {
+                          reservedNames: Set<String> = [], policy: AIOrganizationPolicy = AIOrganizationPolicy()) throws -> AIChangeSet {
         guard taskID == input.taskID, preserveExistingMemberships else { throw AIError.invalid("Wrong task ID or membership policy") }
         let byID = Dictionary(uniqueKeysWithValues: input.items.map { ($0.itemID, $0) })
         let ids = assignments.map(\.itemID), keys = groups.map(\.key)
@@ -78,6 +78,15 @@ public struct AIFileTaskPlan: Codable, Sendable {
             throw AIError.invalid("Every input item_id must appear exactly once; group keys must be unique")
         }
         guard groups.count <= input.items.count else { throw AIError.invalid("Empty or excessive groups") }
+        let assignedCount = assignments.filter { !$0.groupKeys.isEmpty }.count
+        let minimum = assignedCount >= 6 * policy.minimumThemeMembers ? 6 : 0
+        let newCount = groups.filter { $0.existingGroupID == nil }.count
+        guard groups.count <= policy.maximumGroupCount, catalog.count + newCount >= minimum else {
+            throw AIError.invalid("The theme plan must respect the user's target of \(policy.targetGroupCount) groups: \(minimum)–\(policy.maximumGroupCount) groups for this input")
+        }
+        guard newCount == 0 || catalog.count + newCount <= policy.maximumGroupCount else {
+            throw AIError.invalid("Creating these groups would exceed the user's maximum of \(policy.maximumGroupCount). Reuse existing groups or reorganize the selected themes.")
+        }
         var members = [String: [UUID]](), mapped = [String: UUID](), names = Set<String>(), reused = Set<UUID>()
         var result = AIChangeSet(); result.fileTaskID = taskID; result.isThemeReview = true; result.inputCount = input.items.count
         let normalize: (String) -> String = { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
@@ -112,6 +121,9 @@ public struct AIFileTaskPlan: Codable, Sendable {
         }
         for group in groups {
             guard let id = mapped[group.key], let ids = members[group.key], !ids.isEmpty else { throw AIError.invalid("A group has no assigned members") }
+            if group.existingGroupID == nil, ids.count < policy.minimumThemeMembers {
+                throw AIError.invalid("A new theme needs at least \(policy.minimumThemeMembers) distinct supporting items; leave insufficient evidence ungrouped")
+            }
             for offset in stride(from: 0, to: ids.count, by: 100) {
                 result.commands.append(.init(kind: .addItems, targetID: id, clipIDs: Array(ids[offset..<min(offset + 100, ids.count)])))
             }

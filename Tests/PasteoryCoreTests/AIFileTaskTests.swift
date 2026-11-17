@@ -14,7 +14,7 @@ private actor FileTaskTransport: AIChatTransport {
     let groupCount: Int
     var blockFinal: Bool
     let afterPlan: (@Sendable () async throws -> Void)?
-    init(groupCount: Int = 10, blockFinal: Bool = false, afterPlan: (@Sendable () async throws -> Void)? = nil) {
+    init(groupCount: Int = 7, blockFinal: Bool = false, afterPlan: (@Sendable () async throws -> Void)? = nil) {
         self.groupCount = groupCount; self.blockFinal = blockFinal; self.afterPlan = afterPlan
     }
     func unblock() { blockFinal = false }
@@ -56,7 +56,7 @@ private actor FileTaskTransport: AIChatTransport {
     }
 }
 
-@Test @MainActor func fileAgentProcessesTheWholeLibraryAndAppliesMoreThanEightGroupsWithoutChangingContent() async throws {
+@Test @MainActor func fileAgentProcessesTheWholeLibraryAndHonorsTheConfiguredThemeCountWithoutChangingContent() async throws {
     let dirs = try AppDirectories(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
     let suite = "FileTaskWhole." + UUID().uuidString, defaults = try #require(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: dirs.root) }
@@ -70,7 +70,7 @@ private actor FileTaskTransport: AIChatTransport {
     #expect(controller.error == nil)
     let pending = try #require(controller.pending), directory = try #require(controller.latestTaskDirectory)
     #expect(pending.inputCount == 1005 && pending.fileTaskID != nil && pending.isThemeReview == true)
-    #expect(pending.commands.filter { $0.kind == .createGroup }.count == 10)
+    #expect(pending.commands.filter { $0.kind == .createGroup }.count == 7)
     let input = try JSONDecoder().decode(AIFileTaskInput.self, from: Data(contentsOf: directory.appendingPathComponent("items.json")))
     #expect(input.items.count == 1005)
     #expect(input.items.first { $0.clipID == clips[0].id }?.body == "Complete source 0: " + String(repeating: "full body text ", count: 10_000))
@@ -81,7 +81,7 @@ private actor FileTaskTransport: AIChatTransport {
     #expect(!requests[0].encoded.contains("current_batch") && !requests[0].encoded.contains("never-in-task-files"))
     #expect(controller.state.usage.count == 2 && controller.state.usage.allSatisfy { $0.cachedInputTokens == 500 && $0.reasoningTokens == 50 })
     await controller.apply(pending, selectedIDs: Set(pending.commands.map(\.id)))
-    #expect(controller.error == nil && controller.state.groups.count == 10)
+    #expect(controller.error == nil && controller.state.groups.count == 7)
     #expect(try await repo.clip(id: clips[0].id)?.note == clips[0].note)
     #expect(try await repo.clip(id: clips[0].id)?.lastCopiedAt == persistedDate)
     let snapshot = try await StorageAnalyticsService(repository: repo, directories: dirs).snapshot(period: .all)
@@ -188,4 +188,82 @@ private actor FileTaskTransport: AIChatTransport {
         "groups": .array([.object(["key": .string("draft"), "name": .string("Draft"), "definition": .string("Draft theme"), "existing_group_id": .string(UUID().uuidString)])]),
         "assignments": .array([.object(["item_id": .string("c0001"), "group_keys": .array([.string("draft")]), "reason": .string("Test")])])])
     #expect(throws: AIError.self) { try AIFileTaskPlan.decode(Data(plan.encoded.utf8)).changeSet(input: input, groups: [:]) }
+}
+
+@Test func fileTaskRestoresSavedThemeSettingsInThePromptSchemaAndFinalValidation() async throws {
+    let dirs = try AppDirectories(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+    defer { try? FileManager.default.removeItem(at: dirs.root) }
+    let clips = try (0..<42).map { try fileTaskClip("Theme constraint source \($0)") }
+    var config = AIConfiguration(); config.model = "synthetic"; config.organizationPolicy.targetGroupCount = 7
+    let input = try await AIFileTaskExporter.input(clips: clips, taskID: UUID(), configuration: config, directories: dirs)
+    let workspace = try AIFileTaskWorkspace(input: input, clips: clips, groups: [:], reservedNames: [], configuration: config, directories: dirs)
+    let prompt = try await workspace.prepare(previousDraft: nil), directory = await workspace.directory
+    #expect(prompt.contains("目标 7 个") && prompt.contains("6～8") && !prompt.contains("不预设主题数量"))
+    let manifest = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: directory.appendingPathComponent("task.json")))
+    #expect(manifest["theme_count"]["target"].number == 7 && manifest["theme_count"]["maximum"].number == 8)
+    let schema = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: directory.appendingPathComponent("plan.schema.json")))
+    #expect(schema["properties"]["groups"]["maxItems"].number == 8)
+    func plan(_ count: Int) throws -> AIFileTaskPlan {
+        let groups: [JSONValue] = (0..<count).map { .object(["key": .string("g\($0)"), "name": .string("Theme \($0)"), "definition": .string("Synthetic theme")]) }
+        let assignments: [JSONValue] = input.items.enumerated().map { .object(["item_id": .string($0.element.itemID), "group_keys": .array([.string("g\($0.offset % count)")]), "reason": .string("Synthetic membership")]) }
+        return try AIFileTaskPlan.decode(Data(JSONValue.object(["task_id": .string(input.taskID.uuidString), "preserve_existing_memberships": .bool(true), "groups": .array(groups), "assignments": .array(assignments)]).encoded.utf8))
+    }
+    #expect(throws: AIError.self) { try plan(14).changeSet(input: input, groups: [:], policy: config.organizationPolicy) }
+    #expect(throws: AIError.self) { try plan(5).changeSet(input: input, groups: [:], policy: config.organizationPolicy) }
+    for count in 6...8 {
+        #expect(try plan(count).changeSet(input: input, groups: [:], policy: config.organizationPolicy).commands.filter { $0.kind == .createGroup }.count == count)
+    }
+    let existing = (0..<7).map { AIGroupProfile(name: "Existing \($0)", definition: "Existing topic") }
+    let catalog = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
+    let reuse: JSONValue = .object(["task_id": .string(input.taskID.uuidString), "preserve_existing_memberships": .bool(true),
+        "groups": .array([.object(["key": .string("reuse"), "name": .string(existing[0].name), "definition": .string(existing[0].definition), "existing_group_id": .string(existing[0].id.uuidString)])]),
+        "assignments": .array(input.items.map { .object(["item_id": .string($0.itemID), "group_keys": .array([.string("reuse")])]) })])
+    let reused = try AIFileTaskPlan.decode(Data(reuse.encoded.utf8)).changeSet(input: input, groups: catalog)
+    #expect(!reused.commands.contains { $0.kind == .createGroup })
+}
+
+@Test @MainActor func filePlanRevisionContinuesTheOriginalConversationAndArchivesThePreviousPlan() async throws {
+    let dirs = try AppDirectories(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+    let suite = "FilePlanRevision." + UUID().uuidString, defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: dirs.root) }
+    let repo = try SQLiteClipRepository(databaseURL: dirs.databaseFile), settings = AppSettings(defaults: defaults)
+    settings.aiConfiguration.enabled = true; settings.aiConfiguration.model = "synthetic"
+    try await repo.saveBatch((0..<6).map { try fileTaskClip("Revision source \($0)") })
+    let transport = FileTaskTransport(groupCount: 2)
+    let controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "" }, directories: dirs)
+    controller.analyze(); await controller.waitUntilIdle()
+    let original = try #require(controller.pending), originalDirectory = try #require(controller.latestTaskDirectory)
+    #expect(await controller.reviseFilePlan(original)); await controller.waitUntilIdle()
+    #expect(controller.error == nil)
+    let revised = try #require(controller.pending)
+    #expect(revised.id != original.id && revised.fileTaskID == original.fileTaskID)
+    #expect(revised.inputCount == original.inputCount && controller.latestTaskDirectory == originalDirectory)
+    #expect(controller.state.changes.first { $0.id == original.id }?.isRejected == true)
+    #expect(FileManager.default.fileExists(atPath: originalDirectory.appendingPathComponent("revisions/" + original.id.uuidString.lowercased() + "/plan.json").path))
+    #expect(await transport.requests.count == 3)
+    #expect(controller.state.groups.isEmpty)
+}
+
+@Test @MainActor func reviewShowsFourteenGroupsForFortyTwoOperationsAndBlocksAnOversizedOldPlan() async throws {
+    var draft = AIChangeSet(); draft.fileTaskID = UUID(); draft.inputCount = 1000; draft.isThemeReview = true
+    let counts = [45, 75, 44, 36, 26, 22, 31, 25, 37, 22, 9, 17, 3, 7]
+    for (index, count) in counts.enumerated() {
+        let id = UUID(), members = (0..<count).map { _ in UUID() }
+        draft.commands += [.init(kind: .createGroup, targetID: id, name: "Theme \(index)", definition: "Topic definition"),
+                           .init(kind: .addItems, targetID: id, clipIDs: members),
+                           .init(kind: .updateOverview, targetID: id, clipIDs: [members[0]], overview: "Topic overview")]
+    }
+    let presentation = AIReviewPresentation(draft: draft, catalog: [:])
+    #expect(draft.commands.count == 42 && presentation.groups.count == 14)
+    #expect(presentation.assignedCount == 399 && presentation.unassignedCount == 601)
+    #expect(presentation.groups.map(\.memberIDs.count) == counts)
+    let dirs = try AppDirectories(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+    let suite = "OldFilePlanLimit." + UUID().uuidString, defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: dirs.root) }
+    let repo = try SQLiteClipRepository(databaseURL: dirs.databaseFile), settings = AppSettings(defaults: defaults)
+    let saved = draft; try await repo.updateAIState { $0.changes.append(saved) }
+    let controller = AIOrganizationController(repository: repo, settings: settings, credentialProvider: { "" }, directories: dirs)
+    try await controller.reload(); await controller.apply(draft, selectedIDs: Set(draft.commands.map(\.id)))
+    #expect(controller.error != nil && controller.pending?.id == draft.id)
+    #expect(try await repo.aiState().groups.isEmpty)
 }
