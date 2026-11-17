@@ -6,27 +6,25 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <link>https://github.com/houskii/Pasteory/releases</link>
     <language>en</language>
     <item>
-      <title>Pasteory 0.1.51</title>
-      <link>https://github.com/houskii/Pasteory/releases/tag/v0.1.51</link>
-      <pubDate>Tue, 17 Nov 2026 12:23:20 +0000</pubDate>
-      <description sparkle:descriptionFormat="plain-text"># Pasteory 0.1.51 Beta
+      <title>Pasteory 0.1.52</title>
+      <link>https://github.com/houskii/Pasteory/releases/tag/v0.1.52</link>
+      <pubDate>Tue, 17 Nov 2026 12:56:17 +0000</pubDate>
+      <description sparkle:descriptionFormat="plain-text"># Pasteory 0.1.52 Beta
 
-- 图片卡片以 OCR 识别文字为正文：快捷面板显示两行，资料库显示三行；图片格式、尺寸和大小合为一行，缩略图放大并完整显示。
-- 原备注与 OCR 内容分别展示。手动修正或删除 `[OCR:…]` 后，卡片按当前备注展示；OCR 完成时保持卡片高度，减少列表跳动。
-- 快捷面板不再显示 AI 分组的活跃度百分比，资料库继续保留活跃度分值和排名。
-- 快捷面板只处理属于它自身或子窗口的输入。全局快捷键只切换快捷面板；Esc 先关闭面板，面板隐藏后可单独关闭设置页。
-- 打开设置或更新窗口时收起快捷面板，避免悬浮面板遮挡。快捷面板不再主动激活整个应用，关闭后恢复原窗口的焦点。
-- 登录会话支持逐项设置自动刷新周期：3、7、14 或 30 天，默认 14 天。展示上次与下次刷新时间，并可立即刷新；后台复用已有 WebKit 会话，让网站执行续期。检测到登录页后暂停刷新，网络失败一小时后重试。
-- 修复 CI 截图与元数据保存之间的时序问题；对 macOS 临时磁盘资源错误增加有限重试，其他 DMG 校验错误仍立即失败。
+- 图片格式、尺寸和文件大小单独一行展示，OCR 图标移到识别正文左侧。
+- 统一各类卡片底部时间、复制次数和粘贴次数的左边线与底边距。
+- 图片、文件和混合内容的纯文本复制／粘贴优先使用当前备注，展开 `[OCR:…]`，保留原备注、识别文字、换行和普通方括号。普通文字仍使用完整原文。
+- 兼容旧版已识别、尚未写入备注的图片文字；用户修改或删除 OCR 后按当前内容处理。
+- 纯文本准备失败时保留原剪贴板内容。普通图片和文件复制继续写入原始格式。
 
 适用于 Apple Silicon，macOS 14 及以上。继续使用现有 Sparkle 更新密钥及应用代码签名身份。
 
 安装包使用本机生成的 Pasteory Local Build 证书签名，该证书不是 Apple 颁发的开发者证书。安装包未经过 Apple 公证。</description>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <enclosure url="https://github.com/houskii/Pasteory/releases/download/v0.1.51/Pasteory-0.1.51-arm64.dmg" length="11252943" type="application/octet-stream" sparkle:version="56" sparkle:shortVersionString="0.1.51" sparkle:edSignature="QTqTroBF1GHZVyt1NrIphqCBVun8dD4hFmFL9SEtpBAGfDurldRNh/ZadsxfYVLPteMNf1wm/DJIy8utVNZNCw==" sparkle:os="macos"></enclosure>
+      <enclosure url="https://github.com/houskii/Pasteory/releases/download/v0.1.52/Pasteory-0.1.52-arm64.dmg" length="11273231" type="application/octet-stream" sparkle:version="57" sparkle:shortVersionString="0.1.52" sparkle:edSignature="w79GqUhDM9J9QWi3qjqPR7/ZNd6RiFY+hPV8cwdU5sE8c/cggRE6HvkqO9kN3UhSGO6S/lgkV2P+/9vqhU5MCw==" sparkle:os="macos"></enclosure>
     </item>
   </channel>
 </rss><!-- sparkle-signatures:
-edSignature: jv77R2JNlyTnNpgnSg+WFvaulEh3FD5JaS/JdZ3YwM34vof0HNUMhlQIj9OGhBXBKM2aeJKEQAMUzlL1VOyjAA==
-length: 2740
+edSignature: /xzdXS9GTk6Gv3JIQEudOw6zBeXBB0UTTuBepiNOsO28AzGAEi6jI3BmZDXJNPdyl1J0npJBRQLZniJ9RXUMDw==
+length: 2140
 -->
