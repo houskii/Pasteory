@@ -42,6 +42,9 @@ public struct AIConfiguration: Codable, Equatable, Sendable {
     public var includeNotes = true
     public var includeSource = true
     public var includeImageText: Bool?
+    public var allowOriginalResourceRead: Bool?
+    public var agentRoundLimit: Int?
+    public var fileAgentRoundLimit: Int { agentRoundLimit ?? 80 }
     public var analyzeNew = false
     public var timerEnabled = false
     public var intervalMinutes = 30
@@ -77,6 +80,7 @@ public struct AIConfiguration: Codable, Equatable, Sendable {
             throw AIError.invalid("Check the model, scope, prompt and budgets")
         }
         if reasoning != "auto" && !supportedReasoningLevels.contains(reasoning) { throw AIError.invalid("Unsupported reasoning level") }
+        guard (1...256).contains(fileAgentRoundLimit) else { throw AIError.invalid("Invalid agent round limit") }
         for price in [inputPricePerMillion, cachedPricePerMillion, outputPricePerMillion].compactMap({ $0 }) {
             guard price.isFinite && price >= 0 else { throw AIError.invalid("Invalid token price") }
         }
@@ -198,6 +202,7 @@ public struct AIChangeSet: Codable, Equatable, Identifiable, Sendable {
     public var isThemeReview: Bool?
     public var planningInputIDs: Set<UUID>?
     public var userSelectedGroupIDs: Set<UUID>?
+    public var fileTaskID: UUID?
     public init() {}
     public var appendOnly: Bool { commands.allSatisfy { $0.kind == .addItems || $0.kind == .updateOverview } }
     public var fingerprint: String { AIHash.fingerprint(commands) }
@@ -241,6 +246,7 @@ public struct AIJobCheckpoint: Codable, Equatable, Sendable {
     public var requeuedIDs: Set<UUID>?
     public var skippedIDs: Set<UUID>?
     public var retryCounts: [UUID: Int]?
+    public var fileTaskVersion: Int?
     public init(clipIDs: [UUID], batchSize: Int, configurationFingerprint: String) {
         self.clipIDs = clipIDs; self.batchSize = batchSize; self.configurationFingerprint = configurationFingerprint
     }

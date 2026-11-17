@@ -30,7 +30,7 @@ private func addManagementGroup(_ clips: [Clip], name: String, repo: SQLiteClipR
     let clips = try (0..<3).map { try managementClip("Shared member \($0)") }; try await repo.saveBatch(clips)
     _ = try await addManagementGroup(Array(clips.prefix(2)), name: "One", repo: repo)
     _ = try await addManagementGroup([clips[0], clips[2]], name: "Two", repo: repo)
-    let transport = RegroupTransport(), controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { throw AIError.invalid("Cleanup must not load credentials") })
+    let transport = RegroupTransport(), controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { throw AIError.invalid("Cleanup must not load credentials") }, useFileAgent: false)
     try await controller.reload()
     let original = controller.state.groups, selection = AIGroupSelection(groups: Array(original.values))
     #expect(selection.memberIDs.count == 3)
@@ -166,7 +166,7 @@ private actor RegroupTransport: AIChatTransport {
     let selected = try await addManagementGroup(Array(clips.prefix(6)), name: "Old selected", repo: repo)
     let untouched = try await addManagementGroup([clips[6]], name: "Kept", repo: repo)
     let transport = RegroupTransport(delayAfterFirstBatch: true)
-    let controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic" })
+    let controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic" }, useFileAgent: false)
     try await controller.reload()
     let original = controller.state, scope = AIGroupSelection(groups: [try #require(original.groups[selected])])
     #expect(controller.regroupGroups(scope))
@@ -209,7 +209,7 @@ private actor RegroupTransport: AIChatTransport {
         profile.memberIDs = [clip.id]; profile.aiMemberIDs = [clip.id]
         let saved = profile; try await repo.updateAIState { $0.groups[saved.id] = saved }
     }
-    let transport = RegroupTransport(), controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic" })
+    let transport = RegroupTransport(), controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic" }, useFileAgent: false)
     try await controller.reload()
     let definitions = controller.state.groups.filter { $0.key != selected }.mapValues(\.definition)
     #expect(controller.regroupGroups(AIGroupSelection(groups: [try #require(controller.state.groups[selected])])))
@@ -235,7 +235,7 @@ private actor RegroupTransport: AIChatTransport {
     let clips = try (0..<6).map { try managementClip("Plan failure synthetic \($0)") }; try await repo.saveBatch(clips)
     let groupID = try await addManagementGroup(clips, name: "Original", repo: repo)
     let transport = RegroupTransport(invalidPlanningAttempts: 3)
-    let controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic" })
+    let controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic" }, useFileAgent: false)
     try await controller.reload()
     let original = controller.state.groups, scope = AIGroupSelection(groups: Array(original.values))
     #expect(controller.regroupGroups(scope)); await controller.waitUntilIdle()
@@ -249,7 +249,7 @@ private actor RegroupTransport: AIChatTransport {
     controller.analyze(all: true)
     #expect(!controller.running && controller.state.checkpoint == checkpoint)
     #expect(await transport.planningCalls == 3)
-    let reopened = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic" })
+    let reopened = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic" }, useFileAgent: false)
     try await reopened.reload()
     #expect(!reopened.running && reopened.error == checkpoint.failureMessage && reopened.needsAttention)
     reopened.analyze(resume: true); await reopened.waitUntilIdle()
@@ -270,7 +270,7 @@ private actor RegroupTransport: AIChatTransport {
     let clips = try (0..<6).map { try managementClip("Whole library synthetic \($0)") }; try await repo.saveBatch(clips)
     let oldID = try await addManagementGroup(Array(clips.prefix(3)), name: "Old topic", repo: repo)
     let transport = RegroupTransport()
-    let controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic" })
+    let controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic" }, useFileAgent: false)
     try await controller.reload()
     #expect(controller.libraryContentCount == 6 && controller.groupedContentCount == 3)
     #expect(controller.clipIndex.values.allSatisfy { $0.items.isEmpty })
@@ -301,7 +301,7 @@ private actor RegroupTransport: AIChatTransport {
     let clips = try (0..<9).map { try managementClip("Recent synthetic \($0)", timestamp: 1_700_000_000 + Double($0)) }
     try await repo.saveBatch(clips)
     let oldID = try await addManagementGroup(Array(clips.prefix(4)), name: "Old topic", repo: repo)
-    let transport = RegroupTransport(), controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic" })
+    let transport = RegroupTransport(), controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic" }, useFileAgent: false)
     try await controller.reload(); let original = controller.state.groups
     #expect(controller.groupedContentCount == 4 && controller.recentRegroupIDs.count == 6)
     #expect(controller.regroupLibrary(recentOnly: true)); await controller.waitUntilIdle()
@@ -331,7 +331,7 @@ private actor RegroupTransport: AIChatTransport {
     try await repo.saveBatch(clips)
     _ = try await addManagementGroup(Array(clips.prefix(321)), name: "Existing 321", repo: repo)
     let transport = RegroupTransport(delayAfterFirstBatch: true)
-    let controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic" })
+    let controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic" }, useFileAgent: false)
     try await controller.reload(); let groups = controller.state.groups
     #expect(controller.groupedContentCount == 321)
     #expect(controller.regroupLibrary(recentOnly: true))

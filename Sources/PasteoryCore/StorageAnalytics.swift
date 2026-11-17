@@ -50,6 +50,7 @@ public enum PasteoryStorageCategory: String, CaseIterable, Identifiable, Sendabl
     case archives
     case backups
     case logs
+    case aiTaskHistory
     case webKitNetworkCache
     case other
 
@@ -62,6 +63,7 @@ public enum PasteoryStorageCategory: String, CaseIterable, Identifiable, Sendabl
         case .archives: L10n.tr("归档")
         case .backups: L10n.tr("备份")
         case .logs: L10n.tr("日志")
+        case .aiTaskHistory: L10n.tr("AI 任务历史")
         case .webKitNetworkCache: L10n.tr("WebKit 网页缓存")
         case .other: L10n.tr("其他")
         }
@@ -182,9 +184,10 @@ public actor StorageAnalyticsService {
         let archives = allocatedByteCount(at: directories.archives)
         let backups = allocatedByteCount(at: directories.backups)
         let logs = allocatedByteCount(at: directories.logs)
+        let aiTasks = allocatedByteCount(at: directories.aiTasks)
         let webKitNetworkCache = webKitNetworkCacheBytes()
         let total = allocatedByteCount(at: directories.root)
-        let known = database + attachments + archives + backups + logs
+        let known = database + attachments + archives + backups + logs + aiTasks
         let other = max(0, total - known)
         return [
             PasteoryStorageUsage(category: .database, byteCount: database),
@@ -192,6 +195,7 @@ public actor StorageAnalyticsService {
             PasteoryStorageUsage(category: .archives, byteCount: archives),
             PasteoryStorageUsage(category: .backups, byteCount: backups),
             PasteoryStorageUsage(category: .logs, byteCount: logs),
+            PasteoryStorageUsage(category: .aiTaskHistory, byteCount: aiTasks),
             PasteoryStorageUsage(category: .webKitNetworkCache, byteCount: webKitNetworkCache),
             PasteoryStorageUsage(category: .other, byteCount: other)
         ]

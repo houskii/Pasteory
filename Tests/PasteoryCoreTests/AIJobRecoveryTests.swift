@@ -76,7 +76,7 @@ private actor RecoveryTransport: AIChatTransport {
     #expect(try await repo.aiState().checkpoint?.id == job.id)
     var excluded = clips[8]; excluded.aiAnalysisExcluded = true; try await repo.updateExisting(excluded)
     let unrelated = try recoveryClip(9999); try await repo.save(unrelated)
-    let transport = RecoveryTransport(), controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic" })
+    let transport = RecoveryTransport(), controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic" }, useFileAgent: false)
     controller.analyze(resume: true); await controller.waitUntilIdle()
     #expect(controller.error == nil && controller.state.checkpoint == nil)
     let sent = await transport.batches.flatMap { $0 }, pending = try #require(controller.pending)
@@ -109,7 +109,7 @@ private actor RecoveryTransport: AIChatTransport {
     let transport = RecoveryTransport(afterFirstBatch: {
         var current = target; current.note = "Changed while the first batch was in flight"; try await repo.updateExisting(current)
     })
-    let controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic" })
+    let controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic" }, useFileAgent: false)
     controller.analyze(resume: true); await controller.waitUntilIdle()
     #expect(controller.error == nil && controller.state.checkpoint == nil)
     let sent = await transport.batches.flatMap { $0 }
@@ -164,7 +164,7 @@ private actor RecoveryTransport: AIChatTransport {
     let saved = job
     try await repo.updateAIState { $0.groups[group.id] = group; $0.checkpoint = saved }
     var changed = clips[0]; changed.note = "New note"; try await repo.updateExisting(changed)
-    let transport = RecoveryTransport(), controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic" })
+    let transport = RecoveryTransport(), controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic" }, useFileAgent: false)
     try await controller.reload(); #expect(controller.error != nil)
     try await controller.recoverSavedContentChanges()
     let restored = try #require(controller.state.checkpoint)
@@ -187,7 +187,7 @@ private actor RecoveryTransport: AIChatTransport {
     let saved = job
     try await repo.updateAIState { $0.groups[group.id] = group; $0.checkpoint = saved }
     var changed = clips[0]; changed.note = "Still changing"; try await repo.updateExisting(changed)
-    let transport = RecoveryTransport(), controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic" })
+    let transport = RecoveryTransport(), controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic" }, useFileAgent: false)
     controller.analyze(resume: true); await controller.waitUntilIdle()
     #expect(controller.error == nil && controller.state.checkpoint == nil)
     #expect(Set(await transport.batches.flatMap { $0 }) == Set(clips.dropFirst().map(\.id)))

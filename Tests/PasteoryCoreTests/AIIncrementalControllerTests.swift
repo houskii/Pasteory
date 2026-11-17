@@ -56,7 +56,7 @@ private final class OrganizationTestClock: @unchecked Sendable {
     let calendar = Calendar.current, day = calendar.startOfDay(for: Date())
     let start = try #require(calendar.date(bySettingHour: 1, minute: 50, second: 0, of: day))
     let clock = OrganizationTestClock(start), transport = ClassificationTransport(afterFirstBatch: { clock.advance(1800) })
-    let controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic-credential" })
+    let controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic-credential" }, useFileAgent: false)
     controller.clock = { clock.now() }; controller.idleTime = { 600 }
     controller.analyze(trigger: "idle"); await controller.waitUntilIdle()
     #expect(controller.error == nil)
@@ -88,7 +88,7 @@ private final class OrganizationTestClock: @unchecked Sendable {
     try await repo.saveBatch(clips)
     settings.aiConfiguration.enabled = true; settings.aiConfiguration.analyzeNew = true; settings.aiConfiguration.model = "synthetic-model"
     settings.aiConfiguration.topN = 1000
-    let transport = ClassificationTransport(), controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic-credential" })
+    let transport = ClassificationTransport(), controller = AIOrganizationController(repository: repo, settings: settings, transport: transport, credentialProvider: { "synthetic-credential" }, useFileAgent: false)
     try await controller.reload()
     let now = Date(); controller.clock = { now.addingTimeInterval(-40) }
     for clip in clips.prefix(5) { controller.contentChanged(clip.id) }

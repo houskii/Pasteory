@@ -38,4 +38,5 @@ public struct AppDirectories: Sendable {
     }
 
     public var databaseFile: URL { database.appendingPathComponent("pasteory.sqlite3") }
+    public var aiTasks: URL { root.appendingPathComponent("AITasks", isDirectory: true) }
 }

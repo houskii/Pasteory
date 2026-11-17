@@ -1,3 +1,4 @@
+import AppKit
 import Charts
 import PasteoryAI
 import PasteoryCore
@@ -135,8 +136,7 @@ struct AISettingsView: View {
         VStack(alignment: .leading, spacing: 16) {
             AISettingsCard(title: L10n.tr("分析范围与触发")) {
                 Stepper(value: $draft.topN, in: 1...1000, step: 10) { Text(L10n.tr("最近内容 Top N：\(draft.topN)")) }
-                Stepper(value: $draft.batchSize, in: 1...20, step: 1) { Text(L10n.tr("每批最多：\(draft.batchSize) 条")) }
-                Text(L10n.tr("按最近复制时间取不同内容。全库任务也按批次处理，保存进度；不会一次发送整个资料库。"))
+                Text(L10n.tr("一次任务将全部选定资料写入一个 JSON，Agent 自行决定读取、检索和整理方式。最近内容按 Top N 取不同资料，全库范围包含所有可分析内容。"))
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle(L10n.tr("新增内容后分析"), isOn: $draft.analyzeNew).toggleStyle(.switch)
                 Text(L10n.tr("连续复制等待 30 秒；累计 5 条或等待 2 分钟进入队列；自动分析至少间隔 5 分钟。"))
@@ -152,7 +152,8 @@ struct AISettingsView: View {
                 Toggle(L10n.tr("分析用户备注"), isOn: $draft.includeNotes).toggleStyle(.switch)
                 Toggle(L10n.tr("分析来源应用名称"), isOn: $draft.includeSource).toggleStyle(.switch)
                 Toggle(L10n.tr("使用图片的本地 OCR 文字"), isOn: Binding(get: { draft.includeImageText == true }, set: { draft.includeImageText = $0 })).toggleStyle(.switch)
-                Text(L10n.tr("OCR 在本机后台运行并用于搜索。只有开启上项，识别文字才会发给当前模型；图片文件不发送。逐条禁止 AI 的资料及已识别的密钥不参与分析。应用退出或休眠时不运行定时任务。"))
+                Toggle(L10n.tr("允许 Agent 读取原路径图片和文件"), isOn: Binding(get: { draft.allowOriginalResourceRead != false }, set: { draft.allowOriginalResourceRead = $0 })).toggleStyle(.switch)
+                Text(L10n.tr("图片和文件引用原路径，不复制到任务目录。开启后 Agent 可按需读取并交给当前模型；关闭后仅使用导出文字和元数据。本地 OCR 文字是否参与分析由上方开关控制。禁止 AI 的资料及已识别密钥不参与分析。"))
                     .font(.caption).foregroundStyle(.secondary)
             }
             AISettingsCard(title: L10n.tr("结果应用方式")) {
@@ -160,12 +161,11 @@ struct AISettingsView: View {
                     Text(L10n.tr("先检查，再应用")).tag(AIConfiguration.ApplyMode.preview)
                     Text(L10n.tr("自动补充已有 AI 分组")).tag(AIConfiguration.ApplyMode.appendExisting)
                 }
-                Stepper(value: $draft.organizationPolicy.targetGroupCount, in: 6...8) { Text(L10n.tr("AI 主题目标：\(draft.organizationPolicy.targetGroupCount) 个，上限 8 个")) }
-                Text(L10n.tr("新主题通常需要至少 3 条不同内容。零散主题先保留为候选，无关内容保留未分组。主题结构调整统一预览并可撤销。"))
+                Text(L10n.tr("主题数量由内容和整理偏好决定。旧草稿仅作参考，新方案会检查成员和引用，主题调整统一预览并可撤销。"))
                     .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Spacer()
-                    Button(L10n.tr("复核并收敛主题")) { if save() { controller.analyze(trigger: "manual-review") } }.disabled(controller.running)
+                    Button(L10n.tr("复核现有主题")) { if save() { controller.analyze(trigger: "manual-review") } }.disabled(controller.running)
                     Button(L10n.tr("沿用现有主题分析全库")) { if save() { controller.analyze(all: true) } }.disabled(controller.running)
                     Button(L10n.tr("分析最近内容")) { if save() { controller.analyze() } }.disabled(controller.running)
                 }
@@ -177,6 +177,10 @@ struct AISettingsView: View {
                 Stepper(value: $draft.dailyAutomaticRuns, in: 1...1000) { Text(L10n.tr("每日自动任务最多：\(draft.dailyAutomaticRuns) 次")) }
                 Stepper(value: $draft.maxInputTokens, in: 1000...128_000, step: 1000) { Text(L10n.tr("单次输入预算：\(draft.maxInputTokens) tokens")) }
                 Stepper(value: $draft.maxOutputTokens, in: 256...16_384, step: 256) { Text(L10n.tr("单次输出上限：\(draft.maxOutputTokens) tokens")) }
+                Stepper(value: Binding(get: { draft.fileAgentRoundLimit }, set: { draft.agentRoundLimit = $0 }), in: 1...256) { Text(L10n.tr("每次继续最多运行：\(draft.fileAgentRoundLimit) 轮")) }
+                Button(L10n.tr("打开 AI 任务历史")) { controller.openTaskHistory() }
+                Text(L10n.tr("任务完成后保留 Prompt、输入快照、输出方案、执行记录和模型用量；存储看板单列 AI 任务历史。"))
+                    .font(.caption).foregroundStyle(.secondary)
                 Text(L10n.tr("每次请求先预留预算。失败或超时的未知用量保守估算，不显示为零。"))
                     .font(.caption).foregroundStyle(.secondary)
             }

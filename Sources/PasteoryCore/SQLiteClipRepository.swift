@@ -1913,7 +1913,8 @@ extension SQLiteClipRepository {
                 if stored.isThemeReview == true, proposed.commands != stored.commands { throw AIError.invalid("Apply the theme review as one complete operation") }
                 guard proposed.commands.allSatisfy({ stored.commands.contains($0) }),
                       proposed.clipRevisions == stored.clipRevisions, proposed.groupRevisions == stored.groupRevisions,
-                      proposed.userSelectedGroupIDs == stored.userSelectedGroupIDs, proposed.isThemeReview == stored.isThemeReview else {
+                      proposed.userSelectedGroupIDs == stored.userSelectedGroupIDs, proposed.isThemeReview == stored.isThemeReview,
+                      proposed.fileTaskID == stored.fileTaskID else {
                     throw AIError.invalid("Only an unchanged subset of the recorded draft may be applied")
                 }
             }
@@ -1945,7 +1946,7 @@ extension SQLiteClipRepository {
             defer { applyingIntelligence = oldApplying }
             for cmd in proposed.commands {
                 guard cmd.name.count <= 120, cmd.definition.count <= 2000, cmd.overview.count <= 2000,
-                      cmd.reason.count <= 1000, cmd.clipIDs.count <= 100,
+                      cmd.reason.count <= 1000, cmd.clipIDs.count <= (proposed.fileTaskID != nil && cmd.kind == .updateOverview ? 10_000 : 100),
                       Set(cmd.clipIDs).count == cmd.clipIDs.count else { throw AIError.invalid("Invalid command bounds") }
                 if [.addItems, .removeItems, .createAggregation, .updateOverview].contains(cmd.kind) {
                     for id in cmd.clipIDs {
@@ -1957,7 +1958,7 @@ extension SQLiteClipRepository {
                 switch cmd.kind {
                 case .createGroup:
                     guard state.groups[cmd.targetID] == nil, !cmd.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                          state.groups.count < 8,
+                          (proposed.fileTaskID != nil || state.groups.count < 8),
                           cmd.name.count <= 40, !cmd.definition.isEmpty,
                           !(try collections()).contains(where: { $0.id == cmd.targetID }) else { throw AIError.invalid("Invalid new group") }
                     let collection = ClipCollection(id: cmd.targetID, name: cmd.name, kind: .normal, sortOrder: try collections().count)
@@ -2063,7 +2064,7 @@ extension SQLiteClipRepository {
             }
             for id in changedGroups {
                 guard var profile = state.groups[id], !undo.createdGroupIDs.contains(id) || !profile.memberIDs.isEmpty else { throw AIError.invalid("Cannot commit an empty AI group") }
-                if undo.createdGroupIDs.contains(id), proposed.decisions != nil || proposed.isThemeReview == true {
+                if undo.createdGroupIDs.contains(id), proposed.fileTaskID == nil, proposed.decisions != nil || proposed.isThemeReview == true {
                     guard profile.memberIDs.count >= 3 else { throw AIError.invalid("A new theme needs three distinct supporting clips") }
                 }
                 profile.revision += 1; state.groups[id] = profile; undo.afterGroups[id] = profile

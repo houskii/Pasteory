@@ -24,6 +24,10 @@ final class AIOrganizationController: ObservableObject {
     let settings: AppSettings
     var onApplied: ((Bool) -> Void)?
     private let analyzer: AIAnalyzer
+    private let fileAgent: AIFileAgent
+    private let taskDirectories: AppDirectories?
+    private let useFileAgent: Bool
+    @Published private(set) var latestTaskDirectory: URL?
     private let credentialProvider: () throws -> String
     private let client = OpenAICompatibleClient()
     private var work: Task<Void, Never>?
@@ -49,9 +53,12 @@ final class AIOrganizationController: ObservableObject {
     private var reloadGeneration: UInt64 = 0
 
     init(repository: any ClipRepository, settings: AppSettings, transport: any AIChatTransport = OpenAICompatibleClient(),
-         credentialProvider: @escaping () throws -> String = { try AICredentialStore.load() }) {
+         credentialProvider: @escaping () throws -> String = { try AICredentialStore.load() },
+         directories: AppDirectories? = nil, useFileAgent: Bool = true) {
         self.repository = repository; self.settings = settings
         self.analyzer = AIAnalyzer(transport: transport); self.themePlanner = AIThemePlanner(transport: transport)
+        self.fileAgent = AIFileAgent(transport: transport); self.taskDirectories = directories ?? (try? AppDirectories())
+        self.useFileAgent = useFileAgent
         self.credentialProvider = credentialProvider
         NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.willSleepNotification).sink { [weak self] _ in
             Task { @MainActor in self?.sleeping = true }
@@ -75,6 +82,7 @@ final class AIOrganizationController: ObservableObject {
     var todayAutomaticRuns: Int { Set(todayUsage.filter { ["new", "idle", "review"].contains($0.trigger) }.map(\.runID)).count }
     var checkpointProgress: String {
         guard let job = state.checkpoint else { return "" }
+        if job.fileTaskVersion != nil { return L10n.tr("任务资料：\(job.clipIDs.count) 条") }
         return "\(job.cursor) / \(job.clipIDs.count)"
     }
     var checkpointRecovery: String? {
@@ -429,6 +437,11 @@ final class AIOrganizationController: ObservableObject {
     }
 
     func pause() { work?.cancel() }
+    func openTaskHistory() {
+        guard let directories = taskDirectories else { return }
+        try? FileManager.default.createDirectory(at: directories.aiTasks, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(latestTaskDirectory ?? directories.aiTasks)
+    }
     private func reloadForAnalysis() async throws {
         while true {
             try Task.checkCancellation()
@@ -461,6 +474,7 @@ final class AIOrganizationController: ObservableObject {
     func discardCheckpoint() async {
         guard !running else { return }
         do {
+            if let id = state.checkpoint?.id, let directories = taskDirectories { try AIFileTaskWorkspace.markStatus("discarded", taskID: id, directories: directories) }
             try await repository.updateAIState { $0.checkpoint = nil }
             error = nil; status = L10n.tr("已放弃保存的整理任务")
             try await reload()
@@ -478,7 +492,174 @@ final class AIOrganizationController: ObservableObject {
         try await reload()
     }
 
-    private func runAnalysis(all: Bool, resume: Bool, groupID: UUID?, trigger requestedTrigger: String, contentIDs: [UUID]?, groupSelection: AIGroupSelection?) async throws {
+    private func runAnalysis(all: Bool, resume: Bool, groupID: UUID?, trigger: String, contentIDs: [UUID]?, groupSelection: AIGroupSelection?) async throws {
+        if useFileAgent {
+            try await runFileAnalysis(all: all, resume: resume, groupID: groupID, trigger: trigger, contentIDs: contentIDs, groupSelection: groupSelection)
+        } else {
+            // Retained for compatibility verification of pre-file task checkpoints.
+            try await runLegacyAnalysis(all: all, resume: resume, groupID: groupID, trigger: trigger, contentIDs: contentIDs, groupSelection: groupSelection)
+        }
+    }
+
+    private func runFileAnalysis(all: Bool, resume: Bool, groupID: UUID?, trigger requestedTrigger: String, contentIDs: [UUID]?, groupSelection: AIGroupSelection?) async throws {
+        await queueWrite?.value
+        let config = settings.aiConfiguration, policy = config.organizationPolicy
+        try config.validate(); try await reloadForAnalysis()
+        guard let directories = taskDirectories else { throw AIError.invalid("Task storage is unavailable") }
+        if !resume, requestedTrigger.hasPrefix("manual") { try await deferAutomaticJob() }
+        let trigger = resume ? state.checkpoint?.organization?.trigger ?? requestedTrigger : requestedTrigger
+        let nightly = ["idle", "review"].contains(trigger), review = ["review", "manual-review"].contains(trigger)
+        let eligible = clipIndex.values.filter { eligibleClipIDs.contains($0.id) }.sorted {
+            $0.lastCopiedAt == $1.lastCopiedAt ? $0.id.uuidString < $1.id.uuidString : $0.lastCopiedAt > $1.lastCopiedAt
+        }
+        let selection = resume ? state.checkpoint?.organization?.groupSelection : groupSelection
+        try selection?.validate(in: state.groups)
+        let catalog = state.groups.filter { selection?.groupIDs.contains($0.key) != true }
+        let scope: [UUID]
+        if resume { scope = state.checkpoint?.clipIDs ?? [] }
+        else if trigger == "manual-regroup-all" || all { scope = eligible.map(\.id) }
+        else if trigger == "manual-regroup-recent" { scope = Array(eligible.filter { !$0.isArchived }.prefix(config.topN).map(\.id)) }
+        else if let selection { scope = eligible.filter { selection.memberIDs.contains($0.id) }.map(\.id) }
+        else if let contentIDs { let ids = Set(contentIDs); scope = eligible.filter { ids.contains($0.id) }.map(\.id) }
+        else if let groupID { scope = eligible.filter { $0.collectionIDs.contains(groupID) }.map(\.id) }
+        else if nightly {
+            let fingerprint = AIThemeCatalog.fingerprint(Array(state.groups.values)), prompt = AIHash.fingerprint(config.prompt)
+            scope = Array(eligible.filter { clip in
+                if review { return !clip.collectionIDs.isDisjoint(with: Set(state.groups.keys).subtracting(protectedGroups)) || clip.collectionIDs.isEmpty }
+                guard !clip.isArchived, clip.collectionIDs.isEmpty else { return false }
+                guard let decision = state.automation.decisions[clip.id] else { return true }
+                return decision.revision != clip.aiContentRevision || decision.promptFingerprint != prompt || decision.catalogFingerprint != fingerprint
+            }.prefix(policy.nightlyItemLimit).map(\.id))
+        } else { scope = Array(eligible.filter { !$0.isArchived }.prefix(config.topN).map(\.id)) }
+        if scope.isEmpty { status = L10n.tr("没有需要整理的内容"); return }
+        var job: AIJobCheckpoint
+        if resume {
+            guard let saved = state.checkpoint else { throw AIError.invalid("No resumable analysis") }
+            job = saved; job.failureMessage = nil
+            if saved.fileTaskVersion != nil, let fingerprint = saved.organization?.semanticFingerprint,
+               fingerprint != fileTaskFingerprint(config) { throw AIError.conflict("The model, prompt or content-sharing scope changed; start a separate analysis") }
+            let deferred = try AIJobRecovery.reconcile(&job, clips: clipIndex, groups: state.groups, eligibleIDs: eligibleClipIDs, minimumThemeMembers: 1)
+            for id in deferred { if let clip = clipIndex[id] { contentChanged(clip.id) } }
+        } else {
+            guard state.checkpoint == nil else { throw AIError.invalid("Resume or discard the saved task first") }
+            job = AIJobCheckpoint(clipIDs: scope, batchSize: config.batchSize, configurationFingerprint: AIHash.fingerprint(config))
+            job.organization = AIJobOrganization(trigger: trigger, revisions: Dictionary(uniqueKeysWithValues: scope.compactMap { id in clipIndex[id].map { (id, $0.aiContentRevision) } }), protectedGroupIDs: protectedGroups, review: review)
+            job.organization?.groupSelection = selection; job.organization?.groupSnapshots = state.groups
+        }
+        job.fileTaskVersion = 2; job.configurationFingerprint = AIHash.fingerprint(config)
+        job.organization?.semanticFingerprint = fileTaskFingerprint(config)
+        let checkpoint = job
+        let started = clock(), day = Calendar.current.startOfDay(for: clock())
+        try await repository.updateAIState { s in
+            s.checkpoint = checkpoint
+            if !trigger.hasPrefix("manual") { s.lastAutomaticRunAt = started }
+            if nightly, s.automation.nightlyBudget?.day != day { s.automation.nightlyBudget = AINightlyBudget(now: started) }
+        }
+        if nightly { state = try await repository.aiState() }
+        state.checkpoint = job
+        status = L10n.tr("正在生成完整任务资料")
+        let clips = try await repository.clips(ids: job.clipIDs), byID = Dictionary(uniqueKeysWithValues: clips.map { ($0.id, $0) })
+        let ordered = job.clipIDs.compactMap { byID[$0] }
+        let taskURL = directories.aiTasks.appendingPathComponent(job.id.uuidString.lowercased() + ".agent")
+        var aliases = [UUID: String]()
+        if let data = try? Data(contentsOf: taskURL.appendingPathComponent("items.json")), let saved = try? JSONDecoder().decode(AIFileTaskInput.self, from: data) {
+            aliases = Dictionary(uniqueKeysWithValues: saved.items.map { ($0.clipID, $0.itemID) })
+        }
+        let input = try await AIFileTaskExporter.input(clips: ordered, taskID: job.id, configuration: config, directories: directories, aliases: aliases)
+        let names = Set(try await repository.collections().filter { selection?.groupIDs.contains($0.id) != true }.map(\.name))
+        let workspace = try AIFileTaskWorkspace(input: input, clips: clips, groups: catalog, reservedNames: names, configuration: config, directories: directories)
+        latestTaskDirectory = await workspace.directory
+        let prompt = try await workspace.prepare(previousDraft: job.draft, changedIDs: job.requeuedIDs ?? [])
+        let repository = repository
+        var runConfiguration = config
+        if nightly { runConfiguration.dailyTokenLimit = min(config.dailyTokenLimit, todayTokens + max(0, policy.nightlyTokenLimit - nightlyTokens)) }
+        do {
+            try await fileAgent.run(taskID: job.id, prompt: prompt, directory: taskURL.path, configuration: runConfiguration, credential: credentialProvider(), ledger: state.usage, trigger: trigger,
+                workspace: workspace, onProgress: { [weak self] round, tool in
+                    try await self?.fileAgentProgress(round: round, tool: tool, nightly: nightly)
+                }, onUsage: { record in
+                    try await repository.updateAIState { $0.usage.append(record) }
+                    try await workspace.recordUsage(record)
+                })
+            var result = try await workspace.result()
+            try await reloadForAnalysis()
+            // A moving clipboard invalidates only changed items, not the entire plan.
+            let stale = Set(input.items.filter { item in
+                guard let current = clipIndex[item.clipID] else { return true }
+                return !eligibleClipIDs.contains(item.clipID) || current.aiContentRevision != item.contentRevision
+            }.map(\.clipID))
+            if !stale.isEmpty {
+                for id in stale where eligibleClipIDs.contains(id) { if let clip = clipIndex[id] { contentChanged(clip.id) } }
+                result.commands = result.commands.compactMap { original in
+                    var command = original
+                    if command.kind == .updateOverview && !Set(command.clipIDs).isDisjoint(with: stale) { return nil }
+                    command.clipIDs.removeAll { stale.contains($0) }
+                    if command.kind == .addItems && command.clipIDs.isEmpty { return nil }; return command
+                }
+                let populated = Set(result.commands.filter { $0.kind == .addItems }.map(\.targetID))
+                let empty = Set(result.commands.filter { $0.kind == .createGroup && !populated.contains($0.targetID) }.map(\.targetID))
+                result.commands.removeAll { empty.contains($0.targetID) }
+                result.decisions = result.decisions?.filter { !stale.contains($0.key) }
+                result.inputCount -= stale.count
+                try await workspace.record(event: "changed_items_deferred", details: .array(stale.map { .string($0.uuidString) }))
+            }
+            result.clipRevisions = result.clipRevisions.filter { !stale.contains($0.key) }.mapValues { $0 }
+            for id in result.clipRevisions.keys { result.clipRevisions[id] = clipIndex[id]?.aiRevision }
+            if let selection {
+                try selection.validate(in: state.groups)
+                let cleanup = try AIGroupManagement.cleanup(selection, state: state, clips: Array(clipIndex.values))
+                result = try AIGroupManagement.combining(cleanup: cleanup, analysis: result)
+            }
+            result.promptFingerprint = AIHash.fingerprint(config.prompt); result.policyFingerprint = config.lifecycle.fingerprint
+            result.protectedGroupIDs = protectedGroups
+            let fingerprint = AIThemeCatalog.fingerprint(Array(catalog.values))
+            for id in result.decisions?.keys.map({ $0 }) ?? [] {
+                result.decisions?[id]?.promptFingerprint = result.promptFingerprint
+                result.decisions?[id]?.catalogFingerprint = fingerprint
+            }
+            let finished = result, revisions = job.organization?.revisions ?? [:], now = clock(), completedIDs = job.clipIDs
+            try await workspace.saveValidatedResult(finished)
+            try await repository.updateAIState { s in
+                s.checkpoint = nil; s.automation.decisions.merge(finished.decisions ?? [:]) { _, new in new }
+                for id in completedIDs where !stale.contains(id) && s.automation.dirty[id]?.revision == revisions[id] { s.automation.dirty.removeValue(forKey: id) }
+                if nightly { s.automation.lastNightlyDate = now; s.automation.nightlyBudget?.processedIDs.formUnion(completedIDs) }
+                if review { s.automation.lastReviewAt = now }
+                if let groupID { s.automation.requestedGroupReviews?.remove(groupID) }
+                if !finished.commands.isEmpty { s.changes.append(finished) }
+            }
+            try await workspace.finish(status: "ready_for_review")
+            try await reload()
+            if finished.commands.isEmpty { status = L10n.tr("分析完成，无关内容保留未分组") }
+            else if config.applyMode == .appendExisting && finished.appendOnly {
+                try await repository.applyAIChangeSet(finished); try await workspace.finish(status: "applied"); try await reload(); onApplied?(!trigger.hasPrefix("manual"))
+                status = L10n.tr("已补充已有 AI 分组，主题与阅读位置保持稳定")
+            } else { showingReview = !nightly && trigger != "new"; status = L10n.tr("整理建议已生成，可检查后统一应用") }
+        } catch {
+            try? await workspace.finish(status: Task.isCancelled ? "paused" : "failed", message: error.localizedDescription)
+            throw error
+        }
+    }
+
+    private func fileAgentProgress(round: Int, tool: String?, nightly: Bool) throws {
+        let policy = settings.aiConfiguration.organizationPolicy
+        if nightly, sleeping || !policy.isIdleWindow(at: clock()) || idleTime() < policy.idleSeconds ||
+            state.automation.nightlyBudget?.exhausted(policy: policy, now: clock(), tokens: nightlyTokens) == true { throw CancellationError() }
+        let action: String
+        switch tool {
+        case "task_read", "task_query": action = L10n.tr("读取资料")
+        case "task_write": action = L10n.tr("保存方案")
+        case "resource_image": action = L10n.tr("查看图片")
+        case "task_exec": action = L10n.tr("整理任务文件")
+        default: action = L10n.tr("分析资料")
+        }
+        status = L10n.tr("Agent 第 \(round) 轮") + " · " + action
+    }
+    private func fileTaskFingerprint(_ config: AIConfiguration) -> String {
+        AIHash.fingerprint([config.endpoint, config.model, config.prompt, String(config.includeNotes), String(config.includeSource),
+                            String(config.includeImageText == true), String(config.allowOriginalResourceRead != false)])
+    }
+
+    private func runLegacyAnalysis(all: Bool, resume: Bool, groupID: UUID?, trigger requestedTrigger: String, contentIDs: [UUID]?, groupSelection: AIGroupSelection?) async throws {
         await queueWrite?.value
         let config = settings.aiConfiguration, policy = settings.aiConfiguration.organizationPolicy
         try config.validate(); try await reloadForAnalysis()
@@ -708,12 +889,17 @@ final class AIOrganizationController: ObservableObject {
         proposed.commands = original.commands.filter { selectedIDs.contains($0.id) }
         guard !proposed.commands.isEmpty else { return }
         error = nil
-        do { try await repository.applyAIChangeSet(proposed); try await reload(); onApplied?(false); status = L10n.tr("整理已应用，可以撤销") }
+        do {
+            try await repository.applyAIChangeSet(proposed)
+            if let id = proposed.fileTaskID, let directories = taskDirectories { try AIFileTaskWorkspace.markStatus("applied", taskID: id, directories: directories) }
+            try await reload(); onApplied?(false); status = L10n.tr("整理已应用，可以撤销")
+        }
         catch { self.error = error.localizedDescription }
     }
     func reject(_ original: AIChangeSet) async {
         do {
             try await repository.updateAIState { s in if let index = s.changes.firstIndex(where: { $0.id == original.id }) { s.changes[index].isRejected = true } }
+            if let id = original.fileTaskID, let directories = taskDirectories { try AIFileTaskWorkspace.markStatus("rejected", taskID: id, directories: directories) }
             try await reload()
         } catch { self.error = error.localizedDescription }
     }

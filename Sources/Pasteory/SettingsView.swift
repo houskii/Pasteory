@@ -846,6 +846,7 @@ struct SettingsView: View {
         case .archives: .purple
         case .backups: .green
         case .logs: .teal
+        case .aiTaskHistory: .indigo
         case .webKitNetworkCache: .orange
         case .other: .gray
         }

@@ -1185,5 +1185,22 @@
   "macOS Vision · 快速（英文等西文）": "macOS Vision · Fast (English and Western languages)",
   "无法读取图片中的文字": "Unable to read text from the image",
   "资料更新后补算 {0} 条，跳过 {1} 条；其余进度已保留。": "Reanalyzing {0} updated items and skipping {1} items. Other saved progress is preserved.",
-  "已保留整理进度，变化的资料已重新入队，可继续整理。": "Saved progress has been preserved. Updated items are queued again; you can resume organization."
+  "已保留整理进度，变化的资料已重新入队，可继续整理。": "Saved progress has been preserved. Updated items are queued again; you can resume organization.",
+  "一次任务将全部选定资料写入一个 JSON，Agent 自行决定读取、检索和整理方式。最近内容按 Top N 取不同资料，全库范围包含所有可分析内容。": "Each task exports all selected items to one JSON file. The agent chooses how to read, search and organize it. Recent tasks use Top N distinct items; library tasks include every eligible item.",
+  "允许 Agent 读取原路径图片和文件": "Allow the agent to read original images and files",
+  "图片和文件引用原路径，不复制到任务目录。开启后 Agent 可按需读取并交给当前模型；关闭后仅使用导出文字和元数据。本地 OCR 文字是否参与分析由上方开关控制。禁止 AI 的资料及已识别密钥不参与分析。": "Images and files reference their original paths and are not copied into the task directory. When enabled, the agent may read them and send their contents to the configured model. Otherwise, only exported text and metadata are used. The switch above controls local OCR text. Excluded items and detected keys are not analyzed.",
+  "主题数量由内容和整理偏好决定。旧草稿仅作参考，新方案会检查成员和引用，主题调整统一预览并可撤销。": "The content and your preferences determine the number of topics. Previous drafts are references. Membership and references are validated, and topic changes can be reviewed and undone.",
+  "复核现有主题": "Review existing topics",
+  "每次继续最多运行：{0} 轮": "Maximum rounds per continuation: {0}",
+  "打开 AI 任务历史": "Open AI task history",
+  "任务完成后保留 Prompt、输入快照、输出方案、执行记录和模型用量；存储看板单列 AI 任务历史。": "Completed tasks retain their prompt, input snapshot, output plan, execution history and model usage. AI task history is listed separately in storage statistics.",
+  "任务资料：{0} 条": "Task input: {0} items",
+  "正在生成完整任务资料": "Preparing complete task input",
+  "读取资料": "Reading content",
+  "保存方案": "Saving the plan",
+  "查看图片": "Inspecting an image",
+  "整理任务文件": "Processing task files",
+  "分析资料": "Analyzing content",
+  "Agent 第 {0} 轮": "Agent round {0}",
+  "AI 任务历史": "AI task history"
 }
