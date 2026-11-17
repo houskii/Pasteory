@@ -1928,10 +1928,15 @@ extension SQLiteClipRepository {
     public func applyAIChangeSet(_ proposed: AIChangeSet) throws {
         guard proposed.commands.count <= 20_000, !proposed.isRejected, !proposed.isUndone else { throw AIError.invalid("Invalid change set") }
         try transaction {
+            var proposed = proposed
             var state = try aiState()
             if let stored = state.changes.first(where: { $0.id == proposed.id }), stored.isApplied {
-                guard stored.fingerprint == proposed.fingerprint else { throw AIError.conflict("A different result already used this change-set ID") }
+                guard stored.fingerprint == proposed.fingerprint || stored.reviewedCommandFingerprint == proposed.fingerprint else { throw AIError.conflict("A different result already used this change-set ID") }
                 return
+            }
+            if let stored = state.changes.first(where: { $0.id == proposed.id }), stored.isRejected {
+                if stored.reviewedCommandFingerprint == proposed.fingerprint, !(stored.deferredClipIDs ?? []).isEmpty { return }
+                throw AIError.invalid("This organization proposal was dismissed")
             }
             if let stored = state.changes.first(where: { $0.id == proposed.id }) {
                 if stored.isThemeReview == true, proposed.commands != stored.commands { throw AIError.invalid("Apply the theme review as one complete operation") }
@@ -1944,6 +1949,33 @@ extension SQLiteClipRepository {
             }
             let currentClips = try allClips()
             var clipsByID = Dictionary(uniqueKeysWithValues: currentClips.map { ($0.id, $0) })
+            // Reconcile against the live database inside the same transaction as
+            // application. A preview may be open while titles or OCR finish.
+            // Explicit group cleanup retains its complete-selection checks.
+            if proposed.fileTaskID != nil, proposed.userSelectedGroupIDs?.isEmpty != false {
+                let stale = Set(proposed.clipRevisions.compactMap { id, revision in
+                    clipsByID[id].map { $0.mayParticipateInAI && $0.aiRevision == revision } == true ? nil : id
+                })
+                if !stale.isEmpty {
+                    let reviewed = proposed.fingerprint
+                    let dependent = AIJobRecovery.prune(&proposed, invalidIDs: stale, minimumThemeMembers: 1)
+                    let deferred = stale.union(dependent)
+                    proposed.deferredClipIDs = deferred; proposed.reviewedCommandFingerprint = reviewed
+                    proposed.inputCount = max(0, proposed.inputCount - deferred.count)
+                    for id in deferred {
+                        if let clip = clipsByID[id], clip.mayParticipateInAI {
+                            state.automation.enqueue(id: id, revision: clip.aiContentRevision)
+                        }
+                    }
+                    if proposed.commands.isEmpty {
+                        proposed.isRejected = true
+                        state.changes.removeAll { $0.id == proposed.id }; state.changes.append(proposed)
+                        state.compact()
+                        try writeAIState(state)
+                        return
+                    }
+                }
+            }
             let selectedGroups = proposed.userSelectedGroupIDs ?? []
             let clearedGroups = Set(proposed.commands.filter { $0.kind == .clearGroup }.map(\.targetID))
             guard selectedGroups == clearedGroups, selectedGroups.isSubset(of: Set(proposed.groupRevisions.keys)),

@@ -13,7 +13,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
     private let monitor: ClipboardMonitor
     private let hotKeyManager = GlobalHotKeyManager()
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-    private let settingsNavigation = SettingsNavigation()
+    private let settingsNavigation: SettingsNavigation
     private let updateService: UpdateService
     private var updateWindow: NSWindow?
     private var settingsWindow: NSWindow?
@@ -46,6 +46,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
 
     init(state: AppState, settings: AppSettings, attachments: AttachmentStore, defaults: UserDefaults = .standard) {
         self.state = state; self.settings = settings
+        self.settingsNavigation = SettingsNavigation(defaults: settings.defaults)
         self.updateService = UpdateService(defaults: defaults)
         self.pasteCoordinator = PasteCoordinator(attachments: attachments)
         let sourceContextCapture = SourceContextCaptureCoordinator(settings: settings)
@@ -144,6 +145,9 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
         Task {
             await state.bootstrap(processExistingClips: !ProcessInfo.processInfo.arguments.contains("--skip-existing-maintenance"))
             quickPanel.prewarm()
+            if !ProcessInfo.processInfo.arguments.contains("--debug-ui-qa") {
+                Task(priority: .utility) { await self.state.startStoryAutomation() }
+            }
             Task(priority: .utility) { await self.state.refreshDueLinkSessions() }
         }
         Task { await state.webCacheMaintenance.check() }
@@ -541,6 +545,16 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
         if ProcessInfo.processInfo.arguments.contains("--debug-readme-seed") {
             await seedReadmeData()
             if ProcessInfo.processInfo.arguments.contains("--debug-story-seed") { await seedStoryData() }
+            if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "--debug-story-report-file"),
+               ProcessInfo.processInfo.arguments.indices.contains(index + 1) {
+                do {
+                    let data = try Data(contentsOf: URL(fileURLWithPath: ProcessInfo.processInfo.arguments[index + 1]))
+                    let report = try JSONDecoder().decode(AIStoryReport.self, from: data)
+                    settings.aiConfiguration.storyEnabled = true
+                    try await state.repository.updateAIState { $0.stories = [report] }
+                    await state.story.load()
+                } catch { state.show(error) }
+            }
             if ProcessInfo.processInfo.arguments.contains("--debug-story-empty") { settings.aiConfiguration.storyEnabled = true }
             if ProcessInfo.processInfo.arguments.contains("--debug-image-ocr-seed"),
                var image = state.quickClips.first(where: { $0.primaryKind == .image }) {
@@ -557,6 +571,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
                 } catch { state.show(error) }
             }
             if ProcessInfo.processInfo.arguments.contains("--debug-ai-seed") { await seedAIData() }
+            if ProcessInfo.processInfo.arguments.contains("--debug-story-disabled") { settings.aiConfiguration.storyEnabled = false }
             if ProcessInfo.processInfo.arguments.contains("--debug-group-seed") { await seedOrganizationDemo() }
             return
         }
@@ -746,13 +761,13 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
             }
             let story = AIStoryReport(id: UUID(), title: english ? "A week of making your tools feel right" : "这一周，你在把工具变得更顺手",
                 introduction: english ? "You have been working through the small details that shape everyday use: updates, image text, and how useful material stays close at hand."
-                    : "你最近在认真处理那些影响日常使用的小细节：升级能否顺利完成，图片里的文字能否直接使用，常用资料又该怎样留在手边。",
+                    : "升级以后资料还在不在，图片里的字能不能直接复制，都是你这几天在试的事。还有常用内容的活跃度，该怎么随时间慢慢降下来。",
                 recentWork: sections, observations: [AIStorySection(title: english ? "You keep asking how it works in practice" : "你在持续追问实际使用的效果",
                     text: english ? "Your notes connect visible behavior with repeatable checks, from installing an update to copying recognized text."
-                        : "从安装后的数据保留，到复制出来的文字是否正确，你关注的不只是页面有没有变化，也在核对实际结果。",
+                        : "你把升级流程和数据保留放在一起检查，也在核对识别文字能不能实际复制出来。",
                     evidence: sections[0].evidence + sections[1].evidence)],
                 encouragement: english ? "These changes may look small on their own. Together they can remove friction from the tools you use every day. It is fine to finish one clear improvement at a time."
-                    : "这些调整单独看都很小，放在一起，却能减少每天使用工具时的摩擦。把一件事真正做顺，已经是值得留下的进展。",
+                    : "升级后旧东西还在不在，你没漏掉这件事。先把它试踏实，其他小地方可以慢慢调。",
                 periodStart: Date().addingTimeInterval(-7 * 86_400), periodEnd: Date(), sourceCount: clips.count,
                 sourceRevisions: Dictionary(uniqueKeysWithValues: clips.map { ($0.id, $0.aiContentRevision) }))
             try await state.repository.updateAIState { $0.stories = [story] }
@@ -936,13 +951,19 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
 #endif
     }
 
-    private func openSettings(destination: SettingsDestination = .general) {
+    func windowWillClose(_ notification: Notification) {
+        if notification.object as? NSWindow === settingsWindow { settingsNavigation.close() }
+    }
+
+    private func openSettings(destination: SettingsDestination? = nil) {
         if quickPanel.isPresented { quickPanel.close(restoreTargetApplication: false) }
         guard settingsWindow?.attachedSheet == nil else {
             activateAndShow(settingsWindow)
             return
         }
-        settingsNavigation.destination = destination
+        settingsNavigation.open(requested: destination, storyEnabled: settings.aiConfiguration.storyEnabled == true,
+                                latestStoryID: state.story.reports.first?.id,
+                                newOpening: !(settingsWindow?.isKeyWindow == true && NSApp.isActive))
         if settingsWindow == nil {
             let view = SettingsView(
                 state: state, settings: settings, navigation: settingsNavigation, updateService: updateService,
@@ -970,6 +991,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
             window.contentMinSize = NSSize(width: min(1120, availableSize.width), height: min(720, availableSize.height))
             window.setContentSize(NSSize(width: min(1360, availableSize.width), height: min(820, availableSize.height)))
             window.isReleasedWhenClosed = false
+            window.delegate = self
             if !window.setFrameUsingName("PasteorySettingsWindow") { window.center() }
             window.setFrameAutosaveName("PasteorySettingsWindow")
 #if DEBUG

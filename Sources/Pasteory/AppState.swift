@@ -312,6 +312,13 @@ final class AppState: ObservableObject {
         } catch { show(error) }
     }
 
+    func startStoryAutomation() async {
+        story.organizationBusy = { [weak self] in self?.intelligence.running == true || self?.intelligence.storageBusy == true }
+        intelligence.otherAIWorkRunning = { [weak self] in self?.story.running == true }
+        intelligence.onBackgroundTick = { [weak self] in await self?.story.tick() }
+        await story.startAutomation()
+    }
+
     func bootstrap(processExistingClips: Bool = true) async {
         if processExistingClips {
             do {

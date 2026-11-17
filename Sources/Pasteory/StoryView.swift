@@ -1,11 +1,13 @@
 import PasteoryAI
 import PasteoryCore
 import SwiftUI
+import AppKit
 
 struct StoryView: View {
     @ObservedObject var controller: StoryController
     @ObservedObject var settings: AppSettings
     let onConfigure: () -> Void
+    let onViewed: (UUID) -> Void
     @Environment(\.pasteoryAccentColor) private var accent
     @State private var selectedID: UUID?
 
@@ -46,7 +48,7 @@ struct StoryView: View {
             }
             .padding(.horizontal, 24).padding(.vertical, 12)
             Divider()
-            if !controller.status.isEmpty, controller.running || controller.checkpoint != nil {
+            if !controller.status.isEmpty {
                 Text(controller.status).font(.caption).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 24).padding(.top, 12)
             }
@@ -64,19 +66,25 @@ struct StoryView: View {
                 .frame(maxWidth: .infinity)
             }
         }
-        .task { await controller.load() }
+        .task { await controller.load(); recordView() }
         .onChange(of: controller.reports.first?.id) { _, id in selectedID = id }
+        .onChange(of: report?.id) { _, _ in recordView() }
+    }
+
+    private func recordView() {
+        if NSApp.isActive, let report, report.id == controller.reports.first?.id { onViewed(report.id) }
     }
 
     private var empty: some View {
         VStack(spacing: 14) {
             Image(systemName: "book.pages").font(.system(size: 48)).foregroundStyle(accent)
-            Text(L10n.tr("给这一周写一则 Story")).font(.title2.bold())
+            Text(L10n.tr("这一周的 Story 正在准备")).font(.title2.bold())
             Text(L10n.tr("把最近留下的线索串起来，回看在做的事情，也给自己留一点鼓励。"))
                 .foregroundStyle(.secondary).multilineTextAlignment(.center)
-            Button(L10n.tr("生成最近 7 天的 Story")) { controller.generate() }
-                .buttonStyle(.borderedProminent).disabled(controller.running)
-            Text(L10n.tr("只使用允许参与 AI 的内容，沿用备注、来源和 OCR 的分享设置。打开页面不会自动调用模型。"))
+            if !settings.aiConfiguration.enabled {
+                Button(L10n.tr("配置 AI 后自动生成"), action: onConfigure).buttonStyle(.borderedProminent)
+            }
+            Text(L10n.tr("会自动使用最近 7 天允许参与 AI 的内容生成总结，之后每 7 天在闲时更新。沿用备注、来源和 OCR 的分享设置。"))
                 .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity).padding(.vertical, 65).padding(.horizontal, 24)
@@ -100,12 +108,6 @@ struct StoryView: View {
             .frame(maxWidth: .infinity, alignment: .leading).padding(24)
             .background(accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 18))
 
-            Text(L10n.tr("最近在做的事")).font(.title3.bold())
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), alignment: .top)], alignment: .leading, spacing: 14) {
-                ForEach(report.recentWork) { section in StorySectionCard(section: section) }
-            }
-            Text(L10n.tr("AI 的观察")).font(.title3.bold())
-            ForEach(report.observations) { section in StorySectionCard(section: section) }
             VStack(alignment: .leading, spacing: 12) {
                 Label(L10n.tr("给你的一点鼓励"), systemImage: "sun.max")
                     .font(.headline).foregroundStyle(accent)
@@ -113,6 +115,14 @@ struct StoryView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading).padding(22)
             .background(accent.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+
+            Text(L10n.tr("最近在做的事")).font(.title3.bold())
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), alignment: .top)], alignment: .leading, spacing: 14) {
+                ForEach(report.recentWork) { section in StorySectionCard(section: section) }
+            }
+            Text(L10n.tr("AI 的观察")).font(.title3.bold())
+            ForEach(report.observations) { section in StorySectionCard(section: section) }
+
             HStack {
                 Text(L10n.tr("观察来自这段时间的剪贴板线索。"))
                     .font(.caption).foregroundStyle(.secondary)

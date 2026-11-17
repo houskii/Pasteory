@@ -22,6 +22,8 @@ public struct AIStoryReport: Codable, Hashable, Sendable, Identifiable {
     public var generatedAt: Date
     public var sourceCount: Int
     public var sourceRevisions: [UUID: String]
+    public var promptVersion: Int?
+    public var sharingFingerprint: String?
     public init(id: UUID, title: String, introduction: String, recentWork: [AIStorySection], observations: [AIStorySection],
                 encouragement: String, periodStart: Date, periodEnd: Date, generatedAt: Date = Date(),
                 sourceCount: Int, sourceRevisions: [UUID: String]) {
@@ -37,12 +39,23 @@ public struct AIStoryCheckpoint: Codable, Equatable, Sendable {
     public var periodEnd: Date
     public var language: String
     public var sharingFingerprint: String
+    public var promptVersion: Int?
     public init(id: UUID = UUID(), periodStart: Date, periodEnd: Date, language: String, sharingFingerprint: String) {
         self.id = id; self.periodStart = periodStart; self.periodEnd = periodEnd
         self.language = language; self.sharingFingerprint = sharingFingerprint
+        self.promptVersion = AIStorySchedule.promptVersion
     }
     public static func sharingFingerprint(_ configuration: AIConfiguration) -> String {
         AIHash.fingerprint([configuration.includeNotes, configuration.includeSource,
                             configuration.includeImageText == true, configuration.allowOriginalResourceRead != false])
+    }
+}
+
+public enum AIStorySchedule {
+    public static let promptVersion = 2
+    public static let interval: TimeInterval = 7 * 86_400
+    public static func isDue(_ latest: AIStoryReport?, now: Date) -> Bool {
+        guard let latest, latest.promptVersion == promptVersion else { return true }
+        return now.timeIntervalSince(latest.periodEnd) >= interval
     }
 }

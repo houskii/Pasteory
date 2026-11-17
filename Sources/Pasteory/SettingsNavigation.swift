@@ -1,5 +1,6 @@
 import PasteoryCore
 import Combine
+import Foundation
 
 enum SettingsDestination: String, CaseIterable, Identifiable {
     case story, library, general, privacy, shortcuts, openBehavior, linkResolution, aiOrganization, storage, advanced, about
@@ -62,5 +63,43 @@ enum SettingsDestination: String, CaseIterable, Identifiable {
 /// Owned by the coordinator so routing works even when the window already exists.
 @MainActor
 final class SettingsNavigation: ObservableObject {
-    @Published var destination: SettingsDestination = .general
+    @Published var destination: SettingsDestination = .general {
+        didSet { if !automaticRouting { defaults.set(destination.rawValue, forKey: "lastSettingsDestination") } }
+    }
+    private let defaults: UserDefaults
+    private var visible = false
+    private var countedThisOpening = false
+    private var automaticRouting = false
+
+    init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+
+    func open(requested: SettingsDestination? = nil, storyEnabled: Bool, latestStoryID: UUID?, newOpening: Bool = true) {
+        if newOpening { countedThisOpening = false }
+        visible = true
+        updateLatestStory(latestStoryID)
+        guard newOpening || requested != nil else { return }
+        let last = defaults.string(forKey: "lastSettingsDestination").flatMap(SettingsDestination.init(rawValue:)) ?? .general
+        let preferStory = storyEnabled && (latestStoryID == nil || defaults.integer(forKey: "storyOpeningCount") < 3)
+        // A temporary Story landing must not replace the page the user chose.
+        automaticRouting = requested == nil
+        destination = requested ?? (preferStory ? .story : (last == .story && !storyEnabled ? .library : last))
+        automaticRouting = false
+        if destination == .story, let latestStoryID { storyViewed(latestStoryID) }
+    }
+
+    func close() { visible = false }
+
+    func storyViewed(_ id: UUID) {
+        updateLatestStory(id)
+        guard visible, destination == .story, !countedThisOpening else { return }
+        defaults.set(min(3, defaults.integer(forKey: "storyOpeningCount") + 1), forKey: "storyOpeningCount")
+        countedThisOpening = true
+    }
+
+    private func updateLatestStory(_ id: UUID?) {
+        guard let id, defaults.string(forKey: "lastOpenedStoryID") != id.uuidString else { return }
+        defaults.set(id.uuidString, forKey: "lastOpenedStoryID")
+        defaults.set(0, forKey: "storyOpeningCount")
+        countedThisOpening = false
+    }
 }

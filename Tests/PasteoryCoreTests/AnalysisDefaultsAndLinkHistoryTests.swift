@@ -4,7 +4,7 @@ import PasteoryCore
 import Testing
 @testable import Pasteory
 
-@Test @MainActor func analysisDefaultsMigrateOnceAndPreserveLaterUserChoices() throws {
+@Test(arguments: [Optional<Int>.none, .some(1)]) @MainActor func analysisDefaultsMigrateOnceAndPreserveLaterUserChoices(version: Int?) throws {
     let suite = "AnalysisDefaults." + UUID().uuidString
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
@@ -12,17 +12,20 @@ import Testing
     old.includeNotes = false; old.includeSource = false; old.includeImageText = false
     old.allowOriginalResourceRead = false; old.analyzeNew = false; old.timerEnabled = false
     old.organizationPolicy.idleEnabled = false; old.organizationPolicy.weeklyReviewEnabled = false
+    old.storyEnabled = false
     var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(old)) as? [String: Any])
-    value.removeValue(forKey: "analysisDefaultsVersion")
+    if let version { value["analysisDefaultsVersion"] = version } else { value.removeValue(forKey: "analysisDefaultsVersion") }
     defaults.set(try JSONSerialization.data(withJSONObject: value), forKey: "aiOrganizationConfiguration.v1")
     let settings = AppSettings(defaults: defaults), migrated = settings.aiConfiguration
     #expect(migrated.model == old.model && migrated.topN == 1000)
     #expect(migrated.includeNotes && migrated.includeSource && migrated.includeImageText == true && migrated.allowOriginalResourceRead == true)
     #expect(migrated.analyzeNew && migrated.organizationPolicy.idleEnabled && migrated.organizationPolicy.weeklyReviewEnabled)
+    #expect(migrated.storyEnabled == true && migrated.analysisDefaultsVersion == 2)
     settings.aiConfiguration.analyzeNew = false; settings.aiConfiguration.includeImageText = false
     settings.aiConfiguration.organizationPolicy.idleEnabled = false
+    settings.aiConfiguration.storyEnabled = false
     let reloaded = AppSettings(defaults: defaults).aiConfiguration
-    #expect(!reloaded.analyzeNew && reloaded.includeImageText == false && !reloaded.organizationPolicy.idleEnabled)
+    #expect(!reloaded.analyzeNew && reloaded.includeImageText == false && !reloaded.organizationPolicy.idleEnabled && reloaded.storyEnabled == false)
 }
 
 @Test func linkHistoryKeepsIndividualURLsSourcesAndTheLatestAttemptEvenWhenAnOldTitleSurvives() async throws {

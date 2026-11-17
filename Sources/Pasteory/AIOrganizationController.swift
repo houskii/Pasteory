@@ -44,6 +44,8 @@ final class AIOrganizationController: ObservableObject {
     private let themePlanner: AIThemePlanner
     var readingGroupIDs: () -> Set<UUID> = { [] }
     var idleTime: () -> TimeInterval = { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .null) }
+    var otherAIWorkRunning: () -> Bool = { false }
+    var onBackgroundTick: (@MainActor () async -> Void)?
     var clock: () -> Date = Date.init
     private var sleeping = false
     private var workspaceObservers = Set<AnyCancellable>()
@@ -86,7 +88,7 @@ final class AIOrganizationController: ObservableObject {
         return state.usage.filter { $0.date >= start }
     }
     var todayTokens: Int { todayUsage.reduce(0) { $0 + $1.totalTokens } }
-    var todayAutomaticRuns: Int { Set(todayUsage.filter { ["new", "idle", "review"].contains($0.trigger) }.map(\.runID)).count }
+    var todayAutomaticRuns: Int { Set(todayUsage.filter { ["new", "idle", "review"].contains($0.trigger) || $0.automatic == true }.map(\.runID)).count }
     var checkpointProgress: String {
         guard let job = state.checkpoint else { return "" }
         if job.fileTaskVersion != nil { return L10n.tr("任务资料：\(job.clipIDs.count) 条") }
@@ -115,7 +117,7 @@ final class AIOrganizationController: ObservableObject {
         polling = Task { [weak self] in
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(30)) } catch { return }
-                guard let self else { return }; await self.tick()
+                guard let self else { return }; await self.tick(); await self.onBackgroundTick?()
             }
         }
     }
@@ -126,7 +128,7 @@ final class AIOrganizationController: ObservableObject {
         let loadedState = try await repository.aiState()
         guard generation == reloadGeneration else { return }
         if state != loadedState { state = loadedState }
-        if !running, error == nil, let failure = state.checkpoint?.failureMessage { error = failure }
+        if !running, error == nil, let failure = state.checkpoint?.failureMessage { error = readableFailure(failure) }
         // Establish a baseline for an existing library once, so upgrading does
         // not label historical material as new. Later additions stay unread.
         if state.automation.viewedGroupMembers == nil {
@@ -294,7 +296,7 @@ final class AIOrganizationController: ObservableObject {
                 if config.lifecycleEnabled && config.automaticCompression && !storageBusy { await compress(groupID: nil) }
             } catch { self.error = error.localizedDescription }
         }
-        guard config.enabled, !running, !automaticPaused, !sleeping, todayAutomaticRuns < config.dailyAutomaticRuns else { return }
+        guard config.enabled, !running, !otherAIWorkRunning(), !automaticPaused, !sleeping, todayAutomaticRuns < config.dailyAutomaticRuns else { return }
         let minimumInterval = state.lastAutomaticRunAt.map { now.timeIntervalSince($0) >= 300 } ?? true
         let ids = state.automation.incrementalIDs(at: now)
         let mayAppend = pending == nil || (config.applyMode == .appendExisting && pending?.isThemeReview == true)
@@ -375,7 +377,7 @@ final class AIOrganizationController: ObservableObject {
         }
         guard !storageBusy else { return }
         guard settings.aiConfiguration.enabled else { error = L10n.tr("请先在 AI 整理设置中启用模型连接"); return }
-        if pending != nil && !(["new", "idle"].contains(trigger) && settings.aiConfiguration.applyMode == .appendExisting && pending?.isThemeReview == true) { showingReview = true; return }
+        if pending != nil && !(["new", "idle"].contains(trigger) && settings.aiConfiguration.applyMode == .appendExisting && pending?.isThemeReview == true) { error = nil; showingReview = true; return }
         if !resume, let saved = state.checkpoint,
            !["new", "idle", "review"].contains(saved.organization?.trigger ?? "") {
             error = L10n.tr("上次整理尚未完成，请先继续整理，或放弃保存的任务后重新开始。")
@@ -398,7 +400,7 @@ final class AIOrganizationController: ObservableObject {
                 if Task.isCancelled {
                     self.status = L10n.tr("分析已暂停，可以继续上次任务")
                 } else {
-                    self.error = error.localizedDescription
+                    self.error = self.readableFailure(error.localizedDescription)
                     let message = error.localizedDescription
                     try? await self.repository.updateAIState { $0.checkpoint?.failureMessage = message }
                     self.status = L10n.tr("整理未完成，进度已保存")
@@ -664,8 +666,8 @@ final class AIOrganizationController: ObservableObject {
             try await reload()
             if finished.commands.isEmpty { status = L10n.tr("分析完成，无关内容保留未分组") }
             else if config.applyMode == .appendExisting && finished.appendOnly {
-                try await repository.applyAIChangeSet(finished); try await workspace.finish(status: "applied"); try await reload(); onApplied?(!trigger.hasPrefix("manual"))
-                status = L10n.tr("已补充已有 AI 分组，主题与阅读位置保持稳定")
+                try await repository.applyAIChangeSet(finished); try await reload(); onApplied?(!trigger.hasPrefix("manual"))
+                status = recordApplication(finished.id)
             } else { showingReview = !nightly && trigger != "new"; status = L10n.tr("整理建议已生成，可检查后统一应用") }
         } catch {
             try? await workspace.finish(status: Task.isCancelled ? "paused" : "failed", message: error.localizedDescription)
@@ -931,10 +933,9 @@ final class AIOrganizationController: ObservableObject {
         error = nil
         do {
             try await repository.applyAIChangeSet(proposed)
-            if let id = proposed.fileTaskID, let directories = taskDirectories { try AIFileTaskWorkspace.markStatus("applied", taskID: id, directories: directories) }
-            try await reload(); onApplied?(false); status = L10n.tr("整理已应用，可以撤销")
+            try await reload(); onApplied?(false); status = recordApplication(proposed.id)
         }
-        catch { self.error = error.localizedDescription }
+        catch { self.error = readableFailure(error.localizedDescription) }
     }
     func reviseFilePlan(_ original: AIChangeSet) async -> Bool {
         guard !running, !storageBusy, pending?.id == original.id,
@@ -979,8 +980,29 @@ final class AIOrganizationController: ObservableObject {
         do {
             try await repository.updateAIState { s in if let index = s.changes.firstIndex(where: { $0.id == original.id }) { s.changes[index].isRejected = true } }
             if let id = original.fileTaskID, let directories = taskDirectories { try AIFileTaskWorkspace.markStatus("rejected", taskID: id, directories: directories) }
+            error = nil
             try await reload()
+            status = L10n.tr("已忽略本次整理建议，可以开始新的整理。")
         } catch { self.error = error.localizedDescription }
+    }
+    private func applicationStatus(_ id: UUID) -> String {
+        guard let applied = state.changes.first(where: { $0.id == id }), let deferred = applied.deferredClipIDs, !deferred.isEmpty else {
+            return L10n.tr("整理已应用，可以撤销")
+        }
+        if !applied.isApplied { return L10n.tr("本次建议对应的资料均已变化，已保留原内容，可分析的资料会重新整理。") }
+        return L10n.tr("整理已应用，\(deferred.count) 条变化或不可用的资料已跳过；可分析的资料已重新入队。")
+    }
+    private func recordApplication(_ id: UUID) -> String {
+        let message = applicationStatus(id)
+        guard let result = state.changes.first(where: { $0.id == id }), let directories = taskDirectories else { return message }
+        do { try AIFileTaskWorkspace.recordApplication(result, directories: directories); return message }
+        catch { return message + " · " + L10n.tr("任务文件记录暂未写入：\(error.localizedDescription)") }
+    }
+    private func readableFailure(_ message: String) -> String {
+        let prefix = "The data changed during analysis: "
+        guard message.hasPrefix(prefix), let id = UUID(uuidString: String(message.dropFirst(prefix.count))) else { return message }
+        if state.groups[id] != nil { return L10n.tr("分组在方案生成后有了变化，建议已保留，请继续修正方案后应用。") }
+        return L10n.tr("资料在方案生成后有了变化，建议已保留，请继续修正这份方案。")
     }
     func undo() async {
         guard let last = latestUndoable, !running else { return }

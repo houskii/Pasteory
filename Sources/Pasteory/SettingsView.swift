@@ -203,7 +203,9 @@ struct SettingsView: View {
     @ViewBuilder
     private var destinationContent: some View {
         switch selectedDestination {
-        case .story: StoryView(controller: state.story, settings: settings) { selectedDestination = .aiOrganization }
+        case .story: StoryView(controller: state.story, settings: settings,
+                              onConfigure: { selectedDestination = .aiOrganization },
+                              onViewed: { navigation.storyViewed($0) })
         case .library: EmptyView()
         case .general: general
         case .privacy: privacy

@@ -3,6 +3,7 @@ import SQLite3
 import PasteoryAI
 import Testing
 @testable import PasteoryCore
+@testable import Pasteory
 
 private func aiDirectories() throws -> AppDirectories {
     try AppDirectories(root: FileManager.default.temporaryDirectory.appendingPathComponent("PasteoryAI-" + UUID().uuidString))
@@ -18,6 +19,91 @@ private func aiGrouping(_ clips: [Clip], group: UUID = UUID()) -> AIChangeSet {
     change.commands = [AICommand(kind: .createGroup, targetID: group, name: "Project", definition: "Project source materials"),
                        AICommand(kind: .addItems, targetID: group, clipIDs: clips.map(\.id))]
     return change
+}
+
+@Test func filePlanAppliesStableItemsWhenALinkTitleChangesAndKeepsUndoIdempotent() async throws {
+    let dirs = try aiDirectories(); defer { try? FileManager.default.removeItem(at: dirs.root) }
+    let repo = try SQLiteClipRepository(databaseURL: dirs.databaseFile)
+    var link = aiClip("https://example.test/title-refresh"); link.automaticTitle = "Original title"
+    let stable = aiClip("A stable source"), clips = [link, stable]
+    try await repo.saveBatch(clips)
+    var draft = aiGrouping(clips); draft.fileTaskID = UUID(); draft.isThemeReview = true; draft.inputCount = 2
+    let saved = draft
+    try await repo.updateAIState { $0.changes.append(saved) }
+    var changed = try #require(await repo.clip(id: link.id)); changed.automaticTitle = "Updated title"
+    try await repo.updateExisting(changed)
+    try await repo.applyAIChangeSet(saved)
+    let applied = try #require(await repo.aiState().changes.last)
+    #expect(applied.isApplied && applied.deferredClipIDs == [link.id])
+    #expect(applied.reviewedCommandFingerprint == saved.fingerprint)
+    let state = try await repo.aiState(), group = try #require(state.groups.values.first)
+    #expect(group.memberIDs == [stable.id] && state.automation.dirty[link.id] != nil)
+    #expect(try await repo.clip(id: link.id)?.automaticTitle == "Updated title")
+    #expect(try await repo.clip(id: link.id)?.collectionIDs.isEmpty == true)
+    try await repo.applyAIChangeSet(saved)
+    #expect(try await repo.aiState().groups.count == 1)
+    try await repo.undoAIChangeSet(saved.id)
+    #expect(try await repo.aiState().groups.isEmpty)
+    #expect(try await repo.clip(id: link.id)?.automaticTitle == "Updated title")
+    #expect(try await repo.clip(id: stable.id)?.collectionIDs.isEmpty == true)
+}
+
+@Test func filePlanWithOnlyChangedOrExcludedItemsIsDeferredWithoutCreatingAnEmptyGroup() async throws {
+    let dirs = try aiDirectories(); defer { try? FileManager.default.removeItem(at: dirs.root) }
+    let repo = try SQLiteClipRepository(databaseURL: dirs.databaseFile)
+    let first = aiClip("Changed source"), excluded = aiClip("Later excluded")
+    try await repo.saveBatch([first, excluded])
+    var draft = aiGrouping([first, excluded]); draft.fileTaskID = UUID(); draft.inputCount = 2
+    let saved = draft; try await repo.updateAIState { $0.changes.append(saved) }
+    var edited = first; edited.note = "Human edit"; try await repo.updateExisting(edited)
+    var blocked = excluded; blocked.aiAnalysisExcluded = true; try await repo.updateExisting(blocked)
+    try await repo.applyAIChangeSet(saved)
+    let state = try await repo.aiState(), result = try #require(state.changes.last)
+    #expect(!result.isApplied && result.isRejected && result.deferredClipIDs == [first.id, excluded.id])
+    #expect(state.groups.isEmpty && state.automation.dirty[first.id] != nil && state.automation.dirty[excluded.id] == nil)
+    #expect(try await repo.collections().isEmpty)
+    #expect(try await repo.clip(id: first.id)?.note == "Human edit")
+    try await repo.applyAIChangeSet(saved)
+    #expect(try await repo.aiState() == state)
+}
+
+@Test @MainActor func ignoringAFailedDraftClearsItsOldConflictMessage() async throws {
+    let dirs = try aiDirectories(); defer { try? FileManager.default.removeItem(at: dirs.root) }
+    let repo = try SQLiteClipRepository(databaseURL: dirs.databaseFile)
+    let original = aiClip("Original source"); try await repo.save(original)
+    let draft = aiGrouping([original]); try await repo.updateAIState { $0.changes.append(draft) }
+    var changed = original; changed.note = "Changed after analysis"; try await repo.updateExisting(changed)
+    let suite = "DraftError.\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let controller = AIOrganizationController(repository: repo, settings: AppSettings(defaults: defaults), directories: dirs)
+    try await controller.reload()
+    await controller.apply(draft, selectedIDs: Set(draft.commands.map(\.id)))
+    #expect(controller.error != nil && controller.pending != nil)
+    await controller.reject(draft)
+    #expect(controller.error == nil && controller.pending == nil)
+}
+
+@Test(.enabled(if: ProcessInfo.processInfo.environment["PASTEORY_REVIEW_SNAPSHOT"] != nil))
+func savedFilePlanAppliesOnAnExplicitlyIsolatedDatabaseSnapshot() async throws {
+    let path = try #require(ProcessInfo.processInfo.environment["PASTEORY_REVIEW_SNAPSHOT"])
+    let root = URL(fileURLWithPath: path, isDirectory: true)
+    #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("ISOLATED_VALIDATION").path))
+    guard FileManager.default.fileExists(atPath: root.appendingPathComponent("ISOLATED_VALIDATION").path) else { return }
+    let dirs = try AppDirectories(root: root), repo = try SQLiteClipRepository(databaseURL: dirs.databaseFile)
+    let before = try await repo.aiState()
+    var draft = try #require(before.changes.last { $0.fileTaskID != nil && $0.isRejected && !$0.isApplied })
+    draft.isRejected = false
+    let selected = draft
+    try await repo.updateAIState { state in state.changes.removeAll { $0.id == selected.id }; state.changes.append(selected) }
+    try await repo.applyAIChangeSet(selected)
+    let after = try await repo.aiState(), applied = try #require(after.changes.last { $0.id == selected.id })
+    #expect(applied.isApplied && !(applied.deferredClipIDs ?? []).isEmpty)
+    #expect(after.checkpoint == before.checkpoint)
+    let report: [String: Any] = ["applied": applied.isApplied, "input_count": selected.inputCount,
+                               "deferred_count": applied.deferredClipIDs?.count ?? 0,
+                               "applied_command_count": applied.commands.count, "independent_checkpoint_preserved": after.checkpoint == before.checkpoint]
+    try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+        .write(to: root.appendingPathComponent("validation-result.json"), options: .atomic)
 }
 
 private func persistedAITimestamps(_ url: URL) throws -> [String: [Double?]] {

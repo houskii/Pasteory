@@ -6,13 +6,12 @@ import SwiftUI
 
 struct AISettingsView: View {
     private enum Tab: String, CaseIterable {
-        case connection, analysis, lifecycle, usage
+        case connection, lifecycle, usage
         var title: String {
             switch self {
-            case .connection: L10n.tr("模型连接")
-            case .analysis: L10n.tr("分析策略")
+            case .connection: L10n.tr("模型与分析")
             case .lifecycle: L10n.tr("生命周期与压缩")
-            case .usage: L10n.tr("用量与整理记录")
+            case .usage: L10n.tr("Token 用量")
             }
         }
     }
@@ -28,11 +27,12 @@ struct AISettingsView: View {
         configuration.topN = max(100, min(1000, ((configuration.topN + 50) / 100) * 100))
         _draft = State(initialValue: configuration)
         _credential = State(initialValue: (try? AICredentialStore.load()) ?? "")
+        _tab = State(initialValue: controller.settings.defaults.string(forKey: "aiSettingsTab.v2").flatMap(Tab.init(rawValue:)) ?? .connection)
 #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
         if arguments.contains("--debug-ai-lifecycle") { _tab = State(initialValue: .lifecycle) }
         if arguments.contains("--debug-ai-usage") { _tab = State(initialValue: .usage) }
-        if arguments.contains("--debug-ai-analysis") { _tab = State(initialValue: .analysis) }
+        if arguments.contains("--debug-ai-analysis") { _tab = State(initialValue: .connection) }
 #endif
     }
 
@@ -42,21 +42,31 @@ struct AISettingsView: View {
                 ForEach(Tab.allCases, id: \.self) { Text($0.title).tag($0) }
             }
             .pickerStyle(.segmented).padding(.horizontal, 22).padding(.vertical, 14)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    if let message = saveError ?? controller.error {
-                        Text(message).font(.callout).foregroundStyle(.red).textSelection(.enabled)
+            ScrollViewReader { reader in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        if let message = saveError ?? controller.error {
+                            Text(message).font(.callout).foregroundStyle(.red).textSelection(.enabled)
+                        }
+                        if !controller.status.isEmpty {
+                            HStack { if controller.running { ProgressView().controlSize(.small) }; Text(controller.status).font(.caption).foregroundStyle(.secondary); Spacer() }
+                        }
+                        switch tab {
+                        case .connection:
+                            connection
+                            analysis.id("analysis")
+                        case .lifecycle: lifecycle
+                        case .usage: usage
+                        }
+                    }.padding(22)
+                }
+                .onAppear {
+#if DEBUG
+                    if ProcessInfo.processInfo.arguments.contains("--debug-ai-analysis") {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { reader.scrollTo("analysis", anchor: .top) }
                     }
-                    if !controller.status.isEmpty {
-                        HStack { if controller.running { ProgressView().controlSize(.small) }; Text(controller.status).font(.caption).foregroundStyle(.secondary); Spacer() }
-                    }
-                    switch tab {
-                    case .connection: connection
-                    case .analysis: analysis
-                    case .lifecycle: lifecycle
-                    case .usage: usage
-                    }
-                }.padding(22)
+#endif
+                }
             }
             Divider()
             HStack {
@@ -73,6 +83,7 @@ struct AISettingsView: View {
             }.padding(16)
         }
         .sheet(isPresented: $controller.showingReview) { AIReviewView(controller: controller) }
+        .onChange(of: tab) { _, value in controller.settings.defaults.set(value.rawValue, forKey: "aiSettingsTab.v2") }
         .onChange(of: controller.models) { _, models in
             draft.supportedReasoningLevels = models.first { $0.id == draft.model }?.reasoningLevels ?? []
             if !draft.supportedReasoningLevels.contains(draft.reasoning) { draft.reasoning = "auto" }
@@ -138,7 +149,7 @@ struct AISettingsView: View {
             AISettingsCard(title: "Story") {
                 Toggle(L10n.tr("启用 AI 总结"), isOn: Binding(get: { draft.storyEnabled == true }, set: { draft.storyEnabled = $0 }))
                     .toggleStyle(.switch)
-                Text(L10n.tr("开启后，设置页的资料库上方显示 Story。手动生成最近 7 天的回顾，看看在做的事情、AI 观察到的进展，以及写给你的一点鼓励。"))
+                Text(L10n.tr("开启后自动生成最近 7 天的 Story，之后每 7 天在设备闲时静默更新。每版新 Story 在打开设置时优先展示 3 次，之后恢复上次浏览的页面。"))
                     .font(.caption).foregroundStyle(.secondary)
             }
             AISettingsCard(title: L10n.tr("分析范围与触发")) {
@@ -180,18 +191,7 @@ struct AISettingsView: View {
                 Text(L10n.tr("不满意现有主题时，请到资料库的 AI 整理菜单选择“重新整理最近内容…”，按 Top N 重新规划主题并分类，包含未分组内容；也可另选全库范围。"))
                     .font(.caption).foregroundStyle(.secondary)
             }
-            AISettingsCard(title: L10n.tr("预算与调用上限")) {
-                Stepper(value: $draft.dailyTokenLimit, in: 1000...10_000_000, step: 10_000) { Text(L10n.tr("每日 token 上限：\(draft.dailyTokenLimit)")) }
-                Stepper(value: $draft.dailyAutomaticRuns, in: 1...1000) { Text(L10n.tr("每日自动任务最多：\(draft.dailyAutomaticRuns) 次")) }
-                Stepper(value: $draft.maxInputTokens, in: 1000...128_000, step: 1000) { Text(L10n.tr("单次输入预算：\(draft.maxInputTokens) tokens")) }
-                Stepper(value: $draft.maxOutputTokens, in: 256...16_384, step: 256) { Text(L10n.tr("单次输出上限：\(draft.maxOutputTokens) tokens")) }
-                Stepper(value: Binding(get: { draft.fileAgentRoundLimit }, set: { draft.agentRoundLimit = $0 }), in: 1...256) { Text(L10n.tr("每次继续最多运行：\(draft.fileAgentRoundLimit) 轮")) }
-                Button(L10n.tr("打开 AI 任务历史")) { controller.openTaskHistory() }
-                Text(L10n.tr("任务完成后保留 Prompt、输入快照、输出方案、执行记录和模型用量；存储看板单列 AI 任务历史。"))
-                    .font(.caption).foregroundStyle(.secondary)
-                Text(L10n.tr("每次请求先预留预算。失败或超时的未知用量保守估算，不显示为零。"))
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+
         }
     }
 
@@ -245,6 +245,21 @@ struct AISettingsView: View {
 
     private var usage: some View {
         VStack(alignment: .leading, spacing: 16) {
+            AISettingsCard(title: L10n.tr("预算与调用上限")) {
+                Stepper(value: $draft.dailyTokenLimit, in: 1000...10_000_000, step: 10_000) { Text(L10n.tr("每日 token 上限：\(draft.dailyTokenLimit)")) }
+                Stepper(value: $draft.dailyAutomaticRuns, in: 1...1000) { Text(L10n.tr("每日自动任务最多：\(draft.dailyAutomaticRuns) 次")) }
+                Stepper(value: $draft.organizationPolicy.nightlyTokenLimit, in: 1000...10_000_000, step: 10_000) { Text(L10n.tr("每晚整理 token 上限：\(draft.organizationPolicy.nightlyTokenLimit)")) }
+                Text(L10n.tr("分组整理和 Story 共享每日 token 预算与自动任务上限。"))
+                    .font(.caption).foregroundStyle(.secondary)
+                Stepper(value: $draft.maxInputTokens, in: 1000...128_000, step: 1000) { Text(L10n.tr("单次输入预算：\(draft.maxInputTokens) tokens")) }
+                Stepper(value: $draft.maxOutputTokens, in: 256...16_384, step: 256) { Text(L10n.tr("单次输出上限：\(draft.maxOutputTokens) tokens")) }
+                Stepper(value: Binding(get: { draft.fileAgentRoundLimit }, set: { draft.agentRoundLimit = $0 }), in: 1...256) { Text(L10n.tr("每次继续最多运行：\(draft.fileAgentRoundLimit) 轮")) }
+                Button(L10n.tr("打开 AI 任务历史")) { controller.openTaskHistory() }
+                Text(L10n.tr("任务完成后保留 Prompt、输入快照、输出方案、执行记录和模型用量；存储看板单列 AI 任务历史。"))
+                    .font(.caption).foregroundStyle(.secondary)
+                Text(L10n.tr("每次请求先预留预算。失败或超时的未知用量保守估算，不显示为零。"))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 140))], spacing: 12) {
                 metricTile(L10n.tr("今日总量"), value: controller.todayTokens.formatted())
                 metricTile(L10n.tr("输入 tokens"), value: controller.todayUsage.reduce(0) { $0 + $1.inputTokens }.formatted())

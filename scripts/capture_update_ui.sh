@@ -52,6 +52,7 @@ capture settings-connections-zh --debug-language=zh-Hans --debug-open-settings -
 capture settings-connections-en --debug-language=en --debug-open-settings --debug-settings-links --debug-link-connections --debug-session-refresh-seed --debug-settings-narrow
 capture settings-story-zh --debug-language=zh-Hans --debug-open-settings --debug-settings-story --debug-story-seed --debug-settings-wide
 capture settings-story-en --debug-language=en --debug-open-settings --debug-settings-story --debug-story-seed --debug-settings-narrow
+capture settings-story-disabled --debug-language=en --debug-open-settings --debug-story-disabled
 capture settings-story-empty --debug-language=zh-Hans --debug-open-settings --debug-settings-story --debug-story-empty
 capture update-amber --debug-show-quick-window --debug-update-available --debug-theme=blue
 capture update-cyan-narrow --debug-show-quick-window --debug-update-available --debug-theme=orange --debug-panel-narrow
@@ -96,6 +97,7 @@ for name in ("settings-story-zh", "settings-story-en", "settings-story-empty"):
     metadata = json.loads((root / (name + ".png.json")).read_text())
     assert metadata["storyEntryVisible"] and metadata["settingsDestination"] == "story", metadata
     assert metadata["storyReportCount"] == (0 if name.endswith("empty") else 1), metadata
-assert not json.loads((root / "settings-language-en.png.json").read_text())["storyEntryVisible"]
+assert json.loads((root / "settings-language-en.png.json").read_text())["storyEntryVisible"]
+assert not json.loads((root / "settings-story-disabled.png.json").read_text())["storyEntryVisible"]
 print("Live language switching and original demo titles verified in both directions.")
 PYTHON

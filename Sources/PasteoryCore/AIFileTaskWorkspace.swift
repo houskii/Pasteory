@@ -4,6 +4,15 @@ import PasteoryAI
 import UniformTypeIdentifiers
 
 public actor AIFileTaskWorkspace: AIFileAgentWorkspace {
+    public nonisolated static func recordApplication(_ result: AIChangeSet, directories: AppDirectories) throws {
+        guard let taskID = result.fileTaskID else { return }
+        let directory = directories.aiTasks.appendingPathComponent(taskID.uuidString.lowercased() + ".agent")
+        guard FileManager.default.fileExists(atPath: directory.path) else { return }
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        try encoder.encode(result).write(to: directory.appendingPathComponent("output/applied-changes.json"), options: .atomic)
+        try markStatus(result.isApplied ? "applied" : "superseded", taskID: taskID, directories: directories)
+    }
+
     public nonisolated static func markStatus(_ status: String, taskID: UUID, directories: AppDirectories) throws {
         let file = directories.aiTasks.appendingPathComponent(taskID.uuidString.lowercased() + ".agent/history.json")
         guard FileManager.default.fileExists(atPath: file.path), case .object(var history) = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: file)) else { return }
@@ -17,6 +26,7 @@ public actor AIFileTaskWorkspace: AIFileAgentWorkspace {
     private let configuration: AIConfiguration
     private let trigger: String
     private let purpose: AIFileTaskPurpose
+    private let previousEncouragements: [String]
     private let directories: AppDirectories
     private var representations: [UUID: ClipRepresentation]
     private var history: [String: JSONValue]
@@ -24,10 +34,11 @@ public actor AIFileTaskWorkspace: AIFileAgentWorkspace {
 
     public init(input: AIFileTaskInput, clips: [Clip], groups: [UUID: AIGroupProfile], reservedNames: Set<String>,
                 configuration: AIConfiguration, directories: AppDirectories, trigger: String = "manual",
-                purpose: AIFileTaskPurpose = .organization) throws {
+                purpose: AIFileTaskPurpose = .organization, previousEncouragements: [String] = []) throws {
         self.input = input; self.groups = groups; self.reservedNames = reservedNames
         self.configuration = configuration; self.directories = directories; self.trigger = trigger
         self.purpose = purpose
+        self.previousEncouragements = Array(previousEncouragements.prefix(3))
         self.directory = directories.aiTasks.appendingPathComponent(input.taskID.uuidString.lowercased() + ".agent", isDirectory: true)
         self.representations = Dictionary(clips.flatMap(\.items).flatMap(\.representations).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         self.outputLimit = min(96_000, max(2000, configuration.maxInputTokens))
@@ -99,11 +110,13 @@ public actor AIFileTaskWorkspace: AIFileAgentWorkspace {
 
     private func prepareStory(_ checkpoint: AIStoryCheckpoint) throws -> String {
         try write(input, to: "items.json")
+        try write(previousEncouragements, to: "existing/previous-encouragements.json")
         try write(JSONValue.object(["changed_clip_ids": .array([])]), to: "scratch/content-changes.json")
         try write(Array(groups.values).sorted { $0.id.uuidString < $1.id.uuidString }, to: "existing/groups.json")
         try write(AIStoryPlan.schema(taskID: input.taskID), to: "plan.schema.json")
         try write(JSONValue.object([
             "task_id": .string(input.taskID.uuidString), "task_kind": .string("story"), "trigger": .string("story"),
+            "story_prompt_version": .number(Double(AIStorySchedule.promptVersion)),
             "scope_count": .number(Double(input.items.count)), "input_file": .string("items.json"),
             "existing_groups_file": .string("existing/groups.json"), "output_file": .string("output/plan.json"),
             "model": .string(configuration.model), "reasoning_effort": .string(configuration.reasoning),

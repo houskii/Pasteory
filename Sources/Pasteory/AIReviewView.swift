@@ -52,7 +52,7 @@ struct AIReviewView: View {
                     }
                 }
                 HStack {
-                    Text(L10n.tr("版本变化或引用失效时，整批停止并保留现有数据。")).font(.caption2).foregroundStyle(.secondary)
+                    Text(grouped ? L10n.tr("变化的资料会跳过并重新入队，其余建议正常应用；分组结构变化时保留方案供复核。") : L10n.tr("版本变化或引用失效时，整批停止并保留现有数据。")).font(.caption2).foregroundStyle(.secondary)
                     Spacer()
                     Button(L10n.tr("忽略本次")) { Task { await controller.reject(pending); dismiss() } }
                     if grouped {

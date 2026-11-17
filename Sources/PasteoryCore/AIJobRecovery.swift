@@ -77,7 +77,7 @@ public enum AIJobRecovery {
 
     /// Remove stale assignments and every derived result that cites them, while
     /// retaining independent commands and stable theme IDs.
-    private static func prune(_ draft: inout AIChangeSet, invalidIDs: Set<UUID>, minimumThemeMembers: Int) -> Set<UUID> {
+    public static func prune(_ draft: inout AIChangeSet, invalidIDs: Set<UUID>, minimumThemeMembers: Int) -> Set<UUID> {
         var discarded = invalidIDs, dependents = Set<UUID>()
         while true {
             var droppedTargets = Set<UUID>(), retired = Set<UUID>()

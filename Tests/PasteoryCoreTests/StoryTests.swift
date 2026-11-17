@@ -56,6 +56,36 @@ private actor StoryTestTransport: AIChatTransport {
     }
 }
 
+@MainActor private final class StoryIdleFixture { var readyToResume = false }
+
+@Test @MainActor func periodicStoryPausesForUserActivityAndResumesAutomaticallyWithoutRerequestingItsPlan() async throws {
+    let f = try StoryFixture(); defer { f.cleanup() }
+    try await f.repository.save(storyClip("A retained source at the weekly boundary"))
+    let first = f.controller(StoryTestTransport())
+    first.generate(); await first.waitUntilIdle()
+    let idle = StoryIdleFixture(), transport = StoryTestTransport()
+    let controller = f.controller(transport)
+    controller.clock = { storyNow.addingTimeInterval(AIStorySchedule.interval) }
+    controller.idleTime = { [weak controller] in
+        guard !idle.readyToResume, let task = controller?.checkpoint?.id else { return 600 }
+        let output = f.directories.aiTasks.appendingPathComponent(task.uuidString.lowercased() + ".agent/output/plan.json")
+        // The user returns after the tool saved its work. That completed tool
+        // must survive the pause; the next idle period continues the same task.
+        return FileManager.default.fileExists(atPath: output.path) ? 0 : 600
+    }
+    await controller.load(); await controller.tick(); await controller.waitUntilIdle()
+    #expect(controller.reports.count == 1 && controller.checkpoint != nil && controller.error == nil)
+    #expect(!f.defaults.bool(forKey: "storyAutomationPaused"))
+    let requests = await transport.requests
+    await controller.tick(); await controller.waitUntilIdle()
+    #expect(await transport.requests == requests)
+    idle.readyToResume = true
+    await controller.tick(); await controller.waitUntilIdle()
+    #expect(controller.error == nil, "\(controller.error ?? "")")
+    #expect(controller.reports.count == 2 && controller.checkpoint == nil && controller.error == nil)
+    #expect(await transport.requests == 2)
+}
+
 @MainActor
 private final class StoryFixture {
     let suite = "Pasteory.StoryTests.\(UUID())"
@@ -84,11 +114,74 @@ private final class StoryFixture {
     #expect(SettingsDestination.primaryDestinations(storyEnabled: false) == [.library])
     #expect(SettingsDestination.primaryDestinations(storyEnabled: true) == [.story, .library])
     var configuration = try JSONDecoder().decode(AIConfiguration.self, from: JSONEncoder().encode(AIConfiguration()))
-    #expect(configuration.storyEnabled != true)
+    #expect(configuration.storyEnabled == true)
     configuration.storyEnabled = true
     #expect(try JSONDecoder().decode(AIConfiguration.self, from: JSONEncoder().encode(configuration)).storyEnabled == true)
     let legacy = try JSONDecoder().decode(AIOrganizationState.self, from: JSONEncoder().encode(AIOrganizationState()))
     #expect(legacy.stories == nil && legacy.storyCheckpoint == nil)
+}
+
+@Test @MainActor func firstStoryGeneratesAutomaticallyAndWeeklyRefreshWaitsForIdle() async throws {
+    let f = try StoryFixture(); defer { f.cleanup() }
+    try await f.repository.save(storyClip("A synthetic weekly source"))
+    let transport = StoryTestTransport(), first = f.controller(transport)
+    first.idleTime = { 0 }
+    await first.tick(); await first.waitUntilIdle()
+    #expect(first.reports.count == 1 && first.reports.first?.promptVersion == AIStorySchedule.promptVersion)
+    let usage = try await f.repository.aiState().usage
+    #expect(!usage.isEmpty && usage.allSatisfy { $0.automatic == true })
+    let requests = await transport.requests
+    await first.tick(); await first.waitUntilIdle()
+    #expect(await transport.requests == requests)
+    let nextTransport = StoryTestTransport(), next = f.controller(nextTransport)
+    await next.load(); next.idleTime = { 600 }
+    next.clock = { storyNow.addingTimeInterval(AIStorySchedule.interval - 1) }
+    await next.tick(); await next.waitUntilIdle()
+    #expect(await nextTransport.requests == 0)
+    next.clock = { storyNow.addingTimeInterval(AIStorySchedule.interval) }; next.idleTime = { 0 }
+    await next.tick(); await next.waitUntilIdle()
+    #expect(await nextTransport.requests == 0)
+    next.idleTime = { 600 }
+    await next.tick(); await next.waitUntilIdle()
+    #expect(next.reports.count == 2 && next.reports.first?.id != first.reports.first?.id)
+    #expect(next.reports.first?.periodStart == storyNow)
+}
+
+@Test @MainActor func anEmptyLibraryWaitsWithoutSpendingAndGeneratesAfterTheFirstEligibleCopy() async throws {
+    let f = try StoryFixture(); defer { f.cleanup() }
+    let transport = StoryTestTransport(), controller = f.controller(transport)
+    await controller.tick(); await controller.waitUntilIdle()
+    #expect(await transport.requests == 0 && controller.checkpoint == nil)
+    #expect(f.defaults.object(forKey: "storyLastAutomaticAttempt") == nil)
+    try await f.repository.save(storyClip("The first eligible copy"))
+    await controller.tick(); await controller.waitUntilIdle()
+    #expect(controller.reports.count == 1 && controller.error == nil)
+}
+
+@Test @MainActor func automaticStoryWaitsForOtherAIWorkAndHonorsSharedRunAndTokenLimits() async throws {
+    let f = try StoryFixture(); defer { f.cleanup() }
+    try await f.repository.save(storyClip("A source waiting for automatic processing"))
+    let transport = StoryTestTransport(), controller = f.controller(transport)
+    controller.organizationBusy = { true }
+    await controller.tick(); await controller.waitUntilIdle()
+    #expect(await transport.requests == 0)
+    controller.organizationBusy = { false }
+    f.settings.aiConfiguration.dailyAutomaticRuns = 1
+    var used = AIUsageRecord(runID: UUID(), requestedModel: "synthetic", inputTokens: 1, outputTokens: 1,
+                             estimated: false, succeeded: true, trigger: "story")
+    used.date = storyNow; used.automatic = true
+    let runLimit = used; try await f.repository.updateAIState { $0.usage = [runLimit] }
+    await controller.tick(); await controller.waitUntilIdle()
+    #expect(await transport.requests == 0)
+    f.settings.aiConfiguration.dailyAutomaticRuns = 10; f.settings.aiConfiguration.dailyTokenLimit = 1000
+    used.inputTokens = 1000
+    let tokenLimit = used; try await f.repository.updateAIState { $0.usage = [tokenLimit] }
+    await controller.tick(); await controller.waitUntilIdle()
+    #expect(await transport.requests == 0)
+    try await f.repository.updateAIState { $0.usage = [] }
+    f.defaults.set(true, forKey: "storyAutomationPaused")
+    await controller.tick(); await controller.waitUntilIdle()
+    #expect(await transport.requests == 0)
 }
 
 @Test @MainActor func storyScopeUsesSevenDaysOfCopyOrPasteAndHonorsExclusions() {
@@ -223,6 +316,7 @@ private final class StoryFixture {
     var configuration = try JSONDecoder().decode(AIConfiguration.self, from: data)
     configuration.enabled = true; configuration.storyEnabled = true; configuration.agentRoundLimit = 12
     f.settings.aiConfiguration = configuration
+    f.settings.appLanguage = .simplifiedChinese
     let now = Date()
     let texts = [
         "演示工作记录：在剪贴板工具中核对图片 OCR 排版和纯文本复制。",
