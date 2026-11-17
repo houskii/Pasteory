@@ -1,0 +1,37 @@
+name: Verify signing recovery
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-signing.yml'
+      - 'Config/UpdatePublicKey.txt'
+      - 'Config/SigningRecovery*'
+      - 'release/signing/**'
+      - 'scripts/prepare_ci_release.sh'
+      - 'scripts/signing_recovery.py'
+      - 'scripts/check_release_signing.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  restore-and-sign:
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Select OpenSSL 3 and source version
+        run: |
+          echo "$(brew --prefix openssl@3)/bin" >> "$GITHUB_PATH"
+          version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Config/Info.plist)
+          echo "PASTEORY_RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+      - name: Recover existing signing identities from GitHub Secret
+        env:
+          PASTEORY_RECOVERY_PRIVATE_KEY: ${{ secrets.PASTEORY_RECOVERY_PRIVATE_KEY }}
+        run: ./scripts/prepare_ci_release.sh
+      - name: Verify a real signature against the fixed public key
+        run: python3 scripts/check_release_signing.py --tools "$PASTEORY_SPARKLE_TOOLS"

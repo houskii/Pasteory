@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "first_version": "0.1.49",
+  "first_build": 54,
+  "manual_install_required_for_versions_before": "0.1.49",
+  "reason": "The previous release signing key is unavailable. The user authorized a one-time client migration.",
+  "previous_public_key_sha256": "ad8213eabc49fee3b7a3621d2096b91d27d5654313c8ac736bcd23501364fcd0",
+  "public_key_sha256": "22ac712c1e48ea0c95c327a71557ed5e189d5b36faa03a56cd2aad2642383f20",
+  "legacy_public_key_file": "Config/UpdatePublicKey-legacy.txt",
+  "recovery_archive": "release/signing/recovery-0.1.49.cms"
+}

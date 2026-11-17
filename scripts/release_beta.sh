@@ -42,6 +42,11 @@ autoload -Uz is-at-least
 [[ "$version" != "$old_version" && "$build" -gt "$old_build" ]]
 is-at-least "$old_version" "$version"
 
+phase="检查更新签名密钥"
+signing_tools=${PASTEORY_SPARKLE_TOOLS:-$PWD/.build/artifacts/sparkle/Sparkle/bin}
+if [[ ! -x "$signing_tools/generate_keys" ]]; then swift package resolve; fi
+python3 "$SCRIPT_DIR/check_release_signing.py" --tools "$signing_tools"
+
 phase="运行测试和签名打包"
 make test
 PASTEORY_BUILD_VARIANT=production PASTEORY_BUILD_CONFIGURATION=release make verify

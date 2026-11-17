@@ -26,6 +26,9 @@ final class UpdateService: NSObject, ObservableObject, SPUUserDriver, SPUUpdater
 
     private let defaults: UserDefaults
     private let bundle: Bundle
+#if DEBUG
+    private let integration: DebugUpdateIntegration?
+#endif
     private var updater: SPUUpdater?
     private var choiceReply: ((SPUUserUpdateChoice) -> Void)?
     private var cancellation: (() -> Void)?
@@ -41,20 +44,32 @@ final class UpdateService: NSObject, ObservableObject, SPUUserDriver, SPUUpdater
     init(defaults: UserDefaults = .standard, bundle: Bundle = .main) {
         self.defaults = defaults
         self.bundle = bundle
+#if DEBUG
+        integration = DebugUpdateIntegration(bundleIdentifier: bundle.bundleIdentifier, info: bundle.infoDictionary ?? [:])
+#endif
         currentVersion = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? L10n.tr("未知")
         currentBuild = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
         automaticChecksEnabled = defaults.object(forKey: "SUEnableAutomaticChecks") as? Bool ?? true
         lastCheckedAt = defaults.object(forKey: checkDateKey) as? Date
+        super.init()
         if let data = defaults.data(forKey: cacheKey),
            let update = try? JSONDecoder().decode(AppUpdate.self, from: data),
            update.isNewer(thanBuild: currentBuild),
-           AppUpdatePolicy.isGitHubDownload(update.downloadURL) {
+           allowsDownload(update.downloadURL) {
             availableUpdate = update
         }
-        super.init()
     }
 
-    var canInstall: Bool { choiceReply != nil && AppUpdatePolicy.isGitHubDownload(availableUpdate?.downloadURL) }
+    private func allowsDownload(_ url: URL?) -> Bool {
+#if DEBUG
+        if let integration { return integration.allows(url) }
+#endif
+        return AppUpdatePolicy.isGitHubDownload(url)
+    }
+#if DEBUG
+    var isIntegrationFixture: Bool { integration != nil }
+#endif
+    var canInstall: Bool { choiceReply != nil && allowsDownload(availableUpdate?.downloadURL) }
     var canCloseDialog: Bool {
         stage != .extracting && stage != .installing && !(stage == .downloading && cancellation == nil)
     }
@@ -75,15 +90,19 @@ final class UpdateService: NSObject, ObservableObject, SPUUserDriver, SPUUpdater
             return
         }
 #endif
-        guard PasteoryRuntimeIdentity.identity(for: bundle.bundleIdentifier).variant == .production else {
+        var allowedIdentity = PasteoryRuntimeIdentity.identity(for: bundle.bundleIdentifier).variant == .production
+#if DEBUG
+        allowedIdentity = allowedIdentity || integration != nil
+#endif
+        guard allowedIdentity else {
             configurationMessageKey = "QA 版本使用隔离环境，不接收正式应用更新。"
             automaticChecksEnabled = false
             availableUpdate = nil
             return
         }
 #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("--debug-ui-qa")
-            || ProcessInfo.processInfo.arguments.contains("--debug-data-root") {
+        if integration == nil && (ProcessInfo.processInfo.arguments.contains("--debug-ui-qa")
+            || ProcessInfo.processInfo.arguments.contains("--debug-data-root")) {
             configurationMessageKey = "隔离调试环境不检查正式更新。"
             return
         }
@@ -199,7 +218,7 @@ final class UpdateService: NSObject, ObservableObject, SPUUserDriver, SPUUpdater
     }
 
     func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
-        guard AppUpdatePolicy.isGitHubDownload(item.fileURL) else { return }
+        guard allowsDownload(item.fileURL) else { return }
         cache(descriptor(for: item))
     }
 
@@ -247,7 +266,7 @@ final class UpdateService: NSObject, ObservableObject, SPUUserDriver, SPUUpdater
 
     func showUpdateFound(with appcastItem: SUAppcastItem, state: SPUUserUpdateState, reply: @escaping (SPUUserUpdateChoice) -> Void) {
         cancellation = nil
-        guard AppUpdatePolicy.isGitHubDownload(appcastItem.fileURL) else {
+        guard allowsDownload(appcastItem.fileURL) else {
             cache(nil)
             lastError = L10n.tr("此更新未提供可安装的 GitHub 发布包，请到发布页面查看说明。")
             stage = .failed

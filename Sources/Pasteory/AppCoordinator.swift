@@ -127,7 +127,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
         configureStatusItem()
         updateService.start()
 #if DEBUG
-        if !ProcessInfo.processInfo.arguments.contains("--debug-disable-hotkey") {
+        if !ProcessInfo.processInfo.arguments.contains("--debug-disable-hotkey"), !updateService.isIntegrationFixture {
             registerHotKey()
         }
 #else
@@ -149,12 +149,13 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
         maintenanceTimer = Timer.scheduledTimer(withTimeInterval: 86_400, repeats: true) { [weak state] _ in
             Task { @MainActor in await state?.runArchive(automatic: true) }
         }
-        settings.monitoringEnabled = true
 #if DEBUG
-        if !ProcessInfo.processInfo.arguments.contains("--debug-disable-monitor") {
+        settings.monitoringEnabled = !updateService.isIntegrationFixture
+        if !ProcessInfo.processInfo.arguments.contains("--debug-disable-monitor"), !updateService.isIntegrationFixture {
             monitor.start()
         }
 #else
+        settings.monitoringEnabled = true
         monitor.start()
 #endif
         if !settings.completedOnboarding {

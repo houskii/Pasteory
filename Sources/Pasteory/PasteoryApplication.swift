@@ -66,12 +66,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let settingsDefaults: UserDefaults
 #if DEBUG
             let arguments = ProcessInfo.processInfo.arguments
+            let updateFixture = DebugUpdateIntegration(bundleIdentifier: Bundle.main.bundleIdentifier, info: Bundle.main.infoDictionary ?? [:])
             if let index = arguments.firstIndex(of: "--debug-data-root"), arguments.indices.contains(index + 1) {
                 let debugRoot = URL(fileURLWithPath: arguments[index + 1], isDirectory: true)
                 directories = try AppDirectories(root: debugRoot)
                 settingsDefaults = UserDefaults(
                     suiteName: "com.pasteory.debug.\(debugRoot.lastPathComponent)"
                 ) ?? .standard
+            } else if let updateFixture {
+                directories = try AppDirectories(root: updateFixture.dataRoot)
+                settingsDefaults = UserDefaults(suiteName: "com.pasteory.debug.\(updateFixture.dataRoot.lastPathComponent)") ?? .standard
             } else {
                 directories = try AppDirectories()
                 settingsDefaults = .standard
@@ -90,6 +94,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let storageAnalyticsService = StorageAnalyticsService(repository: repository, directories: directories)
             let settings = AppSettings(defaults: settingsDefaults, logsDirectory: directories.logs)
 #if DEBUG
+            if updateFixture != nil {
+                settings.monitoringEnabled = false
+                settings.clearGlobalShortcut()
+                settings.aiConfiguration.enabled = false
+                settings.linkResolutionEnabled = false
+                settings.completedOnboarding = true
+            }
             if let argument = arguments.first(where: { $0.hasPrefix("--debug-group-profile=") }),
                let profile = GroupViewProfile(rawValue: String(argument.dropFirst("--debug-group-profile=".count))) {
                 settings.groupPresentation.profile = profile
@@ -125,6 +136,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let coordinator = AppCoordinator(state: state, settings: settings, attachments: attachments, defaults: settingsDefaults)
             self.coordinator = coordinator
             coordinator.start()
+#if DEBUG
+            updateFixture?.recordLaunch(bundle: .main, actualRoot: directories.root)
+#endif
         } catch {
             let alert = NSAlert(error: error)
             alert.messageText = L10n.tr("Pasteory 无法启动")

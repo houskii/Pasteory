@@ -36,7 +36,7 @@ make app
   --account app.pasteory.Pasteory.updates -p > Config/UpdatePublicKey.txt
 ```
 
-公钥可以进入仓库。私钥留在发布者钥匙串中，不进入仓库、安装包、发布说明或日志。
+公钥可以进入仓库。私钥保存在发布者钥匙串和仓库外的受限备份目录中，不进入仓库、安装包、发布说明或日志。
 发布工具会拒绝本地签名密钥与应用内公钥不一致的安装包。不要因为缺少密钥而重新生成并替换已发布公钥。
 迁移发布机器时，按 Sparkle 官方流程转移现有密钥，并继续使用原有应用代码签名身份。
 
@@ -60,7 +60,50 @@ python3 scripts/signing_recovery.py restore \
   --update-public-key Config/UpdatePublicKey.txt
 ```
 
-只有首次发布会创建新的更新密钥；没有恢复材料时，不以新密钥替换客户端已信任的公钥。
+只有首次发布会创建新的更新密钥；没有恢复材料时，不自动替换客户端已信任的公钥。需要更换密钥时，必须明确安排客户端迁移。
+
+## 换机与密钥备份
+
+更新密钥可以导出、导入，不绑定某一台 Mac。目前保存方式如下：
+
+| 位置 | 保存内容 | 用途 |
+| --- | --- | --- |
+| 发布 Mac 登录钥匙串 | Sparkle 更新私钥 | 本机日常签名 |
+| 仓库外 `~/Library/Application Support/Pasteory/ReleaseSecrets/` | 更新私钥、恢复私钥及公开证书 | 本机恢复和转移；目录权限 0700、私钥文件权限 0600 |
+| 仓库 `release/signing/` | 加密恢复包 | 包含原代码签名身份和更新私钥，公开存放也需要恢复私钥才能解密 |
+| GitHub Actions Secret `PASTEORY_RECOVERY_PRIVATE_KEY` | 解密恢复包的私钥 | GitHub 的新 macOS runner 无需访问发布 Mac，就能恢复同一签名身份 |
+
+换机后可以直接通过 `Build and release Pasteory Beta` 工作流发布。`Verify signing recovery` 工作流单独验证 Secret、解密、代码签名身份恢复和真实 Ed25519 签名，不安装、不发布任何应用，也不上传明文密钥。
+
+若要从新 Mac 本地发布，先取回独立保管的 `recovery-private.pem`，安装支持 CMS AES-256-GCM 的 OpenSSL 3 或更新版本，再恢复：
+
+```bash
+umask 077
+mkdir -p "$HOME/Library/Application Support/Pasteory/ReleaseSecrets"
+python3 scripts/signing_recovery.py restore \
+  --certificate Config/SigningRecovery.crt \
+  --private-key /secure/path/recovery-private.pem \
+  --encrypted "$(cat Config/SigningRecoveryArchive.txt)" \
+  --signing-directory "$HOME/Library/Application Support/Pasteory/Signing" \
+  --update-key "$HOME/Library/Application Support/Pasteory/ReleaseSecrets/sparkle-update-private.key" \
+  --update-public-key Config/UpdatePublicKey.txt
+swift package resolve
+.build/artifacts/sparkle/Sparkle/bin/generate_keys \
+  --account app.pasteory.Pasteory.updates \
+  -f "$HOME/Library/Application Support/Pasteory/ReleaseSecrets/sparkle-update-private.key"
+./scripts/ensure_local_signing_identity.sh >/dev/null
+python3 scripts/check_release_signing.py
+```
+
+请将 `recovery-private.pem` 另存一份到密码管理器或离线盘。仓库已经包含所需公开证书和加密恢复包。GitHub Secret 设置后不能从网页直接读回；它可以供工作流使用，但不代替自己保管的备份。不要将恢复私钥提交 Git 或上传到 Release 附件。
+
+丢失本机密钥时，使用备份恢复即可。若所有私钥和可解密备份都丢失，仍可生成新密钥、构建并发布 DMG。现有客户端的应用内更新需要迁移：当前 Pasteory 使用本地开发签名，用户须手动安装一次包含新公钥的版本，之后继续使用应用内升级。
+
+## 0.1.49 的一次性密钥迁移
+
+原更新私钥和原恢复私钥已无法找回。此次按用户确认的方案生成新更新密钥，保留原应用代码签名身份，并重新建立加密恢复包和 GitHub Secret。旧公开证书、旧公钥和旧加密包保留，迁移信息记录在 `Config/UpdateKeyMigration.json`。
+
+0.1.48 及更早版本需要手动安装一次 0.1.49 或更新版本。旧客户端不会因为线上索引改用新密钥就自动信任它。新客户端嵌入新公钥，后续更新复用同一密钥签名。
 
 ## 准备发布
 
@@ -104,6 +147,8 @@ python3 scripts/prepare_update.py \
 DEBUG 构建可在隔离数据环境中使用 `--debug-update-available` 显示演示更新按钮，配合
 `--debug-theme=orange` 或任意主题枚举值（`blueViolet`、`blue`、`purple`、`pink`、`orange`、`green`、`graphite`）验收。
 演示数据不执行下载和安装；其他隔离调试模式也不访问正式更新源。
+
+真实安装验收另使用 DEBUG QA 测试包：只有 QA 身份、匹配 UUID 的本地标记、独立资料目录及 `127.0.0.1` 固定端口同时满足时，才允许连接测试更新源和下载该端口的 `/updates/` 文件。标记和资料目录随测试包保留，Sparkle 重启后仍使用相同隔离资料。正式 Release 不包含此入口。
 
 发布前还需要在 macOS 实测已签名旧包到新包的完整升级：检查弹窗、取消、下载失败、无效签名、自动重启、正式／QA 隔离、资料与用户快捷键保留，以及辅助功能授权是否保留。
 
