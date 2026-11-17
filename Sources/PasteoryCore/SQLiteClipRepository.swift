@@ -62,7 +62,7 @@ public actor SQLiteClipRepository: ClipRepository {
     public func saveCaptured(_ clip: Clip, context: CapturedSourceContext?) throws -> Clip {
         // Publish the attachment and its reference on the same actor as cleanup.
         var incoming = try AttachmentStore.externalize(clip, into: storageRoot.appendingPathComponent("Attachments"))
-        incoming.intelligenceActivity = ContentActivity(lastUsedAt: incoming.createdAt)
+        incoming.intelligenceActivity = ContentActivity(lastUsedAt: incoming.createdAt, capturedAt: incoming.createdAt)
         incoming.intelligenceActivity?.record(.copy, at: incoming.createdAt)
         if incoming.identityKey == nil {
             incoming.identityKey = (try? ClipIdentity.key(for: incoming, loadData: loadRepresentationData))

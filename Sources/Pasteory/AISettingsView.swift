@@ -204,7 +204,7 @@ struct AISettingsView: View {
                 })) {
                     ForEach(LifecyclePreset.allCases) { Text(L10n.text($0.title)).tag($0) }
                 }
-                Text(L10n.tr("内容活跃度根据使用记录计算，并据此进入留存或归档阶段。分组活跃度由成员汇总，不单独计时。"))
+                Text(L10n.tr("内容活跃度根据使用记录计算。留存与归档按距上次使用的时间判断；分组活跃度由成员汇总。"))
                     .font(.caption).foregroundStyle(.secondary)
                 dayStepper(L10n.tr("降权节点"), value: $draft.lifecycle.deprioritizeDays)
                 dayStepper(L10n.tr("压缩候选节点"), value: $draft.lifecycle.compressionDays)
@@ -212,19 +212,18 @@ struct AISettingsView: View {
                 Text(L10n.tr("标准策略为 7 / 14 / 60 天。时间节点不会自动删除资料，收藏和置顶继续保护内容。"))
                     .font(.caption).foregroundStyle(.secondary)
             }
-            AISettingsCard(title: L10n.tr("计算指标")) {
-                metric(L10n.tr("最近使用程度"), value: $draft.lifecycle.recencyWeight)
-                metric(L10n.tr("使用频率"), value: $draft.lifecycle.frequencyWeight)
-                metric(L10n.tr("不同日期的持续使用"), value: $draft.lifecycle.activeDaysWeight)
-                Stepper(value: $draft.lifecycle.frequencyWindowDays, in: 1...366) { Text(L10n.tr("频率统计窗口：\(draft.lifecycle.frequencyWindowDays) 天")) }
-                Text(L10n.tr("权重为 0 时关闭该指标，其余权重自动归一化。AI 更新概况、调整分组不刷新使用时间。"))
+            AISettingsCard(title: L10n.tr("活跃度计算")) {
+                Stepper(value: $draft.lifecycle.scoringParameters.halfLifeHours, in: 1...8760, step: 1) {
+                    HStack { Text(L10n.tr("普通内容半衰期")); Spacer(); Text(L10n.tr("\(Int(draft.lifecycle.scoringParameters.halfLifeHours)) 小时")).monospacedDigit().foregroundStyle(.secondary) }
+                }
+                metric(L10n.tr("再次复制的系数增量"), value: $draft.lifecycle.scoringParameters.copyIncrement, maximum: 3)
+                metric(L10n.tr("成功粘贴的系数增量"), value: $draft.lifecycle.scoringParameters.pasteIncrement, maximum: 3)
+                Text(L10n.tr("首次采集及再次使用时活跃度为 100%。复制和粘贴增加系数，延缓后续衰减；一次成功粘贴只计粘贴，不重复计复制。"))
                     .font(.caption).foregroundStyle(.secondary)
-                DisclosureGroup(L10n.tr("事件权重与分组汇总")) {
+                Text(L10n.tr("系数最高为 4，加成每 7 天减半。手动打开或编辑刷新使用时间；OCR、AI 整理和链接解析不增加活跃度。"))
+                    .font(.caption).foregroundStyle(.secondary)
+                DisclosureGroup(L10n.tr("分组活跃度汇总")) {
                     VStack(spacing: 12) {
-                        metric(L10n.tr("复制权重"), value: $draft.lifecycle.copyWeight, maximum: 5)
-                        metric(L10n.tr("成功粘贴权重"), value: $draft.lifecycle.pasteWeight, maximum: 5)
-                        metric(L10n.tr("显式打开权重"), value: $draft.lifecycle.openWeight, maximum: 5)
-                        metric(L10n.tr("用户编辑权重"), value: $draft.lifecycle.editWeight, maximum: 5)
                         Stepper(value: $draft.lifecycle.topK, in: 1...100) { Text(L10n.tr("分组高活跃度成员数量：\(draft.lifecycle.topK)")) }
                         metric(L10n.tr("Top K 在分组系数中的权重"), value: $draft.lifecycle.topKWeight)
                         metric(L10n.tr("高活跃度分组阈值"), value: $draft.lifecycle.activeThreshold)
@@ -350,7 +349,7 @@ struct AISettingsView: View {
     }
     private func markCustom() {
         guard draft.lifecycle.preset != .custom else { return }
-        var comparison = draft.lifecycle; comparison.version = 1
+        var comparison = draft.lifecycle; comparison.version = LifecyclePolicy.preset(comparison.preset).version
         if comparison != LifecyclePolicy.preset(comparison.preset) { draft.lifecycle.preset = .custom }
     }
     @discardableResult private func save() -> Bool {

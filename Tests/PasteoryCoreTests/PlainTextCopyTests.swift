@@ -99,3 +99,25 @@ private final class PlainTextCopyFixture {
         #expect(ClipPlainTextReader.unwrapOCR(in: note) == expected)
     }
 }
+
+@Test @MainActor func coordinatorReplayIsSuppressedByTheClipboardMonitorForRawAndPlainTextWrites() async throws {
+    let f = try PlainTextCopyFixture(); defer { f.cleanup() }
+    let suite = "ReplayAccounting.\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let settings = AppSettings(defaults: defaults)
+    var captured = 0
+    let monitor = ClipboardMonitor(pasteboard: f.pasteboard, settings: settings,
+                                   sourceContextCapture: SourceContextCaptureCoordinator(settings: settings),
+                                   onCapture: { _ in captured += 1 })
+    f.coordinator.monitor = monitor
+    monitor.start(); defer { monitor.stop() }
+    for plainText in [false, true] {
+        // Copy and paste share this write path; no real keystrokes are sent by this test.
+        _ = try await f.coordinator.perform(f.clip(note: "[OCR:Synthetic recognition]"), plainText: plainText, paste: false, target: nil)
+        await monitor.flushPendingCapture()
+        #expect(captured == 0)
+    }
+    f.pasteboard.clearContents(); f.pasteboard.setString("A genuine external copy", forType: .string)
+    await monitor.flushPendingCapture()
+    #expect(captured == 1)
+}

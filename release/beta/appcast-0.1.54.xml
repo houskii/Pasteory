@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><!-- sparkle-sign-warning:
+IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
+--><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+  <channel>
+    <title>Pasteory Beta</title>
+    <link>https://github.com/houskii/Pasteory/releases</link>
+    <language>en</language>
+    <item>
+      <title>Pasteory 0.1.54</title>
+      <link>https://github.com/houskii/Pasteory/releases/tag/v0.1.54</link>
+      <pubDate>Tue, 17 Nov 2026 14:12:35 +0000</pubDate>
+      <description sparkle:descriptionFormat="plain-text"># Pasteory 0.1.54 Beta
+
+- 更新内容活跃度算法：首次采集即为 100%，普通内容半衰期为 48 小时；再次复制增加 0.4 系数，成功粘贴增加 0.8 系数。再次使用时恢复到 100%，系数延缓后续衰减。
+- 系数最高为 4，复用加成每 7 天减半，内容活跃度始终在 0～100%。资料库的分组活跃度及排名采用新的成员分值。
+- 在“AI 整理 → 生命周期与压缩”中提供半衰期、复制增量和粘贴增量设置，替换原有混合指标权重。
+- 粘贴前的内部剪贴板回写会被排除，一次成功粘贴只计粘贴，不叠加复制；自动粘贴失败而退回复制时只计复制。
+- 兼容旧设置和已保存的使用记录，不根据终身复制次数补造历史事件。保留原有留存、压缩与归档时间设置，后台 OCR、AI 整理和链接解析不会增加活跃度。
+
+适用于 Apple Silicon，macOS 14 及以上。继续使用现有 Sparkle 更新密钥及应用代码签名身份。
+
+安装包使用本机生成的 Pasteory Local Build 证书签名，该证书不是 Apple 颁发的开发者证书。安装包未经过 Apple 公证。</description>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/houskii/Pasteory/releases/download/v0.1.54/Pasteory-0.1.54-arm64.dmg" length="11424292" type="application/octet-stream" sparkle:version="59" sparkle:shortVersionString="0.1.54" sparkle:edSignature="wzzkKn4ol6pwhGS3Zo4UTGaghHqA5egATYq/Plt+34GaXdA6ej0bQVxZW6RSIAKzgfKtI/2PWTe8q5bSZc5VBw==" sparkle:os="macos"></enclosure>
+    </item>
+  </channel>
+</rss><!-- sparkle-signatures:
+edSignature: cRIehhuZIyvl0xU7EOoWpYb2wXOw+cpIoxkLTFEf2daOce/xjS6WeBMwv7Il4lCrDC5vNGnamw5+zBmpUS89AQ==
+length: 2394
+-->

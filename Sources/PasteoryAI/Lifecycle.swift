@@ -26,8 +26,11 @@ public struct ContentActivity: Codable, Hashable, Sendable {
     }
     public var lastUsedAt: Date
     public var samples: [Sample]
-    public init(lastUsedAt: Date, samples: [Sample] = []) {
-        self.lastUsedAt = lastUsedAt; self.samples = samples
+    /// Identifies the acquisition copy, which starts at 100% without a reuse bonus.
+    /// Optional so activity saved by older versions remains readable.
+    public var capturedAt: Date?
+    public init(lastUsedAt: Date, samples: [Sample] = [], capturedAt: Date? = nil) {
+        self.lastUsedAt = lastUsedAt; self.samples = samples; self.capturedAt = capturedAt
     }
     public mutating func record(_ event: Event, at date: Date = Date()) {
         lastUsedAt = max(lastUsedAt, date)
@@ -37,20 +40,36 @@ public struct ContentActivity: Codable, Hashable, Sendable {
     }
 }
 
+public struct ActivityScoringParameters: Codable, Equatable, Sendable {
+    public var halfLifeHours: Double = 48
+    public var copyIncrement: Double = 0.4
+    public var pasteIncrement: Double = 0.8
+    public static let maximumBonus: Double = 3
+    public static let bonusHalfLifeDays: Double = 7
+
+    public init() {}
+    public func validate() throws {
+        guard halfLifeHours.isFinite, (1...8760).contains(halfLifeHours),
+              copyIncrement.isFinite, (0...Self.maximumBonus).contains(copyIncrement),
+              pasteIncrement.isFinite, (0...Self.maximumBonus).contains(pasteIncrement) else {
+            throw AIError.invalid("Invalid activity scoring parameters")
+        }
+    }
+}
+
 public struct LifecyclePolicy: Codable, Equatable, Sendable {
     public var preset: LifecyclePreset = .standard
-    public var version: Int = 1
+    public var version: Int = 2
     public var deprioritizeDays: Double = 7
     public var compressionDays: Double = 14
     public var archiveDays: Double = 60
-    public var frequencyWindowDays: Int = 30
-    public var recencyWeight: Double = 0.60
-    public var frequencyWeight: Double = 0.25
-    public var activeDaysWeight: Double = 0.15
-    public var copyWeight: Double = 1
-    public var pasteWeight: Double = 2
-    public var openWeight: Double = 1
-    public var editWeight: Double = 1.5
+    // Absent in old settings. All installations adopt the new defaults without
+    // rewriting clip payloads or rebuilding the repository on panel activation.
+    public var activityScoring: ActivityScoringParameters?
+    public var scoringParameters: ActivityScoringParameters {
+        get { activityScoring ?? ActivityScoringParameters() }
+        set { activityScoring = newValue == ActivityScoringParameters() ? nil : newValue }
+    }
     public var topK: Int = 5
     public var topKWeight: Double = 0.6
     public var activeThreshold: Double = 0.65
@@ -62,47 +81,52 @@ public struct LifecyclePolicy: Codable, Equatable, Sendable {
         switch value {
         case .aggressive:
             p.deprioritizeDays = 3; p.compressionDays = 7; p.archiveDays = 30
-            p.recencyWeight = 0.75; p.frequencyWeight = 0.15; p.activeDaysWeight = 0.10; p.topKWeight = 0.35
+            p.topKWeight = 0.35
         case .conservative:
             p.deprioritizeDays = 14; p.compressionDays = 30; p.archiveDays = 120
-            p.recencyWeight = 0.45; p.frequencyWeight = 0.35; p.activeDaysWeight = 0.20; p.topKWeight = 0.75
+            p.topKWeight = 0.75
         case .standard, .custom: break
         }
         return p
     }
     public func validate() throws {
-        let numbers = [deprioritizeDays, compressionDays, archiveDays, recencyWeight, frequencyWeight,
-                       activeDaysWeight, copyWeight, pasteWeight, openWeight, editWeight, topKWeight,
-                       activeThreshold, archiveThreshold]
+        try scoringParameters.validate()
+        let numbers = [deprioritizeDays, compressionDays, archiveDays, topKWeight, activeThreshold, archiveThreshold]
         guard numbers.allSatisfy({ $0.isFinite && $0 >= 0 }), deprioritizeDays >= 1,
               deprioritizeDays <= compressionDays, compressionDays <= archiveDays, archiveDays <= 3650,
-              (1...366).contains(frequencyWindowDays), (1...100).contains(topK),
-              recencyWeight + frequencyWeight + activeDaysWeight > 0,
+              (1...100).contains(topK),
               topKWeight <= 1, archiveThreshold < activeThreshold, activeThreshold <= 1 else {
             throw AIError.invalid("Invalid lifecycle policy")
         }
     }
     public var fingerprint: String { AIHash.digest((try? JSONEncoder.sorted.encode(self)) ?? Data()) }
 
-    public func evaluate(_ activity: ContentActivity, now: Date = Date(), calendar: Calendar = .current) -> ActivityEvaluation {
+    public func evaluate(_ activity: ContentActivity, now: Date = Date(), calendar _: Calendar = .current) -> ActivityEvaluation {
         let age = max(0, now.timeIntervalSince(activity.lastUsedAt) / 86_400)
-        let safeDays = max(1, deprioritizeDays)
-        let recency = pow(0.5, age / safeDays)
-        let window = max(1, frequencyWindowDays)
-        let cutoff = now.addingTimeInterval(-Double(window) * 86_400)
-        let recent = activity.samples.filter { $0.at >= cutoff && $0.at <= now }
-        let counts = recent.reduce(0.0) { sum, sample in
-            let weight: Double
-            switch sample.event { case .copy: weight = copyWeight; case .paste: weight = pasteWeight; case .open: weight = openWeight; case .edit: weight = editWeight }
-            return sum + max(0, weight)
+        let parameters = scoringParameters
+        let cutoff = now.addingTimeInterval(-366 * 86_400)
+        let events = activity.samples.filter { $0.at >= cutoff && $0.at <= now && ($0.event == .copy || $0.event == .paste) }
+            .sorted { $0.at < $1.at }
+        var bonus = 0.0, bonusAt: Date?, skippedAcquisition = false
+        for sample in events {
+            if !skippedAcquisition, sample.event == .copy, sample.at == activity.capturedAt {
+                skippedAcquisition = true
+                continue
+            }
+            if let previous = bonusAt {
+                bonus *= pow(0.5, max(0, sample.at.timeIntervalSince(previous)) / (ActivityScoringParameters.bonusHalfLifeDays * 86_400))
+            }
+            let increment = sample.event == .paste ? parameters.pasteIncrement : parameters.copyIncrement
+            bonus = min(ActivityScoringParameters.maximumBonus, bonus + max(0, increment))
+            bonusAt = sample.at
         }
-        // Counts are windowed, capped, and decay too: old lifetime copyCount cannot
-        // keep a project active forever. Zero-weight metrics are explicitly disabled.
-        let frequency = min(1, log1p(counts) / log(21)) * recency
-        let distinctDays = Set(recent.map { calendar.startOfDay(for: $0.at) }).count
-        let continuity = min(1, Double(distinctDays) / Double(min(7, window))) * recency
-        let denominator = max(0.0001, recencyWeight + frequencyWeight + activeDaysWeight)
-        let raw = (recencyWeight * recency + frequencyWeight * frequency + activeDaysWeight * continuity) / denominator
+        if let previous = bonusAt {
+            bonus *= pow(0.5, max(0, now.timeIntervalSince(previous)) / (ActivityScoringParameters.bonusHalfLifeDays * 86_400))
+        }
+        // Explicit opens and edits refresh lastUsedAt but never add copy/paste
+        // credit. Bonus decay stays anchored to its own event timestamps.
+        let coefficient = 1 + bonus
+        let raw = pow(0.5, age / (max(1, parameters.halfLifeHours) / 24 * coefficient))
         let score = min(1, max(0, raw.isFinite ? raw : 0))
         let stage: ContentStage = age >= archiveDays ? .archived : age >= deprioritizeDays ? .retained : .active
         return ActivityEvaluation(score: score, stage: stage, ageDays: age,

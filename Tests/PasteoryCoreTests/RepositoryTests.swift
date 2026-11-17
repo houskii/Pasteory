@@ -1,4 +1,5 @@
 import Foundation
+import PasteoryAI
 import Testing
 @testable import PasteoryCore
 
@@ -454,6 +455,12 @@ private func textClip(_ value: String, date: Date = Date(), source: String = "ap
     #expect(pasted.lastCopiedAt == earlierDate)
     #expect(pasted.lastPastedAt == Date(timeIntervalSince1970: 300))
     #expect(pasted.lastUsedAt == Date(timeIntervalSince1970: 300))
+    let policy = LifecyclePolicy(), twoDaysLater = Date(timeIntervalSince1970: 300 + 48 * 3600)
+    #expect(pasted.activity.samples.filter { $0.event == .copy }.count == 1)
+    #expect(pasted.activity.samples.filter { $0.event == .paste }.count == 1)
+    let pasteOnlyBonus = 0.8 * pow(0.5, 2.0 / 7)
+    let expected = pow(0.5, 1 / (1 + pasteOnlyBonus))
+    #expect(abs(policy.evaluate(pasted.activity, now: twoDaysLater).score - expected) < 1e-12)
 
     let pastedAgain = try #require(try await repository.recordPaste(id: earlier.id, at: Date(timeIntervalSince1970: 400)))
     #expect(pastedAgain.copyCount == 1)
@@ -465,6 +472,23 @@ private func textClip(_ value: String, date: Date = Date(), source: String = "ap
     let ordered = try await repository.list(filter: .all, query: "", limit: 10)
     #expect(ordered.map(\.id) == [earlier.id, later.id])
     #expect(SearchRanker.rank([later, pastedAgain], query: "").map(\.id) == [earlier.id, later.id])
+}
+
+@Test func activityMigrationUsesRecordedTimestampsRatherThanLifetimeCopyCounts() throws {
+    let policy = LifecyclePolicy(), date = Date(timeIntervalSince1970: 1_800_000_000)
+    var legacy = textClip("Synthetic legacy activity", date: date)
+    let plain = policy.evaluate(legacy.activity, now: date.addingTimeInterval(48 * 3600)).score
+    #expect(plain == 0.5)
+    legacy.copyCount = 10_000
+    #expect(policy.evaluate(legacy.activity, now: date.addingTimeInterval(48 * 3600)).score == plain)
+    legacy.intelligenceActivity = ContentActivity(lastUsedAt: date, samples: [.init(.copy, at: date)])
+    #expect(policy.evaluate(legacy.activity, now: date.addingTimeInterval(48 * 3600)).score == plain)
+    legacy.intelligenceActivity = nil
+    legacy.lastCopiedAt = date.addingTimeInterval(24 * 3600)
+    let current = legacy.activity
+    #expect(current.capturedAt == date)
+    let expected = pow(0.5, 1 / (1 + 0.4 * pow(0.5, 2.0 / 7)))
+    #expect(abs(policy.evaluate(current, now: legacy.lastCopiedAt.addingTimeInterval(48 * 3600)).score - expected) < 1e-12)
 }
 
 @Test func legacyClipWithoutPasteCountStillDecodesAsZero() throws {

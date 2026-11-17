@@ -29,19 +29,23 @@ private let lifecycleNow = Date(timeIntervalSince1970: 1_800_000_000)
     #expect(result(60).score < result(14).score)
 }
 
-@Test func presetsAndMetricOverridesAreValidated() throws {
+@Test func presetsAndScoringParametersAreValidated() throws {
     #expect(LifecyclePolicy.preset(.aggressive).archiveDays == 30)
     #expect(LifecyclePolicy.preset(.conservative).archiveDays == 120)
     var p = LifecyclePolicy()
     p.compressionDays = 2
     #expect(throws: AIError.self) { try p.validate() }
-    p = LifecyclePolicy(); p.recencyWeight = .nan
+    p = LifecyclePolicy(); p.scoringParameters.halfLifeHours = .nan
     #expect(throws: AIError.self) { try p.validate() }
-    p = LifecyclePolicy(); p.recencyWeight = 0; p.frequencyWeight = 0; p.activeDaysWeight = 0
+    p = LifecyclePolicy(); p.scoringParameters.halfLifeHours = 0
+    #expect(throws: AIError.self) { try p.validate() }
+    p = LifecyclePolicy(); p.scoringParameters.copyIncrement = -0.4
+    #expect(throws: AIError.self) { try p.validate() }
+    p = LifecyclePolicy(); p.scoringParameters.pasteIncrement = .infinity
     #expect(throws: AIError.self) { try p.validate() }
 }
 
-@Test func onlyWindowedHumanEventsAffectFrequency() {
+@Test func onlyRetainedHumanEventsContributeReuseBonus() {
     let p = LifecyclePolicy()
     let last = lifecycleNow.addingTimeInterval(-2 * 86_400)
     let plain = ContentActivity(lastUsedAt: last)
@@ -49,6 +53,71 @@ private let lifecycleNow = Date(timeIntervalSince1970: 1_800_000_000)
     let stale = ContentActivity(lastUsedAt: last, samples: [.init(.paste, at: lifecycleNow.addingTimeInterval(-400 * 86_400))])
     #expect(p.evaluate(recent, now: lifecycleNow).score > p.evaluate(plain, now: lifecycleNow).score)
     #expect(p.evaluate(stale, now: lifecycleNow).score == p.evaluate(plain, now: lifecycleNow).score)
+}
+
+@Test func ordinaryActivityStartsAtOneHundredAndHalvesEveryFortyEightHours() {
+    let p = LifecyclePolicy()
+    let activity = ContentActivity(lastUsedAt: lifecycleNow, samples: [.init(.copy, at: lifecycleNow)], capturedAt: lifecycleNow)
+    for (hours, expected) in [(0.0, 1.0), (6, 0.9170040432), (12, 0.8408964153), (24, 0.7071067812),
+                              (48, 0.5), (72, 0.3535533906), (168, 0.0883883476), (336, 0.0078125), (720, 0.000030517578125)] {
+        let result = p.evaluate(activity, now: lifecycleNow.addingTimeInterval(hours * 3600))
+        #expect(abs(result.score - expected) < 0.000000001)
+    }
+    #expect(p.evaluate(activity, now: lifecycleNow.addingTimeInterval(-3600)).score == 1)
+}
+
+@Test func copiesAndPastesRefreshToOneHundredAndAddTheirOwnDecayingCoefficient() {
+    let p = LifecyclePolicy(), acquired = lifecycleNow.addingTimeInterval(-86_400)
+    for (event, increment) in [(ContentActivity.Event.copy, 0.4), (.paste, 0.8)] {
+        var activity = ContentActivity(lastUsedAt: acquired, samples: [.init(.copy, at: acquired)], capturedAt: acquired)
+        activity.record(event, at: lifecycleNow)
+        #expect(p.evaluate(activity, now: lifecycleNow).score == 1)
+        let bonus = increment * pow(0.5, 2.0 / 7)
+        let expected = pow(0.5, 1 / (1 + bonus))
+        #expect(abs(p.evaluate(activity, now: lifecycleNow.addingTimeInterval(48 * 3600)).score - expected) < 1e-12)
+    }
+}
+
+@Test func reuseBonusDecaysBeforeEachIncrementAndIsCappedAtThree() {
+    let p = LifecyclePolicy(), acquired = lifecycleNow.addingTimeInterval(-20 * 86_400)
+    var activity = ContentActivity(lastUsedAt: acquired, capturedAt: acquired)
+    activity.record(.copy, at: lifecycleNow.addingTimeInterval(-7 * 86_400))
+    activity.record(.paste, at: lifecycleNow)
+    // The old 0.4 is now 0.2; the paste adds exactly 0.8.
+    let expected = pow(0.5, 1 / (1 + 1.0 * pow(0.5, 2.0 / 7)))
+    #expect(abs(p.evaluate(activity, now: lifecycleNow.addingTimeInterval(48 * 3600)).score - expected) < 1e-12)
+    for _ in 0..<100 { activity.record(.paste, at: lifecycleNow) }
+    #expect(p.evaluate(activity, now: lifecycleNow).score == 1)
+    let capped = pow(0.5, 1 / (1 + 3.0 * pow(0.5, 2.0 / 7)))
+    #expect(abs(p.evaluate(activity, now: lifecycleNow.addingTimeInterval(48 * 3600)).score - capped) < 1e-12)
+    #expect(p.evaluate(activity, now: lifecycleNow.addingTimeInterval(366 * 86_400)).score < 1e-40)
+}
+
+@Test func manualOpensRefreshTimeWithoutAddingOrPreservingReuseBonus() {
+    let p = LifecyclePolicy(), copied = lifecycleNow.addingTimeInterval(-7 * 86_400)
+    var activity = ContentActivity(lastUsedAt: copied, samples: [.init(.copy, at: copied)])
+    activity.record(.open, at: lifecycleNow)
+    activity.record(.edit, at: lifecycleNow)
+    activity.samples.append(.init(.paste, at: lifecycleNow.addingTimeInterval(10 * 86_400)))
+    #expect(p.evaluate(activity, now: lifecycleNow).score == 1)
+    let expected = pow(0.5, 1 / (1 + 0.4 * pow(0.5, 9.0 / 7)))
+    #expect(abs(p.evaluate(activity, now: lifecycleNow.addingTimeInterval(48 * 3600)).score - expected) < 1e-12)
+}
+
+@Test func oldLifecycleSettingsAndActivityAdoptTheNewDefaultsWithoutLosingRetentionRules() throws {
+    let legacy = Data(#"{"preset":"custom","version":1,"deprioritizeDays":9,"compressionDays":18,"archiveDays":90,"frequencyWindowDays":30,"recencyWeight":0.6,"frequencyWeight":0.25,"activeDaysWeight":0.15,"copyWeight":1,"pasteWeight":2,"openWeight":1,"editWeight":1.5,"topK":5,"topKWeight":0.6,"activeThreshold":0.65,"archiveThreshold":0.1}"#.utf8)
+    var policy = try JSONDecoder().decode(LifecyclePolicy.self, from: legacy)
+    try policy.validate()
+    #expect(policy.scoringParameters.halfLifeHours == 48)
+    #expect(policy.scoringParameters.copyIncrement == 0.4 && policy.scoringParameters.pasteIncrement == 0.8)
+    #expect(policy.deprioritizeDays == 9 && policy.compressionDays == 18 && policy.archiveDays == 90)
+    let oldActivity = try JSONDecoder().decode(ContentActivity.self, from: Data(#"{"lastUsedAt":100,"samples":[{"event":"paste","at":100}]}"#.utf8))
+    #expect(oldActivity.capturedAt == nil && oldActivity.samples.count == 1)
+    policy.scoringParameters.halfLifeHours = 96
+    let restored = try JSONDecoder().decode(LifecyclePolicy.self, from: JSONEncoder().encode(policy))
+    #expect(restored == policy && restored.scoringParameters.halfLifeHours == 96)
+    #expect(abs(restored.evaluate(ContentActivity(lastUsedAt: lifecycleNow), now: lifecycleNow.addingTimeInterval(48 * 3600)).score - sqrt(0.5)) < 1e-12)
+    #expect(restored.fingerprint != LifecyclePolicy().fingerprint)
 }
 
 @Test func groupStatusComesFromMembersAndEmptyGroupIsArchived() {

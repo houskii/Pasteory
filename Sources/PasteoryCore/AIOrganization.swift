@@ -6,6 +6,7 @@ public extension Clip {
         var historical = [ContentActivity.Sample(.copy, at: lastCopiedAt)]
         if let lastPastedAt { historical.append(ContentActivity.Sample(.paste, at: lastPastedAt)) }
         var value = intelligenceActivity ?? ContentActivity(lastUsedAt: lastUsedAt, samples: historical)
+        if value.capturedAt == nil { value.capturedAt = createdAt }
         value.lastUsedAt = max(value.lastUsedAt, lastUsedAt)
         return value
     }
