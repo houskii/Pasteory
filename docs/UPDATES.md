@@ -128,11 +128,17 @@ python3 scripts/prepare_update.py \
 - `dist/update/release-notes.md`：GitHub Release 使用的同一份更新说明。
 - `dist/update/release-tag.txt`：对应 tag。
 
-这个命令只准备文件，不上传或发布。正式交付沿用仓库的单一发布入口：先暂存已验证的源码与公钥，再执行 `make release RELEASE_NOTES=/absolute/path/to/release-notes.md`。
+这个命令只准备文件，不上传或发布。正式交付先在分支提交源码、测试、版本号和更新说明，通过 PR 检查并合入 `main`。发布 Mac 同步主干后，再执行单一发布入口：
 
-源码与版本号也可以先通过 PR 合入 main，再在构建 Mac 执行同一个 `make release` 命令；脚本此时与最近发布标签比较版本和 Build，不会因为 main 已包含本次版本号而拒绝打包。
+```bash
+git switch main
+git pull --ff-only origin main
+make release RELEASE_NOTES="$PWD/docs/releases/v<版本>.md"
+```
 
-`release_beta.sh` 会重新验证、构建、准备签名索引并安装正式应用，将 DMG 和版本化的 `release/beta/appcast-<版本>.xml` 一起提交、打 tag 和推送。GitHub Actions 先发布并核对 DMG、SHA-256 和版本化签名索引，确认附件完整后才将当前索引更新到 `release/beta/appcast.xml`。旧版本的恢复发布不会覆盖新版本索引；旧标签与既有附件不被覆盖。发布脚本最后回读远端索引并核对内容。
+`scripts/check_release_source.py` 要求本地 `main` 与刚拉取的 `origin/main` 完全一致，拒绝暂存的源码、未暂存改动和未跟踪文件。它逐一核对最近发布标签之后修改源码的主干提交，要求 GitHub 上有对应的已合并 PR；API 访问失败也会停止发布。GitHub CLI 必须已登录，发布工作流使用有 `pull-requests: read` 权限的 `GITHUB_TOKEN`。生成的安装包、签名索引及公开签名配置／加密恢复包不属于源码 PR；CI 暂存的签名配置和本次加密包可以继续随产物提交。
+
+`release_beta.sh` 与最近发布标签比较版本和 Build，因此 main 已包含本次版本号时仍可打包。它会重新验证、构建、准备签名索引并安装正式应用，再仅提交生成的 DMG、版本化的 `release/beta/appcast-<版本>.xml` 和 CI 签名恢复文件，打 tag 并推送。GitHub Actions 先发布并核对 DMG、SHA-256 和版本化签名索引，确认附件完整后才将当前索引更新到 `release/beta/appcast.xml`。旧版本的恢复发布不会覆盖新版本索引；旧标签与既有附件不被覆盖。发布脚本最后回读远端索引并核对内容。
 
 签名后修改索引中的任何内容都必须重新签名。首次从其他机器发布前必须导入现有发布私钥，不能用新密钥替代已发布的密钥。
 
