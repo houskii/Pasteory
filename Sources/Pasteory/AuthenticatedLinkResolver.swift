@@ -145,16 +145,16 @@ struct LinkAuthenticationRequest: Identifiable {
 
 @MainActor
 enum LinkAuthenticationSession {
-    static func markUpdated(_ target: LinkAuthenticationTarget) {
-        UserDefaults.standard.set(Date(), forKey: key(for: target))
+    static func markUpdated(_ target: LinkAuthenticationTarget, at date: Date = Date(), defaults: UserDefaults = .standard) {
+        defaults.set(date, forKey: key(for: target))
     }
 
-    static func lastUpdatedAt(_ target: LinkAuthenticationTarget) -> Date? {
-        UserDefaults.standard.object(forKey: key(for: target)) as? Date
+    static func lastUpdatedAt(_ target: LinkAuthenticationTarget, defaults: UserDefaults = .standard) -> Date? {
+        defaults.object(forKey: key(for: target)) as? Date
     }
 
-    static func clear(_ target: LinkAuthenticationTarget) {
-        UserDefaults.standard.removeObject(forKey: key(for: target))
+    static func clear(_ target: LinkAuthenticationTarget, defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: key(for: target))
     }
 
     private static func key(for target: LinkAuthenticationTarget) -> String {
@@ -166,6 +166,8 @@ struct AuthenticatedPageSnapshot: Sendable {
     var finalURL: URL
     var candidates: [LinkTitleCandidate]
     var durationMilliseconds: Int
+    var httpStatusCode: Int? = nil
+    var hasLoginForm = false
 }
 
 enum AuthenticatedLinkResolverError: LocalizedError {
@@ -185,18 +187,22 @@ enum AuthenticatedLinkResolverError: LocalizedError {
 @MainActor
 final class AuthenticatedLinkResolver {
     private let cache: WebCacheMaintenance
+    private let websiteDataStore: WKWebsiteDataStore?
     private var inFlight = [String: Task<AuthenticatedPageSnapshot, Error>]()
 
-    init(cache: WebCacheMaintenance) { self.cache = cache }
+    init(cache: WebCacheMaintenance, websiteDataStore: WKWebsiteDataStore? = nil) {
+        self.cache = cache
+        self.websiteDataStore = websiteDataStore
+    }
 
-    func resolve(url: URL) async throws -> AuthenticatedPageSnapshot {
-        let key = URLFallbackEngine.canonicalResourceKey(for: url)
+    func resolve(url: URL, minimumObservation: TimeInterval = 0) async throws -> AuthenticatedPageSnapshot {
+        let key = URLFallbackEngine.canonicalResourceKey(for: url) + "|observe:\(minimumObservation)"
         if let task = inFlight[key] { return try await task.value }
         let activity = cache.beginActivity()
-        let task = Task { @MainActor [cache] in
+        let task = Task { @MainActor [cache, websiteDataStore] in
             defer { cache.endActivity(activity) }
             await cache.waitForClearance()
-            let load = AuthenticatedPageLoad(url: url)
+            let load = AuthenticatedPageLoad(url: url, websiteDataStore: websiteDataStore, minimumObservation: minimumObservation)
             return try await load.run()
         }
         inFlight[key] = task
@@ -214,11 +220,15 @@ private final class AuthenticatedPageLoad: NSObject, WKNavigationDelegate {
     private var timeoutTask: Task<Void, Never>?
     private var completed = false
     private var extracting = false
+    private var httpStatusCode: Int?
     private let startedAt = Date()
+    private let minimumObservation: TimeInterval
 
-    init(url: URL) {
+    init(url: URL, websiteDataStore: WKWebsiteDataStore?, minimumObservation: TimeInterval) {
         self.url = url
+        self.minimumObservation = minimumObservation
         let configuration = LinkWebKitConfiguration.makeWebViewConfiguration()
+        if let websiteDataStore { configuration.websiteDataStore = websiteDataStore }
         self.webView = WKWebView(frame: .init(x: 0, y: 0, width: 1_280, height: 800), configuration: configuration)
         self.hostPanel = NSPanel(
             contentRect: .init(x: -20_000, y: -20_000, width: 1_280, height: 800),
@@ -258,6 +268,16 @@ private final class AuthenticatedPageLoad: NSObject, WKNavigationDelegate {
         }
     }
 
+    func webView(
+        _ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationResponsePolicy) -> Void
+    ) {
+        if navigationResponse.isForMainFrame {
+            httpStatusCode = (navigationResponse.response as? HTTPURLResponse)?.statusCode
+        }
+        decisionHandler(.allow)
+    }
+
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         finish(.failure(AuthenticatedLinkResolverError.navigation(error.localizedDescription)))
     }
@@ -293,7 +313,8 @@ private final class AuthenticatedPageLoad: NSObject, WKNavigationDelegate {
                     let fingerprint = LinkTitleQualityEvaluator.fingerprint(title)
                     repeatedCount = fingerprint == repeatedTitle ? repeatedCount + 1 : 1
                     repeatedTitle = fingerprint
-                    if repeatedCount >= tier.requiredMatches {
+                    if repeatedCount >= tier.requiredMatches,
+                       Date().timeIntervalSince(observationStartedAt) >= minimumObservation {
                         finish(.success(snapshot))
                         return
                     }
@@ -321,7 +342,9 @@ private final class AuthenticatedPageLoad: NSObject, WKNavigationDelegate {
     private func pageSnapshot() async throws -> AuthenticatedPageSnapshot {
         let script = """
         (() => ({
-          title: document.title || ''
+          title: document.title || '',
+          hasLoginForm: Array.from(document.querySelectorAll('input[type="password"]'))
+            .some(input => input.getClientRects().length > 0)
         }))()
         """
         guard let value = try await webView.evaluateJavaScript(script) as? [String: Any],
@@ -333,7 +356,9 @@ private final class AuthenticatedPageLoad: NSObject, WKNavigationDelegate {
         return AuthenticatedPageSnapshot(
             finalURL: finalURL,
             candidates: candidates,
-            durationMilliseconds: max(0, Int(Date().timeIntervalSince(startedAt) * 1_000))
+            durationMilliseconds: max(0, Int(Date().timeIntervalSince(startedAt) * 1_000)),
+            httpStatusCode: httpStatusCode,
+            hasLoginForm: value["hasLoginForm"] as? Bool ?? false
         )
     }
 
@@ -412,7 +437,6 @@ struct SiteLoginSheet: View {
                 Spacer()
                 Button(L10n.tr("取消")) { dismiss() }
                 Button(request.group == nil ? L10n.tr("完成登录") : L10n.tr("完成登录并重新解析")) {
-                    LinkAuthenticationSession.markUpdated(request.target)
                     onComplete()
                     dismiss()
                 }

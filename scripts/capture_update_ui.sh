@@ -16,13 +16,16 @@ capture() {
   local data_root
   data_root=$(mktemp -d "${TMPDIR:-/tmp}/pasteory-update-ui.XXXXXX")
   local screenshot="$OUTPUT_DIR/$name.png"
+  rm -f "$screenshot" "$screenshot.json"
   "$APP_EXECUTABLE" --debug-data-root "$data_root" --debug-ui-qa \
     --debug-disable-monitor --debug-disable-hotkey --debug-readme-seed \
     --debug-snapshot-path "$screenshot" "$@" > "$OUTPUT_DIR/$name.log" 2>&1 &
   local app_pid=$!
   local succeeded=false
   for attempt in {1..30}; do
-    if [[ -s "$screenshot" ]]; then succeeded=true; break; fi
+    # Wait for both the PNG and its metadata before terminating the app,
+    # including the live language-switching assertions below.
+    if [[ -s "$screenshot" && -s "$screenshot.json" ]]; then succeeded=true; break; fi
     if ! kill -0 "$app_pid" 2>/dev/null; then break; fi
     sleep 1
   done
@@ -35,16 +38,18 @@ capture() {
   fi
 }
 
-capture quick-panel-en --debug-language=en --debug-show-quick-window
-capture quick-panel-zh --debug-language=zh-Hans --debug-show-quick-window
-capture library-en --debug-language=en --debug-open-library --debug-settings-wide
-capture library-zh --debug-language=zh-Hans --debug-open-library --debug-settings-wide
+capture quick-panel-en --debug-language=en --debug-show-quick-window --debug-image-ocr-seed
+capture quick-panel-zh --debug-language=zh-Hans --debug-show-quick-window --debug-image-ocr-seed
+capture library-en --debug-language=en --debug-open-library --debug-settings-wide --debug-image-ocr-seed
+capture library-zh --debug-language=zh-Hans --debug-open-library --debug-settings-wide --debug-image-ocr-seed
 capture settings-language-en --debug-language=en --debug-open-settings
 capture settings-language-zh --debug-language=zh-Hans --debug-open-settings
 capture switched-to-zh --debug-language=en --debug-switch-language=zh-Hans --debug-show-quick-window
 capture switched-to-en --debug-language=zh-Hans --debug-switch-language=en --debug-show-quick-window
 capture settings-shortcuts-en --debug-language=en --debug-open-settings --debug-settings-shortcuts
 capture settings-links-en --debug-language=en --debug-open-settings --debug-settings-links
+capture settings-connections-zh --debug-language=zh-Hans --debug-open-settings --debug-settings-links --debug-link-connections --debug-session-refresh-seed
+capture settings-connections-en --debug-language=en --debug-open-settings --debug-settings-links --debug-link-connections --debug-session-refresh-seed --debug-settings-narrow
 capture update-amber --debug-show-quick-window --debug-update-available --debug-theme=blue
 capture update-cyan-narrow --debug-show-quick-window --debug-update-available --debug-theme=orange --debug-panel-narrow
 capture update-cyan-dark --debug-show-quick-window --debug-update-available --debug-theme=orange --debug-dark
@@ -81,5 +86,8 @@ for name, language, text, menu, title in [
     assert metadata["textLabel"] == text, metadata
     assert metadata["editMenuTitle"] == menu, metadata
     assert title in metadata["sampleTitles"], metadata
+for name in ("settings-connections-zh", "settings-connections-en"):
+    metadata = json.loads((root / (name + ".png.json")).read_text())
+    assert metadata["sessionRefreshIntervals"] == [14, 7, 30], metadata
 print("Live language switching and original demo titles verified in both directions.")
 PYTHON

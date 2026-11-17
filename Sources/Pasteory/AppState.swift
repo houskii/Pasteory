@@ -131,6 +131,7 @@ final class AppState: ObservableObject {
     let storageAnalyticsService: StorageAnalyticsService
     let webCacheMaintenance: WebCacheMaintenance
     let linkResolutionService: LinkResolutionService
+    let linkSessionRefresh: LinkSessionRefreshService
     private let authenticatedLinkResolver: AuthenticatedLinkResolver
     private var quickSearchTask: Task<Void, Never>?
     private var librarySearchTask: Task<Void, Never>?
@@ -187,7 +188,11 @@ final class AppState: ObservableObject {
             await storageAnalyticsService.webKitNetworkCacheBytes()
         }, clear: LinkWebKitConfiguration.clearNetworkCache)
         self.webCacheMaintenance = cache
-        self.authenticatedLinkResolver = AuthenticatedLinkResolver(cache: cache)
+        let authenticatedResolver = AuthenticatedLinkResolver(cache: cache)
+        self.authenticatedLinkResolver = authenticatedResolver
+        self.linkSessionRefresh = LinkSessionRefreshService(defaults: settings.defaults) { url in
+            try await authenticatedResolver.resolve(url: url, minimumObservation: 5)
+        }
         cache.onCleared = { [weak self] in
             guard let self, let period = self.storageAnalyticsRequestedPeriod else { return }
             Task { await self.refreshStorageAnalytics(period: period) }
@@ -329,6 +334,13 @@ final class AppState: ObservableObject {
             await self?.prepareExistingLinkFallbacks()
             await self?.refreshRecentLinkCaches()
         }
+    }
+
+    func refreshDueLinkSessions() async {
+        await linkSessionRefresh.check(
+            targets: LinkAuthenticationTarget.all(customRules: settings.authenticatedLinkRules),
+            networkAllowed: { self.settings.linkResolutionEnabled }
+        )
     }
 
     func resumePendingLocalOCR() {
@@ -675,7 +687,7 @@ final class AppState: ObservableObject {
     private func resolveUsingAuthenticatedSessionIfAvailable(_ clip: Clip) async {
         guard let url = URLFallbackEngine.normalizedWebURL(clip.previewText),
               let target = LinkAuthenticationTarget.matching(url: url, customRules: settings.authenticatedLinkRules),
-              LinkAuthenticationSession.lastUpdatedAt(target) != nil else { return }
+              linkSessionRefresh.lastSignedInAt(target) != nil else { return }
         do {
             guard let resource = try await repository.linkResource(normalizedURL: url.absoluteString),
                   resource.requestState.needsAttention else { return }
@@ -727,7 +739,7 @@ final class AppState: ObservableObject {
     func removeAuthenticatedLinkRule(_ rule: AuthenticatedLinkRule) {
         let target = LinkAuthenticationTarget.custom(rule)
         settings.removeAuthenticatedLinkRule(id: rule.id)
-        LinkAuthenticationSession.clear(target)
+        linkSessionRefresh.remove(target)
         presentStatus(L10n.tr("登录解析规则已移除"))
     }
 

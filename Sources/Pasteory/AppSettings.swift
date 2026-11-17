@@ -292,7 +292,7 @@ final class AppSettings: ObservableObject {
     }
     @Published private(set) var recentFileCommandExecutions: [String: FileCommandExecution] = [:]
 
-    private let defaults: UserDefaults
+    let defaults: UserDefaults
     let fileCommandLogsDirectory: URL?
 
     static func preferredLanguage(in defaults: UserDefaults) -> AppLanguage {

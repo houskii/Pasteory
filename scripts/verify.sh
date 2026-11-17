@@ -44,7 +44,21 @@ while IFS= read -r -d '' icon; do
   [[ "$(sips -g pixelHeight "$icon" | awk '/pixelHeight/{print $2}')" == "128" ]]
 done < <(find "$FILE_ICON_DIR" -maxdepth 1 -type f -name '*.png' -print0)
 "$PROJECT_DIR/scripts/verify_signing.sh" "$APP_DIR"
-hdiutil verify "$DMG_PATH"
+verify_dmg() {
+  local verify_attempt verify_output
+  for verify_attempt in {1..3}; do
+    if verify_output=$(LC_ALL=C hdiutil verify "$DMG_PATH" 2>&1); then
+      print -r -- "$verify_output"
+      return 0
+    fi
+    print -ru2 -- "$verify_output"
+    # A newly created image can briefly be unavailable on hosted macOS runners.
+    # Retry only that OS resource error; invalid images still fail immediately.
+    [[ "$verify_output" == *'Resource temporarily unavailable'* && "$verify_attempt" -lt 3 ]] || return 1
+    sleep "$verify_attempt"
+  done
+}
+verify_dmg
 DMG_MOUNT=$(mktemp -d)
 cleanup_dmg() {
   hdiutil detach "$DMG_MOUNT" >/dev/null 2>&1 || true

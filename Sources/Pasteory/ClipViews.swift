@@ -17,10 +17,13 @@ enum ClipRowMetrics {
     }
 
     static func imageContentHeight(for clip: Clip, compact: Bool) -> CGFloat {
-        var height: CGFloat = compact ? 58 : 62
-        if !clip.displayTitle.isEmpty { height += compact ? 14 : 15 }
-        if !clip.note.isEmpty { height += compact ? 13 : 14 }
-        return height
+        let content = ImageCardContent(clip: clip)
+        // Reserve the text area while OCR is pending so completing it does not move the list.
+        let textHeight: CGFloat = compact ? 34 : 54
+        var height: CGFloat = 21 + textHeight
+        if !clip.displayTitle.isEmpty { height += 19 }
+        if !content.note.isEmpty { height += 18 }
+        return max(compact ? 82 : 98, height)
     }
 }
 
@@ -138,7 +141,25 @@ struct ClipRowView: View {
 
     @ViewBuilder
     private var leadingArea: some View {
-        if ClipSourceLayout.usesVerticalIdentity {
+        if clip.primaryKind == .image, let attachments {
+            VStack(spacing: 3) {
+                ClipInlineThumbnail(clip: clip, attachments: attachments,
+                                    width: compact ? 68 : 84, height: compact ? 68 : 84, fitsImage: true)
+                    .overlay(alignment: .bottomTrailing) {
+                        ClipLeadingVisual(clip: clip, showsTypeBadge: false)
+                            .frame(width: 20, height: 20)
+                            .padding(2)
+                            .background(.background, in: RoundedRectangle(cornerRadius: 5))
+                            .offset(x: 2, y: 2)
+                    }
+                Text(String(clip.source.appName.prefix(18)))
+                    .font(.system(size: 8.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .help(clip.source.appName)
+            }
+            .frame(width: compact ? 72 : 88)
+        } else if ClipSourceLayout.usesVerticalIdentity {
             VStack(spacing: 1) {
                 ClipLeadingVisual(clip: clip, showsTypeBadge: true)
                     .frame(width: compact ? 38 : 46, height: compact ? 38 : 46)
@@ -157,7 +178,9 @@ struct ClipRowView: View {
 
     @ViewBuilder
     private var mainContent: some View {
-        if hasImagePreview, let attachments {
+        if clip.primaryKind == .image, let attachments {
+            imageCardContent(attachments: attachments)
+        } else if hasImagePreview, let attachments {
             HStack(spacing: 8) {
                 ClipInlineThumbnail(
                     clip: clip,
@@ -255,6 +278,57 @@ struct ClipRowView: View {
                 if !clip.note.isEmpty { noteText }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func imageCardContent(attachments: AttachmentStore) -> some View {
+        let content = ImageCardContent(clip: clip)
+        return VStack(alignment: .leading, spacing: 5) {
+            if !clip.displayTitle.isEmpty { titleText }
+            HStack(spacing: 6) {
+                if content.recognitionState == .recognized {
+                    Label("OCR", systemImage: "text.viewfinder")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(pasteoryAccentColor)
+                        .padding(.horizontal, 5).padding(.vertical, 2)
+                        .background(pasteoryAccentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 4))
+                        .fixedSize()
+                }
+                PasteoryImageMetadataDetailsView(clip: clip, attachments: attachments, compact: compact, inline: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if !content.text.isEmpty {
+                Text(String(content.text.prefix(1_200)))
+                    .font(.system(size: compact ? 12 : 13))
+                    .foregroundStyle(.primary)
+                    .lineLimit(compact ? 2 : 3)
+                    .truncationMode(.tail)
+                    .help(String(content.text.prefix(4_000)))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Text(imageRecognitionPlaceholder(content.recognitionState))
+                    .font(.system(size: compact ? 11 : 12))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            if !content.note.isEmpty {
+                Label(String(content.note.prefix(240)), systemImage: "note.text")
+                    .font(.system(size: compact ? 10 : 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .help(String(content.note.prefix(1_000)))
+            }
+        }
+        .frame(height: ClipRowMetrics.imageContentHeight(for: clip, compact: compact), alignment: .center)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func imageRecognitionPlaceholder(_ state: ImageCardContent.RecognitionState) -> String {
+        switch state {
+        case .recognized: ""
+        case .waiting: L10n.tr("等待文字识别")
+        case .noText: L10n.tr("未检测到文字")
+        case .notRequested: L10n.tr("暂无识别文字")
         }
     }
 
@@ -528,6 +602,7 @@ private struct ClipInlineThumbnail: View {
     let attachments: AttachmentStore
     let width: CGFloat
     let height: CGFloat
+    var fitsImage = false
     @State private var image: NSImage?
     @State private var didFinishLoading = false
 
@@ -536,7 +611,7 @@ private struct ClipInlineThumbnail: View {
             if let image {
                 Image(nsImage: image)
                     .resizable()
-                    .scaledToFill()
+                    .aspectRatio(contentMode: fitsImage ? .fit : .fill)
                     .frame(width: width, height: height)
                     .clipped()
             } else if !didFinishLoading {

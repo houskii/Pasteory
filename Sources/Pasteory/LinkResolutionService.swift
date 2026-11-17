@@ -368,7 +368,7 @@ actor LinkResolutionService {
         max(0, Int(Date().timeIntervalSince(date) * 1_000))
     }
 
-    private static func isAllowed(_ url: URL) -> Bool {
+    nonisolated static func isAllowed(_ url: URL) -> Bool {
         guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
               let host = url.host?.lowercased(), !host.isEmpty,
               url.user == nil, url.password == nil else { return false }
@@ -379,7 +379,7 @@ actor LinkResolutionService {
         return riskySegments.isDisjoint(with: pathSegments)
     }
 
-    private static func isPrivateIPv4(_ host: String) -> Bool {
+    nonisolated private static func isPrivateIPv4(_ host: String) -> Bool {
         let parts = host.split(separator: ".").compactMap { Int($0) }
         guard parts.count == 4, parts.allSatisfy({ 0...255 ~= $0 }) else { return false }
         if parts[0] == 10 || parts[0] == 127 { return true }

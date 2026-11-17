@@ -1278,5 +1278,22 @@
   "高活跃度分组阈值": "High-activity group threshold",
   "内容活跃度根据使用记录计算，并据此进入留存或归档阶段。分组活跃度由成员汇总，不单独计时。": "Content activity scores derive from usage and determine retention or archival stages. Group activity is calculated from members, without a separate clock.",
   "分组活跃度": "Group activity score",
-  "由高活跃度成员均值和全部成员均值加权计算；复制等使用行为后更新，时间衰减每 5 分钟重算。": "Weighted from the mean of the most active members and all members. Updated after human usage; time decay is recalculated every 5 minutes."
+  "由高活跃度成员均值和全部成员均值加权计算；复制等使用行为后更新，时间衰减每 5 分钟重算。": "Weighted from the mean of the most active members and all members. Updated after human usage; time decay is recalculated every 5 minutes.",
+  "等待文字识别": "Waiting for text recognition",
+  "未检测到文字": "No text detected",
+  "暂无识别文字": "No recognized text",
+  "页面已刷新": "Page refreshed",
+  "需要重新登录": "Sign in again",
+  "刷新失败，将稍后重试": "Refresh failed; will retry later",
+  "刷新地址已被安全策略拦截": "Refresh URL blocked by the access policy",
+  "按所选周期在后台访问登录入口，让网站处理会话续期。周期不代表 Token 有效期；检测到登录页后会暂停刷新，请重新登录。网络失败会在一小时后重试。": "Visits the sign-in URL in the background on the selected schedule so the website can renew its session. This interval is not the token lifetime. Refresh pauses when a sign-in page is detected; sign in again to resume. Network failures are retried after one hour.",
+  "自动解析已关闭，后台会话刷新已暂停。仍可手动刷新。": "Automatic link resolution is off, so background session refresh is paused. You can still refresh manually.",
+  "立即刷新": "Refresh now",
+  "自动刷新": "Automatic refresh",
+  "刷新周期": "Refresh interval",
+  "上次登录：{0}": "Last sign-in: {0}",
+  "上次刷新：{0} · {1}": "Last refresh: {0} · {1}",
+  "正在刷新…": "Refreshing…",
+  "未完成": "Incomplete",
+  "下次刷新：{0}": "Next refresh: {0}"
 }

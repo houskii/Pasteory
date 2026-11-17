@@ -76,10 +76,18 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
         windowCloseKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
             if self.state.quickActionsMenu.isPresenting { return event }
-            if TextEditingCommands.handle(event, in: NSApp.keyWindow) { return nil }
-            if self.settingsWindow?.isKeyWindow == true,
-               self.settingsWindow?.attachedSheet == nil,
-               !((self.settingsWindow?.firstResponder as? ShortcutRecorderNSView)?.isRecordingShortcut ?? false) {
+            let eventWindow = event.window ?? NSApp.keyWindow
+            if self.quickPanel.ownsKeyboardInput(in: eventWindow) { return event }
+            if TextEditingCommands.handle(event, in: eventWindow) { return nil }
+            if let settingsWindow = self.settingsWindow, eventWindow === settingsWindow,
+               settingsWindow.attachedSheet == nil,
+               !((settingsWindow.firstResponder as? ShortcutRecorderNSView)?.isRecordingShortcut ?? false) {
+                if WindowInputScope.isPlainEscape(event),
+                   !((self.settingsWindow?.firstResponder as? NSTextView)?.hasMarkedText() ?? false) {
+                    if self.quickPanel.isPresented { self.quickPanel.close(restoreTargetApplication: false) }
+                    else { self.settingsWindow?.performClose(nil) }
+                    return nil
+                }
                 let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
                 let action = self.settings.quickAction(
                     keyCode: UInt32(event.keyCode), modifiers: self.carbonModifiers(from: modifiers)
@@ -104,7 +112,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
                     }
                 }
             }
-            return TextEditingCommands.handleClose(event, in: event.window ?? NSApp.keyWindow) ? nil : event
+            return TextEditingCommands.handleClose(event, in: eventWindow) ? nil : event
         }
     }
 
@@ -136,15 +144,22 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
         Task {
             await state.bootstrap(processExistingClips: !ProcessInfo.processInfo.arguments.contains("--skip-existing-maintenance"))
             quickPanel.prewarm()
+            Task(priority: .utility) { await self.state.refreshDueLinkSessions() }
         }
         Task { await state.webCacheMaintenance.check() }
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak state] _ in
-            Task { @MainActor in await state?.webCacheMaintenance.check() }
+            Task { @MainActor in
+                await state?.webCacheMaintenance.check()
+                await state?.refreshDueLinkSessions()
+            }
         }
         webCacheTimer = Timer.scheduledTimer(withTimeInterval: 3_600, repeats: true) { [weak state] _ in
-            Task { @MainActor in await state?.webCacheMaintenance.check() }
+            Task { @MainActor in
+                await state?.webCacheMaintenance.check()
+                await state?.refreshDueLinkSessions()
+            }
         }
         maintenanceTimer = Timer.scheduledTimer(withTimeInterval: 86_400, repeats: true) { [weak state] _ in
             Task { @MainActor in await state?.runArchive(automatic: true) }
@@ -227,6 +242,11 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
         }
         if ProcessInfo.processInfo.arguments.contains("--debug-open-update") {
             updateService.checkForUpdates()
+        }
+        if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "--debug-window-input-check"),
+           ProcessInfo.processInfo.arguments.indices.contains(index + 1) {
+            let path = ProcessInfo.processInfo.arguments[index + 1]
+            Task { await verifyDebugWindowInput(to: path) }
         }
         if ProcessInfo.processInfo.arguments.contains("--debug-text-preview") {
             Task { [weak self] in
@@ -374,6 +394,8 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
             "aiRecentEligibleCount": Set(state.intelligence.recentRegroupIDs).intersection(state.intelligence.eligibleClipIDs).count,
             "localOCRRunning": state.localOCRRunning,
             "localOCRCompleted": state.localOCRCompleted,
+            "sessionRefreshIntervals": LinkAuthenticationTarget.all(customRules: settings.authenticatedLinkRules)
+                .map { state.linkSessionRefresh.record(for: $0).interval.rawValue },
             "presentationMetrics": quickPanel.presentationMetrics,
             "sampleTitles": state.quickClips.map(\.title)
         ]
@@ -383,9 +405,45 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
             captured["textPreviewParseCount"] = await TextPreviewLoader.shared.parseCount
             if let metadataData = try? JSONSerialization.data(withJSONObject: captured, options: [.prettyPrinted, .sortedKeys]) {
                 try? metadataData.write(to: URL(fileURLWithPath: path + ".json"), options: .atomic)
+                try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
             }
         }
-        try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
+    }
+
+    private func verifyDebugWindowInput(to path: String) async {
+        func escape(_ window: NSWindow) async {
+            guard let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53) else { return }
+            NSApp.postEvent(event, atStart: false)
+            try? await Task.sleep(for: .milliseconds(180))
+        }
+        var checks = [String: Bool]()
+        openSettings()
+        guard let settingsWindow else { return }
+        quickPanel.show(); await quickPanel.waitForPresentation()
+        checks["both_windows_can_be_visible"] = settingsWindow.isVisible && quickPanel.isPresented
+        await escape(quickPanel.debugWindow)
+        checks["escape_panel_preserves_settings"] = !quickPanel.isPresented && settingsWindow.isVisible
+        await escape(settingsWindow)
+        checks["escape_settings_after_panel_hidden"] = !settingsWindow.isVisible && !quickPanel.isPresented
+        hotKeyManager.onPress?(); await quickPanel.waitForPresentation()
+        checks["global_shortcut_only_shows_panel"] = quickPanel.isPresented && !settingsWindow.isVisible
+        hotKeyManager.onPress?()
+        checks["global_shortcut_only_hides_panel"] = !quickPanel.isPresented && !settingsWindow.isVisible
+        quickPanel.show(); await quickPanel.waitForPresentation()
+        openSettings()
+        checks["opening_settings_dismisses_panel"] = settingsWindow.isVisible && !quickPanel.isPresented
+        quickPanel.show(); await quickPanel.waitForPresentation()
+        await escape(settingsWindow)
+        checks["escape_does_not_close_both_windows"] = settingsWindow.isVisible && !quickPanel.isPresented
+        await escape(settingsWindow)
+        checks["second_escape_closes_settings"] = !settingsWindow.isVisible
+        let result: [String: Any] = ["checks": checks, "passed": checks.values.allSatisfy { $0 },
+            "bundle_identifier": Bundle.main.bundleIdentifier ?? ""]
+        if let data = try? JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]) {
+            try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
+        }
     }
 
     /// Public demo content only, used for README screenshots in the isolated QA app.
@@ -470,8 +528,29 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
     }
 
     private func seedDebugData() async {
+        if ProcessInfo.processInfo.arguments.contains("--debug-session-refresh-seed") {
+            for site in LinkAuthenticationSite.allCases {
+                state.linkSessionRefresh.markSignedIn(.builtIn(site))
+            }
+            state.linkSessionRefresh.setInterval(.sevenDays, for: .builtIn(.lark))
+            state.linkSessionRefresh.setInterval(.thirtyDays, for: .builtIn(.codebase))
+        }
         if ProcessInfo.processInfo.arguments.contains("--debug-readme-seed") {
             await seedReadmeData()
+            if ProcessInfo.processInfo.arguments.contains("--debug-image-ocr-seed"),
+               var image = state.quickClips.first(where: { $0.primaryKind == .image }) {
+                image.title = ""
+                image.note = settings.appLanguage == .english ? "Release planning reference" : "下次整理前先核对分组内容"
+                image.isPinned = true
+                do {
+                    try await state.repository.updateExisting(image)
+                    let text = settings.appLanguage == .english
+                        ? "The grouping plan contains seven themes.\nReview each group before applying the plan.\nRecognized image text can be searched and edited.\nAdditional lines remain available in the library."
+                        : "分组整理完成，生成 7 个主题。\n可以先查看各组内容，再决定是否应用整份方案。\n图片识别文字支持搜索，也可以在备注中修改。\n这是一段用于验证长 OCR 阅读效果的示例文字。"
+                    _ = try await state.repository.saveLocalOCR(LocalOCRResult(contentHash: image.contentHash, text: text), clipID: image.id)
+                    await state.refreshQuick(); await state.refreshLibrary()
+                } catch { state.show(error) }
+            }
             if ProcessInfo.processInfo.arguments.contains("--debug-ai-seed") { await seedAIData() }
             if ProcessInfo.processInfo.arguments.contains("--debug-group-seed") { await seedOrganizationDemo() }
             return
@@ -813,6 +892,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
     }
 
     private func openSettings(destination: SettingsDestination = .general) {
+        if quickPanel.isPresented { quickPanel.close(restoreTargetApplication: false) }
         guard settingsWindow?.attachedSheet == nil else {
             activateAndShow(settingsWindow)
             return
@@ -871,6 +951,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
     }
 
     private func presentUpdateDialog() {
+        if quickPanel.isPresented { quickPanel.close(restoreTargetApplication: false) }
         if updateWindow == nil {
             let controller = NSHostingController(rootView: UpdateDialogView(service: updateService, settings: settings))
             controller.sizingOptions = []

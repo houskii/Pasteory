@@ -23,7 +23,6 @@ struct LinkResolutionSettingsView: View {
     @State private var pendingAuthenticationTarget: LinkAuthenticationTarget?
     @State private var rulePendingRemoval: URLFallbackRule?
     @State private var authenticatedRulePendingRemoval: AuthenticatedLinkRule?
-    @State private var sessionRevision = UUID()
 
     private enum LinkSettingsSection: String, CaseIterable, Identifiable {
         case all
@@ -88,6 +87,9 @@ struct LinkResolutionSettingsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .task { await state.refreshLinkResolutionData() }
+        .onChange(of: settings.linkResolutionEnabled) { _, enabled in
+            if enabled { Task { await state.refreshDueLinkSessions() } }
+        }
         .onAppear {
 #if DEBUG
             let arguments = ProcessInfo.processInfo.arguments
@@ -125,7 +127,7 @@ struct LinkResolutionSettingsView: View {
         }
         .sheet(item: $authenticationRequest) { request in
             SiteLoginSheet(request: request, cache: state.webCacheMaintenance) {
-                sessionRevision = UUID()
+                state.linkSessionRefresh.markSignedIn(request.target)
                 authenticationRequest = nil
                 if let group = request.group {
                     Task { await state.retryAuthenticatedLinkResolution(group, using: request.target) }
@@ -350,38 +352,19 @@ struct LinkResolutionSettingsView: View {
     private var connections: some View {
         let chromeStatus = ChromeExtensionIntegration.status()
         let authenticationTargets = LinkAuthenticationTarget.all(customRules: settings.authenticatedLinkRules)
-        _ = sessionRevision
         return Form {
             Section(L10n.tr("Pasteory 登录会话")) {
+                if !settings.linkResolutionEnabled {
+                    Label(L10n.tr("自动解析已关闭，后台会话刷新已暂停。仍可手动刷新。"), systemImage: "pause.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 ForEach(authenticationTargets) { target in
-                    HStack(alignment: .center, spacing: 12) {
-                        Image(systemName: "person.crop.circle.badge.key")
-                            .foregroundStyle(pasteoryAccentColor)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(target.title).font(.headline)
-                            Text(target.domainDescription).font(.caption.monospaced()).foregroundStyle(.secondary)
-                            if let updatedAt = LinkAuthenticationSession.lastUpdatedAt(target) {
-                                Text(L10n.tr("最近更新：\(updatedAt.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(L10n.language.locale)))"))
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            } else {
-                                Text(L10n.tr("尚未建立登录会话"))
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        Spacer()
-                        Button(LinkAuthenticationSession.lastUpdatedAt(target) == nil ? L10n.tr("登录…") : L10n.tr("更新登录…")) {
-                            authenticationRequest = LinkAuthenticationRequest(target: target, group: nil)
-                        }
-                        if let rule = target.customRule {
-                            Button(role: .destructive) { authenticatedRulePendingRemoval = rule } label: {
-                                Image(systemName: "trash")
-                            }
-                            .buttonStyle(.borderless)
-                        }
+                    LinkSessionConnectionRow(target: target, refresh: state.linkSessionRefresh) {
+                        authenticationRequest = LinkAuthenticationRequest(target: target, group: nil)
+                    } onRemove: {
+                        authenticatedRulePendingRemoval = target.customRule
                     }
-                    .padding(.vertical, 3)
                 }
                 HStack {
                     Spacer(minLength: 0)
@@ -390,6 +373,9 @@ struct LinkResolutionSettingsView: View {
                     }
                 }
                 Text(L10n.tr("登录发生在 Pasteory 独立的 WebKit 会话中，不读取 Chrome Cookie。登录数据和 WebCrypto 钥匙串账户按 Bundle ID 隔离，正式包与 QA 包互不共享。"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(L10n.tr("按所选周期在后台访问登录入口，让网站处理会话续期。周期不代表 Token 有效期；检测到登录页后会暂停刷新，请重新登录。网络失败会在一小时后重试。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 LabeledContent(L10n.tr("浏览器兼容标识"), value: chromeCompatibilityLabel)
@@ -430,6 +416,80 @@ struct LinkResolutionSettingsView: View {
         guard let range = LinkWebKitConfiguration.compatibilityUserAgent.range(of: marker) else { return L10n.tr("Chrome 兼容") }
         let version = LinkWebKitConfiguration.compatibilityUserAgent[range.upperBound...].split(separator: " ").first ?? ""
         return "Chrome \(version)"
+    }
+}
+
+private struct LinkSessionConnectionRow: View {
+    @Environment(\.pasteoryAccentColor) private var accent
+    let target: LinkAuthenticationTarget
+    @ObservedObject var refresh: LinkSessionRefreshService
+    let onSignIn: () -> Void
+    let onRemove: () -> Void
+
+    private func dateText(_ date: Date) -> String {
+        date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(L10n.language.locale))
+    }
+
+    var body: some View {
+        let record = refresh.record(for: target)
+        let signedInAt = refresh.lastSignedInAt(target)
+        let refreshing = refresh.refreshingTargetIDs.contains(target.id)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Image(systemName: "person.crop.circle.badge.key").foregroundStyle(accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(target.title).font(.headline)
+                    Text(target.domainDescription).font(.caption.monospaced()).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if refreshing {
+                    ProgressView().controlSize(.small)
+                }
+                Button(L10n.tr("立即刷新")) { Task { await refresh.refresh(target) } }
+                    .disabled(signedInAt == nil || refreshing)
+                Button(signedInAt == nil ? L10n.tr("登录…") : L10n.tr("更新登录…"), action: onSignIn)
+                if target.customRule != nil {
+                    Button(role: .destructive, action: onRemove) { Image(systemName: "trash") }
+                        .buttonStyle(.borderless)
+                }
+            }
+            HStack(spacing: 18) {
+                Toggle(L10n.tr("自动刷新"), isOn: Binding(
+                    get: { refresh.record(for: target).automatic },
+                    set: { refresh.setAutomatic($0, for: target) }
+                ))
+                .toggleStyle(.switch)
+                .fixedSize()
+                Picker(L10n.tr("刷新周期"), selection: Binding(
+                    get: { refresh.record(for: target).interval },
+                    set: { refresh.setInterval($0, for: target) }
+                )) {
+                    ForEach(LinkSessionRefreshInterval.allCases) { interval in
+                        Text(interval.title).tag(interval)
+                    }
+                }
+                .frame(width: 180)
+                Spacer(minLength: 0)
+            }
+            .controlSize(.small)
+            VStack(alignment: .leading, spacing: 3) {
+                if let signedInAt {
+                    Text(L10n.tr("上次登录：\(dateText(signedInAt))"))
+                } else {
+                    Text(L10n.tr("尚未建立登录会话"))
+                }
+                if let attempted = record.lastAttemptAt {
+                    Text(L10n.tr("上次刷新：\(dateText(attempted)) · \(refreshing ? L10n.tr("正在刷新…") : record.outcome?.title ?? L10n.tr("未完成"))"))
+                        .foregroundStyle(record.outcome == .needsAuthentication ? .orange : .secondary)
+                }
+                if let next = refresh.nextRefreshAt(target) {
+                    Text(L10n.tr("下次刷新：\(dateText(next))"))
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 6)
     }
 }
 

@@ -376,11 +376,6 @@ struct QuickPanelView: View {
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if case .collection(let id) = tab.scope {
-                    if let group = state.intelligence.state.groups[id] {
-                        Text(state.intelligence.groupActivity(group).score.formatted(.percent.precision(.fractionLength(0))))
-                            .font(.system(size: 9, weight: .medium)).monospacedDigit().foregroundStyle(.secondary)
-                            .help(L10n.tr("分组综合活跃度"))
-                    }
                     GroupNewContentBadge(state: state, id: id)
                 }
                 GroupShortcutHint(text: tabShortcutHint(tab))

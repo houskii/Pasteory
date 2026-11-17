@@ -53,6 +53,13 @@ struct LoadedImagePresentation: Equatable, Sendable {
         guard let byteCount else { return L10n.tr("文件大小: 未知") }
         return L10n.tr("文件大小: \(FileSizeFormatter.string(forByteCount: byteCount))")
     }
+
+    var summaryText: String {
+        var parts = [format?.uppercased() ?? L10n.tr("未知")]
+        if let pixelWidth, let pixelHeight { parts.append("\(pixelWidth) × \(pixelHeight)") }
+        if let byteCount { parts.append(FileSizeFormatter.string(forByteCount: byteCount)) }
+        return parts.joined(separator: " · ")
+    }
 }
 
 enum PasteboardFileURLDecoder {
@@ -612,24 +619,30 @@ struct PasteoryImageMetadataDetailsView: View {
     let clip: Clip
     let attachments: AttachmentStore
     var compact = false
+    var inline = false
     @State private var presentation: LoadedImagePresentation
 
-    init(clip: Clip, attachments: AttachmentStore, compact: Bool = false) {
+    init(clip: Clip, attachments: AttachmentStore, compact: Bool = false, inline: Bool = false) {
         self.clip = clip
         self.attachments = attachments
         self.compact = compact
+        self.inline = inline
         _presentation = State(initialValue: ClipImagePresentationLoader.fallback(for: clip))
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(presentation.formatText)
-            Text(presentation.dimensionsText)
-                .monospacedDigit()
-            Text(presentation.fileSizeText)
-                .monospacedDigit()
+        Group {
+            if inline {
+                Text(presentation.summaryText).monospacedDigit()
+            } else {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(presentation.formatText)
+                    Text(presentation.dimensionsText).monospacedDigit()
+                    Text(presentation.fileSizeText).monospacedDigit()
+                }
+            }
         }
-        .font(.system(size: compact ? 10.5 : 11.5, weight: .semibold))
+        .font(.system(size: compact ? 10.5 : 11.5, weight: inline ? .regular : .semibold))
         .foregroundStyle(.secondary)
         .lineLimit(1)
         .task(id: clip.id) {

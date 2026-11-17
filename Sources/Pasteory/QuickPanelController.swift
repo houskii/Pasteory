@@ -33,6 +33,7 @@ final class QuickPanelController: NSObject {
     private let frameAutosaveName = "PasteoryQuickPanelWindow"
     private var hasInitialPlacement = false
     private var activatedApplicationForQuickPanel = false
+    private weak var previousOwnWindow: NSWindow?
     private(set) var targetApplication: NSRunningApplication?
 
     init(
@@ -152,7 +153,13 @@ final class QuickPanelController: NSObject {
         panel.contentView?.layoutSubtreeIfNeeded()
     }
 
-    func toggle() { panel.isVisible || presentationTask != nil ? close() : show() }
+    var isPresented: Bool { panel.isVisible || presentationTask != nil }
+
+    func ownsKeyboardInput(in window: NSWindow?) -> Bool {
+        WindowInputScope.contains(window, root: panel)
+    }
+
+    func toggle() { isPresented ? close() : show() }
 
 #if DEBUG
     private(set) var presentationMetrics: [[String: Double]] = []
@@ -174,6 +181,7 @@ final class QuickPanelController: NSObject {
 #endif
         presentationTask?.cancel()
         activatedApplicationForQuickPanel = false
+        previousOwnWindow = NSApp.isActive && NSApp.keyWindow !== panel ? NSApp.keyWindow : nil
         if state.quickCommandKeyDown { state.quickCommandKeyDown = false }
         if state.quickSearchFocused { state.quickSearchFocused = false }
         cancelPendingCommandHelp()
@@ -214,7 +222,7 @@ final class QuickPanelController: NSObject {
 #else
             let backgroundSnapshot = false
 #endif
-            if !backgroundSnapshot, !NSApp.isActive {
+            if !backgroundSnapshot, !panel.styleMask.contains(.nonactivatingPanel), !NSApp.isActive {
                 activatedApplicationForQuickPanel = true
                 NSApp.activate(ignoringOtherApps: true)
             }
@@ -261,6 +269,8 @@ final class QuickPanelController: NSObject {
     }
 
     func close(restoreTargetApplication: Bool = true) {
+        let returnWindow = previousOwnWindow
+        previousOwnWindow = nil
         presentationTask?.cancel(); presentationTask = nil
         panel.orderOut(nil)
         if state.quickCommandKeyDown { state.quickCommandKeyDown = false }
@@ -282,7 +292,9 @@ final class QuickPanelController: NSObject {
         _ = state.prepareCachedQuickPanel()
         if let eventMonitor { NSEvent.removeMonitor(eventMonitor); self.eventMonitor = nil }
         if let globalMouseMonitor { NSEvent.removeMonitor(globalMouseMonitor); self.globalMouseMonitor = nil }
-        if activatedApplicationForQuickPanel,
+        if restoreTargetApplication, let returnWindow, returnWindow.isVisible {
+            returnWindow.makeKeyAndOrderFront(nil)
+        } else if activatedApplicationForQuickPanel,
            restoreTargetApplication,
            let targetApplication,
            !targetApplication.isTerminated {
@@ -324,8 +336,17 @@ final class QuickPanelController: NSObject {
 
     private func installKeyMonitor() {
         if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
-        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged, .rightMouseDown]) { [weak self] event in
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged, .leftMouseDown, .rightMouseDown]) { [weak self] event in
             guard let self, self.panel.isVisible else { return event }
+            if self.state.quickActionsMenu.isPresenting { return event }
+            let eventWindow = event.window ?? NSApp.keyWindow
+            guard self.ownsKeyboardInput(in: eventWindow) else {
+                if event.type == .leftMouseDown || event.type == .rightMouseDown {
+                    self.close(restoreTargetApplication: false)
+                }
+                return event
+            }
+            if event.type == .leftMouseDown { return event }
             let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             if event.type == .keyDown {
                 cancelPendingCommandHelp()
@@ -334,7 +355,6 @@ final class QuickPanelController: NSObject {
                     hideCommandHelp()
                 }
             }
-            if state.quickActionsMenu.isPresenting { return event }
             if TextEditingCommands.handle(event, in: self.panel) {
                 state.quickCommandKeyDown = false
                 hideCommandHelp()
