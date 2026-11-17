@@ -6,28 +6,23 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <link>https://github.com/houskii/Pasteory/releases</link>
     <language>en</language>
     <item>
-      <title>Pasteory 0.1.49</title>
-      <link>https://github.com/houskii/Pasteory/releases/tag/v0.1.49</link>
-      <pubDate>Tue, 17 Nov 2026 10:30:18 +0000</pubDate>
-      <description sparkle:descriptionFormat="plain-text"># Pasteory 0.1.49 Beta
+      <title>Pasteory 0.1.50</title>
+      <link>https://github.com/houskii/Pasteory/releases/tag/v0.1.50</link>
+      <pubDate>Tue, 17 Nov 2026 10:53:22 +0000</pubDate>
+      <description sparkle:descriptionFormat="plain-text"># Pasteory 0.1.50 Beta
 
-- 恢复 Sparkle 更新发布：建立新更新密钥、加密恢复包和 GitHub Actions Secret，后续发布无需依赖当前 Mac。
-- 发布前验证固定公钥是否能核验真实签名，提前发现私钥缺失或公私钥不匹配。
-- 增加独立的 GitHub 签名恢复验证流程，检查云端能否解密恢复并使用原签名身份。
-- 补充换机、密钥备份和恢复步骤。
+本版本用于验证从 0.1.49 到更高版本的正式应用内升级。功能与资料格式沿用 0.1.49，继续使用相同的更新签名密钥和应用代码签名身份。
 
-**这次需要手动安装一次。** 原更新私钥和原恢复私钥无法找回，本版本按用户确认的方案更换更新公钥。0.1.48 及更早版本需要从本 Release 下载 DMG 手动安装；安装此版本后，后续更新继续通过应用内“检查更新”验签、下载和安装。
+已安装 0.1.49 的用户可通过应用内“检查更新”查看本版本，确认后下载、验签、安装并重启。0.1.48 及更早版本仍需先手动安装包含新更新公钥的版本。
 
-适用于 Apple Silicon，macOS 14 及以上。保留原应用代码签名身份。
-
-本次按用户要求只发布，不替换构建 Mac 上已安装的 Pasteory。
+适用于 Apple Silicon，macOS 14 及以上。
 
 安装包使用本机生成的 Pasteory Local Build 证书签名，该证书不是 Apple 颁发的开发者证书。安装包未经过 Apple 公证。</description>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <enclosure url="https://github.com/houskii/Pasteory/releases/download/v0.1.49/Pasteory-0.1.49-arm64.dmg" length="11177537" type="application/octet-stream" sparkle:version="54" sparkle:shortVersionString="0.1.49" sparkle:edSignature="AI2K7cg+s97bGqkYuzRsqcRAkTqNUR0ybie7dlEnNL8ASdS7rRiVcKHD73vZNR1UByL9TNrYAE/r/fNSKXIaBQ==" sparkle:os="macos"></enclosure>
+      <enclosure url="https://github.com/houskii/Pasteory/releases/download/v0.1.50/Pasteory-0.1.50-arm64.dmg" length="11179906" type="application/octet-stream" sparkle:version="55" sparkle:shortVersionString="0.1.50" sparkle:edSignature="eAv2xwC7hgd+FoL6iGT4LZIUSK4FdrhQNXmvpe2It1IEgqRz/Y5iGlHeCplAtoUig6It+/pZ6jNEXwwozjLuBw==" sparkle:os="macos"></enclosure>
     </item>
   </channel>
 </rss><!-- sparkle-signatures:
-edSignature: l3f54MqvVU/livuFa4xw8l9oqRjGRQ6msEMBKxkARjnh3uB2nOMk8IjKtluJmIWUfZ3c9/UiIFxQhpBZzhl2Dw==
-length: 2287
+edSignature: zLK/AuERtvIAvbITKEQnsVLDsmYolVEeRkOiJ5GOm0C99adywyNNYG3fnFFZdLzrsInd/OQsR+hvBB1+mEwJDg==
+length: 1840
 -->
