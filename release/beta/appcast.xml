@@ -6,23 +6,24 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <link>https://github.com/houskii/Pasteory/releases</link>
     <language>en</language>
     <item>
-      <title>Pasteory 0.1.56</title>
-      <link>https://github.com/houskii/Pasteory/releases/tag/v0.1.56</link>
-      <pubDate>Wed, 18 Nov 2026 03:27:14 +0000</pubDate>
-      <description sparkle:descriptionFormat="plain-text"># Pasteory 0.1.56 Beta
+      <title>Pasteory 0.1.57</title>
+      <link>https://github.com/houskii/Pasteory/releases/tag/v0.1.57</link>
+      <pubDate>Wed, 18 Nov 2026 04:12:56 +0000</pubDate>
+      <description sparkle:descriptionFormat="plain-text"># Pasteory 0.1.57 Beta
 
-- 快捷面板和资料库的普通卡片恢复垂直居中，正文下方紧接时间和使用次数。
-- 图片缩略图和来源名称在左侧居中，右侧的图片信息与时间和使用次数左对齐。图片识别完成前后，卡片高度保持一致。
-- 统计行空间不足时，用图标显示复制和粘贴次数，给时间和状态标记留出位置。
+- 图片来源图标加上主题色描边。快捷面板的图片卡片缩小缩略图和留白，识别文字最多显示三行。
+- HTML 与图片等混合剪贴板使用同一套图片卡片布局，保留项目数，图片规格和 OCR 与时间戳分行对齐。
+- 已有 Story 的格式更新和定期更新都在设备空闲后开始。打开 Story 会显示保存的回顾。
+- Agent 按整个请求的大小计算输入预算，自动略过较早的对话轮次。原资料、工具结果和已保存的任务进度可继续读取。
 
 适用于 Apple Silicon，macOS 14 及以上。沿用现有的应用签名身份和 Sparkle 更新密钥。
 
 安装包使用本机生成的 Pasteory Local Build 证书签名，未经过 Apple 公证。</description>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <enclosure url="https://github.com/houskii/Pasteory/releases/download/v0.1.56/Pasteory-0.1.56-arm64.dmg" length="11497261" type="application/octet-stream" sparkle:version="61" sparkle:shortVersionString="0.1.56" sparkle:edSignature="qHqxhqtJrp2Zz226kYZ1aSo3d5HJyLdPgrL6KVguOWHhXlCrJnpd4tx2n5gEIwFM7g7f0O1EdUJRH2gM+iK/BA==" sparkle:os="macos"></enclosure>
+      <enclosure url="https://github.com/houskii/Pasteory/releases/download/v0.1.57/Pasteory-0.1.57-arm64.dmg" length="11491505" type="application/octet-stream" sparkle:version="62" sparkle:shortVersionString="0.1.57" sparkle:edSignature="B1RAIvUvrVIDEchmIR51a5JYtKvoQR55WcWl9aayPHwOp5Bs3UHhLOZPKYnC3yXrdQXMKj0GfbDQiHAOrWWpCQ==" sparkle:os="macos"></enclosure>
     </item>
   </channel>
 </rss><!-- sparkle-signatures:
-edSignature: aFniHIDuM31AA/5FB4R9198RgDOliU5dV3VryFpILqMIxIQvnO8aDvNG5O5umf0Mx0mWxpDmoeeYkPObcjUBBg==
-length: 1833
+edSignature: gJKnJByg25llDciE6Is6VK9qJU97XoftIe+vDGCWmYc2/pTojAqkJ5w9vgvZONcbC0Ip7AG2fq5RpmRH8KLRAQ==
+length: 2001
 -->
