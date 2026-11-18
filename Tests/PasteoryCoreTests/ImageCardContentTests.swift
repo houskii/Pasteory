@@ -57,3 +57,20 @@ private func imageCardClip() throws -> Clip {
     #expect(ClipRowMetrics.height(for: clip, compact: true) == compact)
     #expect(ClipRowMetrics.height(for: clip, compact: false) == library)
 }
+
+@Test func mixedHTMLAndImageUsesTheImageCardLayoutAndOCRBlock() throws {
+    let capture = PasteboardCapture(items: [
+        .init(order: 0, representations: [.init(uti: "public.html", data: Data("<p>Example</p>".utf8))]),
+        .init(order: 1, representations: [.init(uti: "public.png", data: Data([1, 2, 3]))])
+    ], source: .init(appName: "Synthetic"))
+    var mixed = try #require(ClipClassifier.makeClip(from: capture))
+    mixed.note = "Manual note\n\n[OCR:First line\nSecond line\nThird line]"
+    #expect(mixed.primaryKind == .mixed)
+    #expect(ClipRowMetrics.usesImageCard(for: mixed))
+    #expect(ImageCardContent(clip: mixed).text == "First line\nSecond line\nThird line")
+    #expect(ImageCardContent(clip: mixed).note == "Manual note")
+    var image = mixed
+    image.primaryKind = .image
+    #expect(ClipRowMetrics.height(for: mixed, compact: true) == ClipRowMetrics.height(for: image, compact: true))
+    #expect(ClipRowMetrics.height(for: mixed, compact: false) == ClipRowMetrics.height(for: image, compact: false))
+}

@@ -63,28 +63,22 @@ public actor AIFileAgent {
         }
         var usage = [AIUsageRecord]()
         let today = Calendar.current.startOfDay(for: Date())
+        let encoder = JSONEncoder.sorted
+        var fields: [String: JSONValue] = ["model": .string(configuration.model), "messages": .array([]),
+            "tools": try .value(Self.tools), "tool_choice": .string("auto"),
+            "max_tokens": .number(Double(configuration.maxOutputTokens)), "stream": .bool(false)]
+        if configuration.reasoning != "auto" { fields["reasoning_effort"] = .string(configuration.reasoning) }
+        let messageBudget = configuration.maxInputTokens * 2 - (try encoder.encode(JSONValue.object(fields)).count)
         for round in 1...configuration.fileAgentRoundLimit {
             try Task.checkCancellation()
             try await onProgress(round, nil)
-            let contextBytes = max(6000, configuration.maxInputTokens * 2)
-            // The complete transcript stays on disk. Compact old exchanges as
-            // units, so tool-call/result pairs remain valid on every provider.
-            while try JSONEncoder.sorted.encode(messages).count > contextBytes, messages.count > 4 {
-                var boundary = 3
-                while boundary < messages.count && messages[boundary]["role"].string != "assistant" { boundary += 1 }
-                guard boundary < messages.count else { break }
-                messages.removeSubrange(2..<boundary)
-            }
-            var fields: [String: JSONValue] = ["model": .string(configuration.model), "messages": .array(messages),
-                "tools": try .value(Self.tools), "tool_choice": .string("auto"),
-                "max_tokens": .number(Double(configuration.maxOutputTokens)), "stream": .bool(false)]
-            if configuration.reasoning != "auto" { fields["reasoning_effort"] = .string(configuration.reasoning) }
-            let estimatedInput = max(1, (try JSONEncoder.sorted.encode(JSONValue.object(fields)).count + 1) / 2)
-            guard estimatedInput <= configuration.maxInputTokens else { throw AIError.invalid("Agent context is full; continue with a larger input budget") }
+            let requestMessages = try Self.messagesForRequest(messages, byteBudget: messageBudget, encoder: encoder)
+            fields["messages"] = .array(requestMessages)
+            let estimatedInput = max(1, (try encoder.encode(JSONValue.object(fields)).count + 1) / 2)
             let spent = (ledger + usage).filter { $0.date >= today }.reduce(0) { $0 + $1.totalTokens }
             guard spent + estimatedInput + configuration.maxOutputTokens <= configuration.dailyTokenLimit else { throw AIError.budget }
             // Persist file URLs, never image base64. Hydration is request-local.
-            var hydrated = messages
+            var hydrated = requestMessages
             for index in hydrated.indices {
                 if let parts = hydrated[index]["content"].array {
                     var next = parts
@@ -103,7 +97,7 @@ public actor AIFileAgent {
             fields["messages"] = .array(hydrated)
             let response: AIChatResponse
             do {
-                let raw = try await transport.completion(body: JSONEncoder.sorted.encode(JSONValue.object(fields)), configuration: configuration, credential: credential)
+                let raw = try await transport.completion(body: encoder.encode(JSONValue.object(fields)), configuration: configuration, credential: credential)
                 response = try JSONDecoder().decode(AIChatResponse.self, from: raw)
             } catch {
                 let record = AIUsageRecord(runID: taskID, requestedModel: configuration.model, inputTokens: estimatedInput,
@@ -148,5 +142,37 @@ public actor AIFileAgent {
             }
         }
         throw AIError.invalid("Agent round limit reached; the task is saved and can be continued")
+    }
+
+    private static func messagesForRequest(_ history: [JSONValue], byteBudget: Int, encoder: JSONEncoder) throws -> [JSONValue] {
+        let instructions = Array(history.prefix(2))
+        // The empty array's brackets are already counted in the request envelope.
+        let instructionBytes = try encoder.encode(instructions).count - 2
+        let available = byteBudget - instructionBytes
+        guard available >= 0 else {
+            throw AIError.invalid("The task instructions and tool definitions exceed the configured input limit")
+        }
+        guard history.count > instructions.count else { return history }
+
+        let notice: JSONValue = .object(["role": .string("user"), "content": .string(
+            "Earlier exchanges were shortened to fit this request. Continue the same task. Check task.json, scratch/ and output/ for saved work and trace/ for earlier tool results. Read smaller pages or select fewer fields as needed."
+        )])
+        let noticeBytes = try encoder.encode(notice).count + 1
+        var remaining = available
+        var start = history.endIndex
+        for index in history.indices.dropFirst(instructions.count).reversed() {
+            let message = history[index]
+            remaining -= try encoder.encode(message).count + 1
+            guard remaining >= 0 else { break }
+            if index == instructions.count { return history }
+            // A request may omit whole exchanges. A tool result or a tool's
+            // image cannot start the retained suffix. The saved history stays intact.
+            let role = message["role"].string
+            if remaining >= noticeBytes, role == "assistant" || (role == "user" && message["content"].string != nil) {
+                start = index
+            }
+        }
+        guard available >= noticeBytes else { return instructions }
+        return instructions + [notice] + history[start...]
     }
 }
