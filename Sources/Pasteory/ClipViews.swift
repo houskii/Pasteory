@@ -5,10 +5,6 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 enum ClipRowMetrics {
-    static let footerHeight: CGFloat = 16
-    static let footerBottomInset: CGFloat = 8
-    static let footerSpacing: CGFloat = 3
-    static var footerReservedHeight: CGFloat { footerHeight + footerBottomInset + footerSpacing }
     static func height(for clip: Clip, compact: Bool) -> CGFloat {
         switch clip.primaryKind {
         case .code: compact ? 96 : 104
@@ -20,7 +16,7 @@ enum ClipRowMetrics {
         }
     }
 
-    static func imageContentHeight(for clip: Clip, compact: Bool) -> CGFloat {
+    private static func imageContentHeight(for clip: Clip, compact: Bool) -> CGFloat {
         let content = ImageCardContent(clip: clip)
         // Reserve the text area while OCR is pending so completing it does not move the list.
         let textHeight: CGFloat = compact ? 34 : 54
@@ -42,45 +38,35 @@ struct ClipRowView: View {
 
     private var rowHeight: CGFloat { ClipRowMetrics.height(for: clip, compact: compact) }
     private var sourceSpacing: CGFloat { ClipSourceLayout.usesVerticalIdentity ? 6 : 10 }
-    private var footerLeadingInset: CGFloat {
-        (ClipSourceLayout.usesVerticalIdentity ? (compact ? 54 : 60) : (compact ? 38 : 46)) + sourceSpacing
-    }
     private var trailingWidth: CGFloat {
         ClipTypeMarkerPreview.overlaysSourceIcon ? (compact ? 34 : 38) : (compact ? 54 : 58)
     }
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            HStack(alignment: .center, spacing: sourceSpacing) {
-                leadingArea
-                    .padding(.bottom, clip.primaryKind == .image ? ClipRowMetrics.footerReservedHeight : 0)
+        HStack(alignment: .center, spacing: sourceSpacing) {
+            leadingArea
+            VStack(alignment: .leading, spacing: 3) {
                 mainContent
-                    .frame(maxWidth: .infinity)
-                    .frame(height: rowHeight - ClipRowMetrics.footerReservedHeight, alignment: .bottom)
-                    .clipped()
-                    .padding(.bottom, ClipRowMetrics.footerReservedHeight)
-                Spacer(minLength: 4)
-                VStack(alignment: .trailing, spacing: 0) {
-                    if !ClipTypeMarkerPreview.overlaysSourceIcon {
-                        ClipKindLabel(clip: clip)
-                    }
-                    Spacer(minLength: 0)
-                    if let shortcutNumber {
-                        Text("⌘ \(shortcutNumber)")
-                            .font(.caption)
-                            .foregroundStyle(.primary)
-                            .fixedSize()
-                    }
-                }
-                .frame(width: trailingWidth, height: max(56, rowHeight - 16), alignment: .trailing)
-                .padding(.trailing, 4)
-                .padding(.bottom, 4)
+                footer
             }
-            footer
-                .frame(height: ClipRowMetrics.footerHeight, alignment: .leading)
-                .padding(.leading, footerLeadingInset)
-                .padding(.trailing, trailingWidth + 8)
-                .padding(.bottom, ClipRowMetrics.footerBottomInset)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            Spacer(minLength: 4)
+            VStack(alignment: .trailing, spacing: 0) {
+                if !ClipTypeMarkerPreview.overlaysSourceIcon {
+                    ClipKindLabel(clip: clip)
+                }
+                Spacer(minLength: 0)
+                if let shortcutNumber {
+                    Text("⌘ \(shortcutNumber)")
+                        .font(.caption)
+                        .foregroundStyle(.primary)
+                        .fixedSize()
+                }
+            }
+            .frame(width: trailingWidth, height: max(56, rowHeight - 16), alignment: .trailing)
+            .padding(.trailing, 4)
+            .padding(.bottom, 4)
         }
         .saturation(fileIsMissing ? 0 : 1)
         .opacity(fileIsMissing ? 0.5 : 1)
@@ -96,6 +82,20 @@ struct ClipRowView: View {
     }
 
     private var footer: some View {
+        ViewThatFits(in: .horizontal) {
+            if !compact || L10n.language != .english {
+                footerLine(compactCounts: false)
+            }
+            footerLine(compactCounts: true)
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+        .clipped()
+    }
+
+    private func footerLine(compactCounts: Bool) -> some View {
         HStack(spacing: 7) {
             if !ClipSourceLayout.usesVerticalIdentity {
                 Text(String(clip.source.appName.prefix(40)))
@@ -115,7 +115,7 @@ struct ClipRowView: View {
                lineCount > 1 {
                 Text(L10n.tr("\(lineCount) 行")).fixedSize()
             }
-            usageCount
+            usageCount(compact: compactCounts)
                 .fixedSize()
                 .layoutPriority(2)
                 .help(L10n.tr("复制 \(clip.copyCount) 次，通过 Pasteory 粘贴 \(clip.recordedPasteCount) 次"))
@@ -124,16 +124,11 @@ struct ClipRowView: View {
             if clip.isFavorite { Image(systemName: "star.fill").foregroundStyle(.yellow) }
             if clip.priority > 0 { Text("P\(clip.priority)").font(.caption2.bold()).foregroundStyle(pasteoryAccentColor) }
         }
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .clipped()
     }
 
     @ViewBuilder
-    private var usageCount: some View {
-        if compact && L10n.language == .english {
+    private func usageCount(compact: Bool) -> some View {
+        if compact {
             HStack(spacing: 3) {
                 Image(systemName: "doc.on.doc")
                 Text(CompactCountFormatter.string(for: clip.copyCount))
@@ -224,11 +219,7 @@ struct ClipRowView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(
-                height: clip.primaryKind == .file
-                    ? (compact ? 62 : 66)
-                    : (clip.primaryKind == .image
-                        ? ClipRowMetrics.imageContentHeight(for: clip, compact: compact)
-                        : (compact ? 42 : 46)),
+                height: clip.primaryKind == .file ? (compact ? 62 : 66) : (compact ? 42 : 46),
                 alignment: .leading
             )
         } else if clip.primaryKind == .file {
@@ -331,7 +322,6 @@ struct ClipRowView: View {
                     .help(String(content.note.prefix(1_000)))
             }
         }
-        .frame(height: ClipRowMetrics.imageContentHeight(for: clip, compact: compact), alignment: .center)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
