@@ -76,9 +76,9 @@ final class StoryController: ObservableObject {
               !settings.defaults.bool(forKey: "storyAutomationPaused"),
               (try? configuration.validate()) != nil else { return }
         guard checkpoint != nil || AIStorySchedule.isDue(reports.first, now: now) else { return }
-        // The first Story starts without a click. Later editions wait until the
-        // computer is idle, and reuse the existing application background timer.
-        guard reports.first?.promptVersion != AIStorySchedule.promptVersion || idleTime() >= configuration.organizationPolicy.idleSeconds else {
+        // A format migration is an update to an existing report and uses the
+        // same idle requirement as a weekly refresh.
+        guard canStartWithoutWaitingForIdle else {
             status = L10n.tr("Story 将在设备空闲时静默更新。")
             return
         }
@@ -109,6 +109,8 @@ final class StoryController: ObservableObject {
             status = L10n.tr("最近 7 天还没有可用于 Story 的内容，留下新记录后会自动生成。")
             return
         }
+        guard settings.aiConfiguration == configuration, !running, !sleeping, !organizationBusy(),
+              !settings.defaults.bool(forKey: "storyAutomationPaused"), canStartWithoutWaitingForIdle else { return }
         settings.defaults.set(now, forKey: "storyLastAutomaticAttempt")
         generate(resume: canResume, automatic: true)
     }
@@ -143,7 +145,7 @@ final class StoryController: ObservableObject {
         }
         if !automatic { settings.defaults.set(false, forKey: "storyAutomationPaused") }
         automaticRun = automatic
-        automaticRequiresIdle = automatic && reports.first?.promptVersion == AIStorySchedule.promptVersion
+        automaticRequiresIdle = automatic && !reports.isEmpty
         running = true; error = nil; status = L10n.tr("正在准备这一周的资料…")
         work = Task { [weak self] in
             guard let self else { return }
@@ -232,6 +234,7 @@ final class StoryController: ObservableObject {
                     await onUpdated?()
                 })
             try Task.checkCancellation()
+            if shouldPauseAutomaticWork() { throw CancellationError() }
             let report = try await workspace.storyResult()
             try await workspace.saveValidatedStory(report)
             try await repository.updateAIState { state in
@@ -256,8 +259,12 @@ final class StoryController: ObservableObject {
         automaticRun && (sleeping || organizationBusy() || (automaticRequiresIdle && idleTime() < settings.aiConfiguration.organizationPolicy.idleSeconds))
     }
 
+    private var canStartWithoutWaitingForIdle: Bool {
+        reports.isEmpty || idleTime() >= settings.aiConfiguration.organizationPolicy.idleSeconds
+    }
+
     private func recordPause(automatic: Bool) {
-        if automatic {
+        if automatic && !settings.defaults.bool(forKey: "storyAutomationPaused") {
             settings.defaults.removeObject(forKey: "storyLastAutomaticAttempt")
             status = L10n.tr("Story 将在下次闲时继续更新。")
         } else { status = L10n.tr("Story 已暂停，可以继续生成。") }

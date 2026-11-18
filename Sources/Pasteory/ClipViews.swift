@@ -6,24 +6,30 @@ import UniformTypeIdentifiers
 
 enum ClipRowMetrics {
     static func height(for clip: Clip, compact: Bool) -> CGFloat {
-        switch clip.primaryKind {
+        if usesImageCard(for: clip) { return imageHeight(for: clip, compact: compact) }
+        return switch clip.primaryKind {
         case .code: compact ? 96 : 104
         case .link: compact ? 86 : 92
         case .file: compact ? 96 : 104
-        case .image:
-            imageContentHeight(for: clip, compact: compact) + (compact ? 30 : 34)
         default: compact ? 72 : 82
         }
     }
 
-    private static func imageContentHeight(for clip: Clip, compact: Bool) -> CGFloat {
+    static func usesImageCard(for clip: Clip) -> Bool {
+        if clip.primaryKind == .image { return true }
+        guard clip.primaryKind != .file else { return false }
+        return clip.items.contains { item in
+            item.representations.contains { ImageFormatLabel.isImageUTI($0.uti) }
+        }
+    }
+
+    private static func imageHeight(for clip: Clip, compact: Bool) -> CGFloat {
         let content = ImageCardContent(clip: clip)
-        // Reserve the text area while OCR is pending so completing it does not move the list.
-        let textHeight: CGFloat = compact ? 34 : 54
-        var height: CGFloat = 21 + textHeight
-        if !clip.displayTitle.isEmpty { height += 19 }
-        if !content.note.isEmpty { height += 18 }
-        return max(compact ? 82 : 98, height)
+        // Reserve all three OCR lines even while recognition is pending.
+        var height: CGFloat = compact ? 90 : 109
+        if !clip.displayTitle.isEmpty { height += compact ? 18 : 19 }
+        if !content.note.isEmpty { height += compact ? 17 : 18 }
+        return max(compact ? 102 : 132, height)
     }
 }
 
@@ -37,6 +43,7 @@ struct ClipRowView: View {
     @State private var fileIsMissing = false
 
     private var rowHeight: CGFloat { ClipRowMetrics.height(for: clip, compact: compact) }
+    private var usesImageCard: Bool { ClipRowMetrics.usesImageCard(for: clip) }
     private var sourceSpacing: CGFloat { ClipSourceLayout.usesVerticalIdentity ? 6 : 10 }
     private var trailingWidth: CGFloat {
         ClipTypeMarkerPreview.overlaysSourceIcon ? (compact ? 34 : 38) : (compact ? 54 : 58)
@@ -151,15 +158,19 @@ struct ClipRowView: View {
 
     @ViewBuilder
     private var leadingArea: some View {
-        if clip.primaryKind == .image, let attachments {
+        if usesImageCard, let attachments {
             VStack(spacing: 3) {
                 ClipInlineThumbnail(clip: clip, attachments: attachments,
-                                    width: compact ? 68 : 84, height: compact ? 68 : 84, fitsImage: true)
+                                    width: compact ? 64 : 84, height: compact ? 64 : 84, fitsImage: true)
                     .overlay(alignment: .bottomTrailing) {
                         ClipLeadingVisual(clip: clip, showsTypeBadge: false)
                             .frame(width: 20, height: 20)
                             .padding(2)
                             .background(.background, in: RoundedRectangle(cornerRadius: 5))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 5)
+                                    .strokeBorder(pasteoryAccentColor, lineWidth: 1)
+                            }
                             .offset(x: 2, y: 2)
                     }
                 Text(String(clip.source.appName.prefix(18)))
@@ -168,7 +179,7 @@ struct ClipRowView: View {
                     .lineLimit(1)
                     .help(clip.source.appName)
             }
-            .frame(width: compact ? 72 : 88)
+            .frame(width: compact ? 68 : 88)
         } else if ClipSourceLayout.usesVerticalIdentity {
             VStack(spacing: 1) {
                 ClipLeadingVisual(clip: clip, showsTypeBadge: true)
@@ -188,40 +199,8 @@ struct ClipRowView: View {
 
     @ViewBuilder
     private var mainContent: some View {
-        if clip.primaryKind == .image, let attachments {
+        if usesImageCard, let attachments {
             imageCardContent(attachments: attachments)
-        } else if hasImagePreview, let attachments {
-            HStack(spacing: 8) {
-                ClipInlineThumbnail(
-                    clip: clip,
-                    attachments: attachments,
-                    width: compact ? 52 : 60,
-                    height: compact ? 42 : 46
-                )
-                VStack(alignment: .leading, spacing: 3) {
-                    if !clip.displayTitle.isEmpty { titleText }
-                    if clip.primaryKind == .file {
-                        PasteoryFileMetadataDetailsView(
-                            clip: clip,
-                            attachments: attachments,
-                            compact: compact,
-                            refreshID: filePresentationRefreshID
-                        )
-                    } else {
-                        PasteoryImageMetadataDetailsView(
-                            clip: clip,
-                            attachments: attachments,
-                            compact: compact
-                        )
-                    }
-                    if !clip.note.isEmpty { noteText }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .frame(
-                height: clip.primaryKind == .file ? (compact ? 62 : 66) : (compact ? 42 : 46),
-                alignment: .leading
-            )
         } else if clip.primaryKind == .file {
             HStack(spacing: 8) {
                 if let metadata = clip.effectiveFileMetadata, metadata.isMultiple {
@@ -230,6 +209,11 @@ struct ClipRowView: View {
                         accentColor: pasteoryAccentColor
                     )
                     .frame(width: compact ? 52 : 60, height: compact ? 52 : 60)
+                } else if let attachments, ImageFormatLabel.fileNameIsImage(FileIconResolver.normalizedFileName(clip.previewText)) {
+                    ClipInlineThumbnail(
+                        clip: clip, attachments: attachments,
+                        width: compact ? 52 : 60, height: compact ? 42 : 46
+                    )
                 } else {
                     PasteoryFileIconView(fileName: FileIconResolver.normalizedFileName(clip.previewText))
                         .frame(width: compact ? 52 : 60, height: compact ? 52 : 60)
@@ -303,7 +287,7 @@ struct ClipRowView: View {
                     Text(String(content.text.prefix(1_200)))
                         .font(.system(size: compact ? 12 : 13))
                         .foregroundStyle(.primary)
-                        .lineLimit(compact ? 2 : 3)
+                        .lineLimit(3)
                         .truncationMode(.tail)
                         .help(String(content.text.prefix(4_000)))
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -425,18 +409,6 @@ struct ClipRowView: View {
         let preview = String(clip.previewText.prefix(240))
         let note = String(clip.note.prefix(160))
         return L10n.tr("\(clip.primaryKind.displayName)，\(title)，\(preview)，\(note)，来自 \(String(clip.source.appName.prefix(80)))\(clip.isPinned ? L10n.tr("，已置顶") : "")")
-    }
-
-    private var hasImagePreview: Bool {
-        if clip.primaryKind == .image { return true }
-        if clip.primaryKind == .file {
-            if clip.effectiveFileMetadata?.isMultiple == true { return false }
-            return ImageFormatLabel.fileNameIsImage(FileIconResolver.normalizedFileName(clip.previewText))
-        }
-        let supportedImageUTIs = Set(["public.png", "public.tiff", "public.jpeg", "public.jpeg-2000", "public.heic", "public.heif", "com.compuserve.gif", "org.webmproject.webp", "public.svg-image"])
-        return clip.items.contains { item in
-            item.representations.contains { supportedImageUTIs.contains($0.uti) }
-        }
     }
 }
 

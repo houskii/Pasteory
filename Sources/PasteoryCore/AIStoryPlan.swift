@@ -67,6 +67,7 @@ public struct AIStoryPlan: Codable, Sendable {
         """
         你是 Pasteory 的 Story 作者。基于最近七天的剪贴板资料，写一份面向用户的温暖、具体的回顾。输出语言：\(checkpoint.language == "en" ? "English" : "简体中文")。
         所有选定资料完整保存在 items.json 中，共 \(input.items.count) 条；现有分组在 existing/groups.json。一次任务、一份完整输入，由你决定如何读取、检索和归纳，不要逐条请求应用发送资料，也不要把资料拆成分类批次。
+        资料较多时，分段读取或用脚本提取线索，把阅读进度、候选章节和引用原文保存在 scratch/。继续任务时先查看这些文件，再读取需要核对的部分。
         时间范围：\(ISO8601DateFormatter().string(from: checkpoint.periodStart)) 至 \(ISO8601DateFormatter().string(from: checkpoint.periodEnd))。
         请读懂近期做的事情、关注的问题和可见的进展：
         - title 用一句自然的话概括这一周，introduction 简短交代这一周主要在做什么。总结和鼓励会展示在最前面，下面才是具体分析。

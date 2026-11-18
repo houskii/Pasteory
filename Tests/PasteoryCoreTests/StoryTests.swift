@@ -158,6 +158,30 @@ private final class StoryFixture {
     #expect(controller.reports.count == 1 && controller.error == nil)
 }
 
+@Test @MainActor func loadingAnOldStoryKeepsItVisibleAndItsFormatUpdateWaitsForIdle() async throws {
+    let f = try StoryFixture(); defer { f.cleanup() }
+    try await f.repository.save(storyClip("A source for a saved Story from the earlier format"))
+    let original = f.controller(StoryTestTransport())
+    original.generate(); await original.waitUntilIdle()
+    let previousID = try #require(original.reports.first?.id)
+    try await f.repository.updateAIState { $0.stories?[0].promptVersion = nil }
+
+    let transport = StoryTestTransport(), controller = f.controller(transport)
+    controller.idleTime = { 0 }
+    await controller.startAutomation()
+    await controller.load()
+    await controller.waitUntilIdle()
+    #expect(controller.reports.first?.id == previousID && controller.checkpoint == nil)
+    #expect(await transport.requests == 0)
+
+    controller.idleTime = { 600 }
+    await controller.tick(); await controller.waitUntilIdle()
+    #expect(controller.reports.count == 2 && controller.checkpoint == nil)
+    #expect(controller.reports.first?.id != previousID)
+    #expect(controller.reports.first?.promptVersion == AIStorySchedule.promptVersion)
+    #expect(await transport.requests == 2)
+}
+
 @Test @MainActor func automaticStoryWaitsForOtherAIWorkAndHonorsSharedRunAndTokenLimits() async throws {
     let f = try StoryFixture(); defer { f.cleanup() }
     try await f.repository.save(storyClip("A source waiting for automatic processing"))
