@@ -4,11 +4,15 @@
 
 **从复制过的内容里，学会你做事的习惯。**
 
-Pasteory 是一个本地优先的 macOS 剪贴板管理工具。文字、图片、链接、代码、颜色和文件引用随手保存，需要时找回、粘贴，继续手上的工作。
+Pasteory 是一个本地优先的剪贴板管理工具，提供 macOS 版与原生 Windows 预览版。文字、图片、链接、代码、颜色和文件引用随手保存，需要时找回、粘贴，继续手上的工作。
 
 [下载最新 Beta](https://github.com/houskii/Pasteory/releases) · [全部版本](https://github.com/houskii/Pasteory/releases)
 
-## 一个快捷键，找回刚才的内容
+## Windows 预览版
+
+按 **Ctrl+Shift+V** 搜索和复用剪贴板历史。Windows 版支持文本、网页链接、图片和文件引用，以及收藏、置顶、分组、标题和备注。可从系统托盘暂停记录。下载、构建与使用方式见 [Windows 指南](Windows/README.md)。
+
+## macOS 上用一个快捷键找回内容
 
 按 **⌘⇧V** 打开快捷面板，搜索历史、切换分组，把之前复制过的内容粘贴到当前应用。
 

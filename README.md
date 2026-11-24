@@ -4,11 +4,15 @@
 
 **Pasteory learns from what you copied.**
 
-A local-first clipboard manager for macOS. Keep text, images, links, code, colors, and file references within reach—then find and paste them without leaving your work.
+A local-first clipboard manager for macOS, with a native Windows preview. Keep text, images, links, code, colors, and file references within reach—then find and paste them without leaving your work.
 
 [Download the latest Beta](https://github.com/houskii/Pasteory/releases) · [All releases](https://github.com/houskii/Pasteory/releases)
 
-## Your clipboard, a shortcut away
+## Windows preview
+
+Press **Ctrl+Shift+V** to search and reuse clipboard history. The Windows app captures text, web links, images, and file references. You can edit titles and notes, organize clips into groups, favorite or pin them, and pause capture from the tray. See the [Windows build and usage guide](Windows/README.md).
+
+## Your clipboard, a shortcut away on macOS
 
 Press **⌘⇧V** to open the Quick Panel. Search your history, switch groups, and paste a previous copy into the app you’re using.
 

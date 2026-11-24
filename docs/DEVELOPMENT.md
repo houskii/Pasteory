@@ -1,10 +1,12 @@
 # Developing Pasteory
 
-Pasteory uses Swift 6, SwiftUI, and AppKit. Open `Package.swift` in Xcode 26 or use the commands below on an Apple Silicon Mac. End-user instructions are in the [README](../README.md).
+The macOS app uses Swift 6, SwiftUI, and AppKit. Open `Package.swift` in Xcode 26 or use the commands below on an Apple Silicon Mac. End-user instructions are in the [README](../README.md).
 
 `PasteoryCore` contains storage, search, rules, and archiving. `Pasteory` contains the native app. Product and interaction references: [product](PRODUCT.md), [Settings](SETTINGS_UI.md), [Quick Panel](QUICK_PANEL_INTERACTIONS.md), and [file icons](FILE_ICON_SYSTEM.md).
 
-## 构建与安装
+The Windows app and its tests live under `Windows/`. See the [Windows guide](../Windows/README.md) for .NET build and packaging commands.
+
+## 构建与安装（macOS）
 
 ```bash
 make test
