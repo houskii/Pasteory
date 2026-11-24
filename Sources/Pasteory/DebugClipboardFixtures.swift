@@ -8,6 +8,7 @@ struct DebugClipboardFixtures {
     let state: AppState
     let settings: AppSettings
 
+    /// Public demo content only, used for README screenshots in the isolated QA app.
     private func seedReadmeData() async {
         func localized(_ english: String, _ chinese: String) -> String {
             settings.appLanguage == .english ? english : chinese

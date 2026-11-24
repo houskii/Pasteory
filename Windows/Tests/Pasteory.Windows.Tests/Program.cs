@@ -1,6 +1,8 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -65,7 +67,51 @@ internal static class Program
                 if (NativeMethods.OwnsClipboard()) Clipboard.Clear();
             }
         }
+        int pathIndex = Array.IndexOf(args, "--packaged-app");
+        if (pathIndex >= 0) CheckPackagedApp(args[pathIndex + 1]);
         Console.WriteLine("Windows clipboard format and WPF checks passed.");
+    }
+
+    private static void CheckPackagedApp(string executable)
+    {
+        string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Pasteory");
+        Check(!Directory.Exists(directory), "Packaged app verification requires a fresh Windows profile");
+        string indexPath = Path.Combine(directory, "history.json");
+        string token = "Pasteory preview CI " + Guid.NewGuid().ToString("N");
+        using var process = Process.Start(new ProcessStartInfo(Path.GetFullPath(executable))
+        {
+            WorkingDirectory = Path.GetDirectoryName(Path.GetFullPath(executable))!
+        }) ?? throw new InvalidOperationException("Could not start the portable build");
+        try
+        {
+            Check(process.WaitForInputIdle(10000), "Start the portable app message loop");
+            for (int retry = 0; retry < 20; retry++)
+            {
+                Check(!process.HasExited, "The portable app exited during launch");
+                Clipboard.SetText(token);
+                Thread.Sleep(200);
+                if (!File.Exists(indexPath)) continue;
+                using var stream = new FileStream(indexPath, FileMode.Open, FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete);
+                using var reader = new StreamReader(stream);
+                if (reader.ReadToEnd().Contains(token, StringComparison.Ordinal))
+                {
+                    Console.WriteLine("The portable app captured a real Windows clipboard event and persisted the text.");
+                    return;
+                }
+            }
+            throw new InvalidOperationException("The portable app did not write the copied text to history");
+        }
+        finally
+        {
+            if (NativeMethods.OwnsClipboard()) Clipboard.Clear();
+            if (!process.HasExited)
+            {
+                process.Kill();
+                process.WaitForExit();
+            }
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
     }
 
     private static void Check(bool condition, string description)

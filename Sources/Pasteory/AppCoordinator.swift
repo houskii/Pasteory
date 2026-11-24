@@ -180,16 +180,22 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
             openOnboarding()
         }
 #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("--debug-show-quick-window") {
+        let arguments = ProcessInfo.processInfo.arguments
+        let shouldSeed = arguments.contains("--debug-seed") || arguments.contains("--debug-readme-seed")
+        if arguments.contains("--debug-show-quick-window") {
             Task { [weak self] in
                 guard let self else { return }
-                if ProcessInfo.processInfo.arguments.contains("--debug-seed") || ProcessInfo.processInfo.arguments.contains("--debug-readme-seed") { await DebugClipboardFixtures(state: state, settings: settings).seed() }
+                if shouldSeed {
+                    await DebugClipboardFixtures(state: state, settings: settings).seed()
+                }
                 try? await Task.sleep(for: .milliseconds(600)); openDebugQuickWindow()
             }
         } else if ProcessInfo.processInfo.arguments.contains("--debug-show-quick-panel") {
             Task { [weak self] in
                 guard let self else { return }
-                if ProcessInfo.processInfo.arguments.contains("--debug-seed") || ProcessInfo.processInfo.arguments.contains("--debug-readme-seed") { await DebugClipboardFixtures(state: state, settings: settings).seed() }
+                if shouldSeed {
+                    await DebugClipboardFixtures(state: state, settings: settings).seed()
+                }
                 try? await Task.sleep(for: .milliseconds(600)); quickPanel.show()
                 if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "--debug-snapshot-path"),
                    ProcessInfo.processInfo.arguments.indices.contains(index + 1) {
@@ -230,7 +236,9 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
         if ProcessInfo.processInfo.arguments.contains("--debug-open-library") {
             Task { [weak self] in
                 guard let self else { return }
-                if ProcessInfo.processInfo.arguments.contains("--debug-seed") || ProcessInfo.processInfo.arguments.contains("--debug-readme-seed") { await DebugClipboardFixtures(state: state, settings: settings).seed() }
+                if shouldSeed {
+                    await DebugClipboardFixtures(state: state, settings: settings).seed()
+                }
                 try? await Task.sleep(for: .milliseconds(600))
                 openLibrary()
             }
@@ -238,7 +246,9 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
         if ProcessInfo.processInfo.arguments.contains("--debug-open-settings") {
             Task { [weak self] in
                 guard let self else { return }
-                if ProcessInfo.processInfo.arguments.contains("--debug-seed") || ProcessInfo.processInfo.arguments.contains("--debug-readme-seed") { await DebugClipboardFixtures(state: state, settings: settings).seed() }
+                if shouldSeed {
+                    await DebugClipboardFixtures(state: state, settings: settings).seed()
+                }
                 try? await Task.sleep(for: .milliseconds(300))
                 openSettings()
             }
@@ -452,7 +462,6 @@ final class AppCoordinator: NSObject, NSMenuDelegate, NSWindowDelegate {
         }
     }
 
-    /// Public demo content only, used for README screenshots in the isolated QA app.
 #endif
 
     private func refreshLanguage(_ language: AppLanguage) {
