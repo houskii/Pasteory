@@ -315,13 +315,13 @@ internal sealed partial class AiTasks
             AiResourceMessage? attachment = null;
             object[] definitions = tools.Definitions(story);
             int limit = Math.Clamp(prefs.TaskRounds, 1, 500);
-            int output = story ? 2800 : Math.Clamp(1400 + items.Length * 60, 2200, 4800);
+            int output = Math.Clamp(prefs.MaxOutputTokens, 256, 16_384);
             for (int round = 0; round < limit || state.Result is not null; round++)
             {
                 token.ThrowIfCancellationRequested();
                 if (state.Result is null)
                 {
-                    var messages = BuildContext(opening, state, limit - round, attachment);
+                    var messages = BuildContext(prefs, opening, state, limit - round, attachment, output, definitions);
                     attachment = null;
                     var reply = await CallAsync(prefs, key, task.Id, task.Trigger, output, token, messages, definitions);
                     token.ThrowIfCancellationRequested();
@@ -396,26 +396,32 @@ internal sealed partial class AiTasks
         }
     }
 
-    private static object[] BuildContext(JsonElement[] opening, AiAgentState state, int remaining, AiResourceMessage? attachment)
+    internal static object[] BuildContext(AiPreferences prefs, JsonElement[] opening, AiAgentState state, int remaining,
+        AiResourceMessage? attachment, int output, object[] definitions)
     {
-        const int contextTokens = 20_000;
-        var messages = new List<object>(opening.Cast<object>());
-        int tokens = opening.Sum(message => AiModelClient.Estimate(message.GetRawText()));
-        var selected = new Stack<JsonElement[]>();
-        for (int i = state.Exchanges.Length - 1; i >= 0; i--)
+        var notice = AiTaskWorkspace.Message("user", $"Earlier turns were omitted to fit this request. " +
+            $"{state.Assignments.Count} classifications are staged. You can revisit source items with the task tools and request smaller ranges.");
+        var lastRound = AiTaskWorkspace.Message("user", "This is the last available round. Submit the finished JSON if ready.");
+        int inputLimit = Math.Clamp(prefs.MaxInputTokens, 1000, 128_000);
+        int count = state.Exchanges.Length;
+        object[] selected = From(count);
+        for (int i = count - 1; i >= 0; i--)
         {
-            var exchange = state.Exchanges[i];
-            tokens += exchange.Sum(message => AiModelClient.Estimate(message.GetRawText()));
-            if (tokens > contextTokens && selected.Count > 0) break;
-            selected.Push(exchange);
+            object[] candidate = From(i);
+            if (AiModelClient.EstimateRequest(prefs, output, candidate, definitions) > inputLimit) break;
+            selected = candidate;
         }
-        if (selected.Count < state.Exchanges.Length)
-            messages.Add(AiTaskWorkspace.Message("user",
-                $"Earlier messages have been shortened. {state.Assignments.Count} classifications are staged. Use the task tools to revisit items."));
-        messages.AddRange(selected.SelectMany(exchange => exchange).Cast<object>());
-        if (attachment is not null) messages.Add(attachment);
-        if (remaining == 1) messages.Add(AiTaskWorkspace.Message("user", "This is the last available round. Submit the finished JSON if ready."));
-        return messages.ToArray();
+        return selected;
+
+        object[] From(int first)
+        {
+            var messages = new List<object>(opening.Cast<object>());
+            if (first > 0) messages.Add(notice);
+            messages.AddRange(state.Exchanges.Skip(first).SelectMany(exchange => exchange).Cast<object>());
+            if (attachment is not null && first < count) messages.Add(attachment);
+            if (remaining == 1) messages.Add(lastRound);
+            return messages.ToArray();
+        }
     }
 
     private static (JsonElement[] Saved, AiResourceMessage? Attachment) UseTools(AiModelClient.Completion reply,
@@ -504,15 +510,16 @@ internal sealed partial class AiTasks
     private async Task<AiModelClient.Completion> CallAsync(AiPreferences prefs, string key, Guid task, string trigger,
         int maxOutput, CancellationToken cancel, IReadOnlyList<object> messages, object[]? definitions = null)
     {
-        int estimate = AiModelClient.Estimate(JsonSerializer.Serialize(messages.Where(message => message is not AiResourceMessage), AiFile.Wire))
-            + messages.Count(message => message is AiResourceMessage) * 1500;
+        int estimate = AiModelClient.EstimateRequest(prefs, maxOutput, messages, definitions);
+        if (estimate > Math.Clamp(prefs.MaxInputTokens, 1000, 128_000))
+            throw new InvalidOperationException("The request exceeds the input budget. Increase the input limit and resume the task.");
         if (TodayTokens + estimate + maxOutput > prefs.DailyTokens) throw new InvalidOperationException("Daily token budget reached.");
         if (trigger is "idle" or "review" && TonightTokens + estimate + maxOutput > prefs.NightlyTokens)
             throw new InvalidOperationException("Nightly token budget reached.");
         AiModelClient.Completion result;
         try
         {
-            result = await model.CompleteAsync(prefs, key, "", "", maxOutput, cancel, messages, definitions);
+            result = await model.CompleteAsync(prefs, key, maxOutput, estimate, messages, definitions, cancel);
         }
         catch (Exception error) when (Expected(error) || error is OperationCanceledException)
         {

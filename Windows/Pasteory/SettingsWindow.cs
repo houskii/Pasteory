@@ -7,6 +7,7 @@ using System.Reflection;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -356,6 +357,7 @@ internal sealed partial class SettingsWindow : Window
             ItemsSource = options.Select(value => new { Value = value, Name = Labels.Get(value) }).ToArray(),
             DisplayMemberPath = "Name", SelectedValuePath = "Value", SelectedValue = selected, MinHeight = 27, MinWidth = 115
         };
+        picker.SetResourceReference(StyleProperty, "SettingsPicker");
         AutomationProperties.SetName(picker, Labels.Get(label));
         return picker;
     }
@@ -415,6 +417,19 @@ internal sealed partial class SettingsWindow : Window
             if (groups.SelectedValue is string selected) app.SetGroupProfile(selected);
         };
         quick.Children.Add(Row("Group display", groups));
+        Switch(quick, "Recommend AI groups in Common view", app.Settings.RecommendAiGroups,
+            (settings, value) => settings with { RecommendAiGroups = value });
+        var recommended = Picker("AI recommendation count", Enumerable.Range(1, 8).Select(count => count.ToString()),
+            GroupNavigation.RecommendationCount(app.Settings).ToString());
+        recommended.SelectionChanged += (_, _) =>
+        {
+            if (recommended.SelectedValue is string value && int.TryParse(value, out int count) &&
+                !app.SaveSettings(app.Settings with { Ai = app.Settings.Ai with { RecommendedGroupCount = count } }))
+                recommended.SelectedValue = GroupNavigation.RecommendationCount(app.Settings).ToString();
+        };
+        quick.Children.Add(Row("AI recommendation count", recommended));
+        quick.Children.Add(Row("Group sidebar width", GroupWidthSlider()));
+        Switch(quick, "Compact group rows", app.Settings.CompactGroupRows, (settings, value) => settings with { CompactGroupRows = value });
 
         var runtime = SettingsCard(layout, "Application");
         Switch(runtime, "Start at sign-in", app.Settings.StartAtLogin, (settings, value) => settings with { StartAtLogin = value });
@@ -424,6 +439,41 @@ internal sealed partial class SettingsWindow : Window
         actions.Children.Add(restart);
         actions.Children.Add(Ui.Button("Quit", () => app.Shutdown()));
         runtime.Children.Add(Row("Application status", actions, "Pasteory is running in the system tray."));
+    }
+
+    private FrameworkElement GroupWidthSlider()
+    {
+        var slider = new Slider
+        {
+            Minimum = GroupNavigation.MinSidebarWidth, Maximum = GroupNavigation.MaxSidebarWidth,
+            Value = GroupNavigation.SidebarWidth(app.Settings), TickFrequency = 1, IsSnapToTickEnabled = true,
+            SmallChange = 1, LargeChange = 10, Width = 140, VerticalAlignment = VerticalAlignment.Center
+        };
+        AutomationProperties.SetName(slider, Labels.Get("Group sidebar width"));
+        var value = Ui.Text(slider.Value.ToString("0"), 12, "Muted");
+        value.MinWidth = 34;
+        value.TextAlignment = TextAlignment.Right;
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        row.Children.Add(slider);
+        row.Children.Add(value);
+        void SaveWidth()
+        {
+            if (slider.Value != GroupNavigation.SidebarWidth(app.Settings) &&
+                !app.SaveSettings(app.Settings with { GroupSidebarWidth = slider.Value }))
+                slider.Value = GroupNavigation.SidebarWidth(app.Settings);
+        }
+        slider.ValueChanged += (_, _) =>
+        {
+            value.Text = slider.Value.ToString("0");
+            if (!slider.IsMouseCaptureWithin) SaveWidth();
+        };
+        slider.AddHandler(Thumb.DragCompletedEvent, new DragCompletedEventHandler((_, args) =>
+        {
+            if (args.Canceled) slider.Value = GroupNavigation.SidebarWidth(app.Settings);
+            else SaveWidth();
+        }));
+        slider.PreviewMouseLeftButtonUp += (_, _) => SaveWidth();
+        return row;
     }
 
     private void BuildShortcuts(Panel layout)

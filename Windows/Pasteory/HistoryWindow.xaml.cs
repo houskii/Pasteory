@@ -43,12 +43,17 @@ public partial class HistoryWindow : Window
     private readonly Dictionary<string, (Guid? Group, bool Ungrouped, string Query, ClipViewPosition Position)> profilePositions = [];
     private GroupTab[] tabs = [];
     private Guid[] rankedAi = [];
+    private double panelContentWidth;
+    private double sidebarExtent;
+    private double? draggedSidebarWidth;
 
     internal HistoryWindow(App app)
     {
         this.app = app;
+        panelContentWidth = GroupNavigation.PanelContentWidth(app.Settings);
         InitializeComponent();
         SetResourceReference(StyleProperty, typeof(Window));
+        FindGroup.Content = Ui.WithIcon(Glyph.Search, Labels.Get("Search groups"), "Muted");
         results = new ClipResults(app, History, compact: true);
         results.MarkingChanged += UpdateResultBar;
         helpTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
@@ -90,13 +95,13 @@ public partial class HistoryWindow : Window
             rankedAi = app.RankedAiGroups().Select(group => group.Id).ToArray();
             refreshing = false;
             CloseEditor();
-            Width = Math.Clamp(app.Settings.PanelWidth, MinWidth, 670);
+            Width = panelContentWidth + DesiredSidebarWidth();
             Height = Math.Clamp(app.Settings.PanelHeight, MinHeight, 760);
-            PositionNearPointer();
             lastStatus = "";
             undoAggregationId = null;
         }
         Refresh(reset: newPresentation);
+        if (newPresentation) PositionNearPointer();
         Show();
         Activate();
         FocusManager.SetFocusedElement(this, FocusArea);
@@ -135,7 +140,7 @@ public partial class HistoryWindow : Window
         }
         var byId = app.Collections.Where(group => group.IsAi).ToDictionary(group => group.Id);
         var ai = rankedAi.Where(byId.ContainsKey).Select(id => byId[id]).Concat(byId.Values).DistinctBy(group => group.Id).ToArray();
-        var groups = GroupNavigation.Visible(display, app.Collections, ai, library: false, currentGroupId);
+        var groups = GroupNavigation.Visible(app.Settings, app.Collections, ai, library: false, currentGroupId);
         var nextTabs = groups.Select((group, index) => new GroupTab(group, GroupNavigation.Hint(app.Settings, index + 1)))
             .Prepend(new GroupTab(null, GroupNavigation.Hint(app.Settings, 0))).ToArray();
         if (viewChanged || !tabs.SequenceEqual(nextTabs) || tabs.Length == 0) UpdateGroups(nextTabs);
@@ -145,22 +150,42 @@ public partial class HistoryWindow : Window
         UpdateButton.ToolTip = offer is null ? null : Labels.Format("Update {0} is available", offer.Version);
         UpdateButton.Background = app.Settings.Theme == "Orange" ? Brushes.PaleTurquoise : Brushes.NavajoWhite;
         UpdateButton.Foreground = app.Settings.Theme == "Orange" ? Brushes.DarkSlateGray : Brushes.SaddleBrown;
-        string placement = GroupNavigation.Placement(app.Settings);
-        bool sidebar = placement != "Top" && display != "Minimal";
-        bool right = sidebar && placement == "Right";
-        Grid.SetColumn(Sidebar, right ? 1 : 0);
-        Grid.SetColumn(History, right ? 0 : 1);
-        Grid.SetColumn(EmptyMessage, right ? 0 : 1);
-        var fill = new GridLength(1, GridUnitType.Star);
-        ResultColumns.ColumnDefinitions[0].Width = right ? fill : GridLength.Auto;
-        ResultColumns.ColumnDefinitions[1].Width = right ? GridLength.Auto : fill;
-        Sidebar.Visibility = sidebar ? Visibility.Visible : Visibility.Collapsed;
-        GroupStrip.Visibility = display == "Minimal" || sidebar ? Visibility.Collapsed : Visibility.Visible;
-        ScopeBar.Visibility = display != "Minimal" || ungrouped ? Visibility.Visible : Visibility.Collapsed;
-        ProfileOptions.Visibility = display == "Minimal" ? Visibility.Visible : Visibility.Collapsed;
-        if (sidebar && IsVisible && Width < 516) PositionNearPointer();
+        UpdateGroupLayout();
+        UpdateScope();
         RefreshResults(reset, select, position: restored);
     }
+
+    private double DesiredSidebarWidth() => GroupNavigation.Placement(app.Settings) == "Top" || app.Settings.GroupDisplay == "Minimal"
+        ? 0 : draggedSidebarWidth ?? GroupNavigation.SidebarWidth(app.Settings);
+
+    private void UpdateGroupLayout()
+    {
+        double extent = DesiredSidebarWidth();
+        bool sidebar = extent > 0;
+        bool right = sidebar && GroupNavigation.Placement(app.Settings) == "Right";
+        Grid.SetColumn(Sidebar, right ? 1 : 0);
+        Grid.SetColumn(PanelContent, right ? 0 : 1);
+        var fill = new GridLength(1, GridUnitType.Star);
+        FocusArea.ColumnDefinitions[0].Width = right ? fill : GridLength.Auto;
+        FocusArea.ColumnDefinitions[1].Width = right ? GridLength.Auto : fill;
+        SidebarSurface.CornerRadius = right ? new CornerRadius(0, 15, 15, 0) : new CornerRadius(15, 0, 0, 15);
+        SidebarSurface.BorderThickness = right ? new Thickness(1, 0, 0, 0) : new Thickness(0, 0, 1, 0);
+        SidebarDivider.HorizontalAlignment = right ? HorizontalAlignment.Left : HorizontalAlignment.Right;
+        Sidebar.Visibility = sidebar ? Visibility.Visible : Visibility.Collapsed;
+        bool minimal = app.Settings.GroupDisplay == "Minimal";
+        GroupStrip.Visibility = minimal || sidebar ? Visibility.Collapsed : Visibility.Visible;
+        ScopeBar.Visibility = !minimal || ungrouped ? Visibility.Visible : Visibility.Collapsed;
+        ProfileOptions.Visibility = minimal ? Visibility.Visible : Visibility.Collapsed;
+        if (sidebarExtent != extent)
+        {
+            sidebarExtent = extent;
+            Width = panelContentWidth + extent;
+            if (IsVisible) PositionNearPointer(preservePosition: true);
+        }
+        ApplySidebarWidth();
+    }
+
+    private void ApplySidebarWidth() => Sidebar.Width = Math.Min(sidebarExtent, Math.Max(110, Width - GroupNavigation.MinPanelContentWidth));
 
     private void UpdateGroups(GroupTab[] next)
     {
@@ -169,17 +194,14 @@ public partial class HistoryWindow : Window
         Groups.ItemsSource = tabs;
         Groups.SelectedItem = tabs.FirstOrDefault(tab => tab.Id == currentGroupId) ?? tabs[0];
         currentGroupId = (Groups.SelectedItem as GroupTab)?.Id;
-        var groupCount = new StackPanel { Orientation = Orientation.Horizontal };
-        groupCount.Children.Add(Ui.Icon(Glyph.AllGroups, 12));
-        var number = Ui.Text(app.Collections.Count.ToString(), 11, "Muted", strong: true);
-        number.FontFamily = new FontFamily("Segoe UI");
-        number.Margin = new Thickness(3, 0, 0, 0);
-        groupCount.Children.Add(number);
-        AllGroups.Content = groupCount;
+        AllGroups.Content = GroupCount();
+        SidebarAllGroups.Content = GroupCount();
+        SidebarProfiles.Content = GroupNavigation.ProfileStrip(app);
         SidebarGroups.Children.Clear();
         foreach (var tab in tabs)
         {
             var button = Ui.Button(tab.Name, () => ChangeGroup(tab), "NavButton");
+            button.DataContext = tab;
             button.Content = GroupNavigation.Row(tab.Glyph, tab.Name, tab.Hint, "Ink", tab.IsAi);
             button.ToolTip = tab.HintText;
             AutomationProperties.SetName(button, tab.Name);
@@ -188,7 +210,17 @@ public partial class HistoryWindow : Window
             SidebarGroups.Children.Add(button);
         }
         refreshing = false;
-        UpdateScope();
+    }
+
+    private StackPanel GroupCount()
+    {
+        var groupCount = new StackPanel { Orientation = Orientation.Horizontal };
+        groupCount.Children.Add(Ui.Icon(Glyph.AllGroups, 12));
+        var number = Ui.Text(app.Collections.Count.ToString(), 11, "Muted", strong: true);
+        number.FontFamily = new FontFamily("Segoe UI");
+        number.Margin = new Thickness(3, 0, 0, 0);
+        groupCount.Children.Add(number);
+        return groupCount;
     }
 
     private void UpdateScope()
@@ -198,7 +230,11 @@ public partial class HistoryWindow : Window
         GroupPosition.Text = index == 0 ? Labels.Format("{0} groups", tabs.Length - 1) :
             Labels.Format("Group {0} / {1}", index, tabs.Length - 1);
         for (int i = 0; i < SidebarGroups.Children.Count; i++)
-            ((Button)SidebarGroups.Children[i]).SetResourceReference(BackgroundProperty, i == index && !ungrouped ? "PanelTint" : "TransparentBrush");
+        {
+            var button = (Button)SidebarGroups.Children[i];
+            button.MinHeight = GroupNavigation.RowHeight(app.Settings);
+            button.SetResourceReference(BackgroundProperty, i == index && !ungrouped ? "PanelTint" : "TransparentBrush");
+        }
     }
 
     private async void RefreshResults(bool reset, Guid? select = null, Guid? focusChildren = null, ClipViewPosition? position = null)
@@ -320,8 +356,7 @@ public partial class HistoryWindow : Window
         var shown = tabs.FirstOrDefault(item => item.Id == tab.Id);
         if (shown is null)
         {
-            if (app.Settings.GroupDisplay is "Minimal" || app.Settings.GroupDisplay == "AI groups" && !tab.IsAi)
-                app.SetGroupProfile("Common groups");
+            if (tab.Collection is { } group && !app.SetGroupProfile(GroupNavigation.ProfileForGroup(app.Settings, group))) return;
             currentGroupId = tab.Id;
             Refresh(reset: true);
         }
@@ -623,7 +658,8 @@ public partial class HistoryWindow : Window
         {
             string query = search.Text.Trim();
             var previous = list.SelectedItem as GroupTab;
-            var options = all.Where(item => item.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase)).ToArray();
+            var options = all.Where(item => item.Collection is { } group ? GroupNavigation.Matches(group, query) :
+                item.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase)).ToArray();
             list.ItemsSource = options;
             list.SelectedItem = options.Contains(previous) ? previous : options.FirstOrDefault();
         };
@@ -654,7 +690,8 @@ public partial class HistoryWindow : Window
         list.AllowDrop = true;
         list.DragOver += GroupDragOver;
         list.Drop += GroupDropped;
-        var surface = LibraryEditors.Wrap("All groups", body, list, () => { Go(); return true; }, CloseEditorFromForm, "Open group");
+        var surface = LibraryEditors.Wrap("All groups", body, ReferenceEquals(sender, FindGroup) ? search : list,
+            () => { Go(); return true; }, CloseEditorFromForm, "Open group");
         OpenEditor(surface);
     }
 
@@ -872,27 +909,53 @@ public partial class HistoryWindow : Window
 
     private void ResizePanel(object sender, DragDeltaEventArgs e)
     {
-        Width = Math.Clamp(Width + e.HorizontalChange, MinWidth, 670);
+        Width = Sidebar.Width + Math.Clamp(Width + e.HorizontalChange - Sidebar.Width,
+            GroupNavigation.MinPanelContentWidth, GroupNavigation.MaxPanelContentWidth);
         Height = Math.Clamp(Height + e.VerticalChange, MinHeight, 760);
     }
 
-    private void SavePanelSize(object sender, DragCompletedEventArgs e) =>
-        app.SaveSettings(app.Settings with { PanelWidth = Width, PanelHeight = Height });
+    private void SavePanelSize(object sender, DragCompletedEventArgs e)
+    {
+        double contentWidth = Width - Sidebar.Width;
+        if (!e.Canceled && app.SaveSettings(app.Settings with { PanelContentWidth = contentWidth, PanelHeight = Height }))
+            panelContentWidth = contentWidth;
+        Width = panelContentWidth + sidebarExtent;
+        Height = Math.Clamp(app.Settings.PanelHeight, MinHeight, 760);
+        PositionNearPointer(preservePosition: true);
+    }
 
-    private void PositionNearPointer()
+    private void ResizeSidebar(object sender, DragDeltaEventArgs e)
+    {
+        double delta = GroupNavigation.Placement(app.Settings) == "Right" ? -e.HorizontalChange : e.HorizontalChange;
+        draggedSidebarWidth = Math.Clamp((draggedSidebarWidth ?? Sidebar.Width) + delta,
+            GroupNavigation.MinSidebarWidth, GroupNavigation.MaxSidebarWidth);
+        UpdateGroupLayout();
+    }
+
+    private void SaveSidebarSize(object sender, DragCompletedEventArgs e)
+    {
+        double? width = draggedSidebarWidth;
+        draggedSidebarWidth = null;
+        if (!e.Canceled && width is { } value) app.SaveSettings(app.Settings with { GroupSidebarWidth = Math.Round(value) });
+        UpdateGroupLayout();
+    }
+
+    private void PositionNearPointer(bool preservePosition = false)
     {
         var handle = new WindowInteropHelper(this).EnsureHandle();
         var mouse = Forms.Cursor.Position;
+        bool hasPrevious = NativeMethods.GetWindowRect(handle, out var previous) != 0;
+        if (preservePosition && hasPrevious) mouse = new((previous.Left + previous.Right) / 2, (previous.Top + previous.Bottom) / 2);
         var work = Forms.Screen.FromPoint(mouse).WorkingArea;
         var monitor = NativeMethods.MonitorFromPoint(new NativeMethods.ScreenPoint(mouse.X, mouse.Y), 2);
         double scale = NativeMethods.GetDpiForMonitor(monitor, 0, out uint monitorDpi, out _) == 0 ? monitorDpi / 96d : 1;
         Height = Math.Min(Height, Math.Max(MinHeight, work.Height / scale));
-        if (GroupNavigation.Placement(app.Settings) != "Top" && app.Settings.GroupDisplay != "Minimal") Width = Math.Max(Width, 516);
         Width = Math.Min(Width, Math.Max(MinWidth, work.Width / scale));
+        ApplySidebarWidth();
         int width = (int)Math.Ceiling(Width * scale);
         int height = (int)Math.Ceiling(Height * scale);
         int left = mouse.X - width / 2, top = mouse.Y + (int)(12 * scale);
-        if (originallyPositioned && NativeMethods.GetWindowRect(handle, out var previous) != 0)
+        if ((originallyPositioned || preservePosition) && hasPrevious)
         {
             left = previous.Left;
             top = previous.Top;

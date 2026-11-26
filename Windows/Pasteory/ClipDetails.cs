@@ -352,7 +352,7 @@ internal sealed class ClipDetails : DockPanel
         {
             body.Children.Add(Ui.Text(Labels.Format("Copy ×{0} · Paste ×{1}", clip.CopyCount, clip.PasteCount), 11, "Muted"));
             if (clip.LastPastedAt is { } pasted) body.Children.Add(Ui.Text(Labels.Format("Last pasted {0}", pasted.ToLocalTime().ToString("g")), 11, "Muted"));
-            if (app.Settings.Ai.Enabled && app.ClipRank(clip) is { } activity)
+            if (app.Settings.Ai.LifecycleEnabled && app.ClipRank(clip) is { } activity)
             {
                 var policy = app.Settings.Ai.Activity;
                 DateTimeOffset now = DateTimeOffset.Now;

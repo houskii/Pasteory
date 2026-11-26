@@ -25,6 +25,38 @@ using Pasteory.Windows;
 
 internal static partial class Program
 {
+    private static void CheckLargeRichText()
+    {
+        string text = new string('a', 8 * 1024 * 1024) + "尾部样本";
+        string html = ClipboardFormats.WindowsHtml("<p>排版" + new string('b', 3 * 1024 * 1024) + "</p>");
+        string rtf = "{\\rtf1\\ansi " + new string('c', 3 * 1024 * 1024) + "}";
+        var data = new DataObject();
+        data.SetText(text, TextDataFormat.UnicodeText);
+        data.SetText(html, TextDataFormat.Html);
+        data.SetText(rtf, TextDataFormat.Rtf);
+        var item = ClipboardFormats.Read(data, "Large rich-text fixture");
+        Check(item is { } && item.Value.Clip.Text == text && item.Value.Clip.Html == html && item.Value.Clip.Rtf == rtf,
+            "Capture each large text representation without truncating the plain or rich formats");
+        string root = Directory.CreateTempSubdirectory("Pasteory-LargeClipboard-QA-").FullName;
+        try
+        {
+            var clip = item!.Value.Clip;
+            var timer = Stopwatch.StartNew();
+            Check(new HistoryStore(root).Capture(clip), "Apply the search budget to searchable text and the storage budget to all formats");
+            Console.WriteLine($"Saved {text.Length:N0} text characters with HTML and RTF in {timer.Elapsed.TotalSeconds:F2} seconds.");
+            var reopened = new HistoryStore(root);
+            var clipboard = ClipboardFormats.Create(reopened.Clips.Single(), false, null);
+            Check(reopened.SearchIds("尾部样本").SequenceEqual([clip.Id]) && clipboard.GetText() == text &&
+                clipboard.GetText(TextDataFormat.Html) == html && clipboard.GetText(TextDataFormat.Rtf) == rtf,
+                "Search the end of a large clipboard item and replay all saved formats in full");
+        }
+        finally { Directory.Delete(root, recursive: true); }
+
+        var oversized = new DataObject();
+        oversized.SetText(new string('界', ClipboardFormats.MaxTextBytes / 3 + 1));
+        Check(ClipboardFormats.Read(oversized, "Large text fixture") is null, "Measure the clipboard representation limit in UTF-8 bytes");
+    }
+
     private static void CheckImagePlainText(Clip mixed, byte[] image)
     {
         var withOcr = (mixed with { Note = " Image note [tag] " }).WithImageRecognition("Sample [PDF]", DateTimeOffset.UtcNow);
@@ -381,8 +413,8 @@ internal static partial class Program
         {
             var clips = Enumerable.Range(0, 25).Select(index => new Clip { Text = $"Synthetic clip {index} " +
                 (index == 3 ? new string('x', 62_000) + " complete ending" : "") }).ToArray();
-            var settings = new AiPreferences { Enabled = true, Model = "synthetic-model", TaskRounds = 1, RecentLimit = 2 };
-            using var transport = new HttpClient(new MockAiResponses(clips, wide: true));
+            var settings = new AiPreferences { Enabled = true, Model = "synthetic-model", TaskRounds = 1, RecentLimit = 2, MaxOutputTokens = 704 };
+            using var transport = new HttpClient(new MockAiResponses(clips, wide: true, outputLimit: settings.MaxOutputTokens));
             var first = new AiTasks(root, new AiModelClient(transport));
             first.Credentials.Set(settings.Endpoint, "only-a-test-value");
             first.ObserveClips(settings, [], clips);
@@ -414,11 +446,34 @@ internal static partial class Program
             await reopened.AnalyzeAsync(settings with { NightlyTokens = 1000 }, changed, [], false, "idle", false, CancellationToken.None);
             Check(reopened.Job(false)?.Error == "Nightly token budget reached." && reopened.Usage.Count == 2,
                 "Enforce a separate nightly budget before a model request");
+            await reopened.AnalyzeAsync(settings with { MaxInputTokens = 1_000 }, changed, [], true, "story", false, CancellationToken.None);
+            Check(reopened.Job(true) is { Status: "Paused", Error: { } error } && error.Contains("exceeds the input budget") &&
+                reopened.Usage.Count == 2, "Refuse to send a request when the task instructions and tools exceed the configured input budget");
         }
         finally { Directory.Delete(root, recursive: true); }
     }
 
-    private sealed class MockAiResponses(Clip[] clips, bool wide = false) : HttpMessageHandler
+    private static void CheckAiContextBudget()
+    {
+        var prefs = new AiPreferences { Model = "synthetic-model", MaxInputTokens = 1_200, MaxOutputTokens = 704 };
+        JsonElement[] opening = [AiTaskWorkspace.Message("system", "Work with the saved task."), AiTaskWorkspace.Message("user", "Read the clips.")];
+        object[] tools = [new { type = "function", function = new { name = "clips_get", description = new string('X', 800) } }];
+        JsonElement[] earlier = [AiTaskWorkspace.Message("assistant", "An older turn"), AiTaskWorkspace.Message("user", new string('Y', 1600))];
+        JsonElement[] latest =
+        [
+            JsonSerializer.SerializeToElement(new { role = "assistant", tool_calls = new[] { new { id = "fetch-latest" } } }),
+            JsonSerializer.SerializeToElement(new { role = "tool", tool_call_id = "fetch-latest", content = "Newest tool result" })
+        ];
+        var state = new AiAgentState(2, [earlier, latest], new() { ["i1"] = new("i1", [], "Still available") });
+        var context = AiTasks.BuildContext(prefs, opening, state, 1, null, prefs.MaxOutputTokens, tools);
+        var retained = context.OfType<JsonElement>().ToArray();
+        Check(AiModelClient.EstimateRequest(prefs, prefs.MaxOutputTokens, context, tools) <= prefs.MaxInputTokens &&
+            retained[2].GetProperty("content").GetString()!.Contains("1 classifications are staged", StringComparison.Ordinal) &&
+            retained.Skip(3).Take(2).SequenceEqual(latest) && retained.Length == 6 && state.Exchanges[0].SequenceEqual(earlier),
+            "Count the full request, omit earlier exchanges intact and retain the latest tool call and its reply");
+    }
+
+    private sealed class MockAiResponses(Clip[] clips, bool wide = false, int outputLimit = 4_000) : HttpMessageHandler
     {
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -430,6 +485,8 @@ internal static partial class Program
             {
                 string body = await request.Content!.ReadAsStringAsync(cancellationToken);
                 using var sent = JsonDocument.Parse(body);
+                Check(sent.RootElement.GetProperty("max_tokens").GetInt32() == outputLimit &&
+                    (Encoding.UTF8.GetByteCount(body) + 1) / 2 <= 24_000, "Send the configured output cap within the estimated input budget");
                 var messages = sent.RootElement.GetProperty("messages");
                 string args = messages[1].GetProperty("content").GetString()!;
                 JsonElement input = JsonSerializer.Deserialize<JsonElement>(args);

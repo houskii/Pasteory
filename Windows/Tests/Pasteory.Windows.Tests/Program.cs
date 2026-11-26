@@ -121,11 +121,13 @@ internal static partial class Program
             mixedReplay.GetImage().PixelHeight == 1, "Preserve both text and image in a mixed copy");
         CheckImagePlainText(mixed.Clip, mixed.Image!);
         var originalImage = CheckOriginalImages();
+        if (args.Contains("--large-clipboard")) CheckLargeRichText();
 
         app.InitializeComponent();
         var panel = new HistoryWindow(app);
         Check(panel.Title == "Pasteory", "Load the native WPF history panel and resources");
         CheckMacBackup();
+        CheckAiContextBudget();
         CheckAiModel().GetAwaiter().GetResult();
         CheckAiRecovery().GetAwaiter().GetResult();
         CheckUpdateSignature();
@@ -272,11 +274,22 @@ internal static partial class Program
             aiGroups: new HashSet<Guid> { theme.Id });
         Check(listing.Rows.Select(row => row.Clip.Id).SequenceEqual([ungrouped.Id]),
             "Keep manually grouped clips in the ungrouped view until they acquire an AI theme");
-        Check(GroupNavigation.Visible("Common groups", [manual, theme], [theme], library: true).Select(group => group.Id)
-                .SequenceEqual([theme.Id, manual.Id]) &&
-            GroupNavigation.Visible("AI groups", [manual, theme], [theme], library: false).SequenceEqual([theme]) &&
-            GroupNavigation.Visible("Minimal", [manual, theme], [theme], library: false).Length == 0,
+        var common = new LocalSettings();
+        var second = new ClipCollection(Guid.NewGuid(), "Another theme", IsAi: true);
+        ClipCollection[] all = [manual, theme, second], ranked = [theme, second];
+        Check(GroupNavigation.Visible(common with { Ai = common.Ai with { RecommendedGroupCount = 1 } }, all, ranked, library: true)
+                .SequenceEqual([theme, manual]) &&
+            GroupNavigation.Visible(common with { RecommendAiGroups = false }, all, ranked, library: false, selected: theme.Id)
+                .SequenceEqual([manual]) &&
+            GroupNavigation.Visible(common with { GroupDisplay = "AI groups", RecommendAiGroups = false }, all, ranked, library: false)
+                .SequenceEqual(ranked) &&
+            GroupNavigation.Visible(common with { GroupDisplay = "Minimal" }, all, ranked, library: false).Length == 0,
             "Profiles determine which groups occupy the displayed shortcut positions");
+        Check(GroupNavigation.PanelContentWidth(common with { QuickGroupPlacement = "Left", PanelWidth = 532 }) == 380 &&
+            GroupNavigation.PanelContentWidth(common with { PanelContentWidth = 425, QuickGroupPlacement = "Right" }) == 425 &&
+            GroupNavigation.SidebarWidth(common with { GroupSidebarWidth = 450 }) == 320 &&
+            GroupNavigation.RowHeight(common with { CompactGroupRows = true }) == 28,
+            "Share sidebar preferences while retaining the content width of a previously resized panel");
     }
 
     private static void CheckLinkTitles()

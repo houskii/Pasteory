@@ -74,6 +74,7 @@ try
     CheckLibrary(root);
     CheckSearchRepair(root);
     CheckOcrNotes(root);
+    CheckLifecycleCompression(root);
     CheckLinkSessionSchedule(root);
     await CheckCleanup(root);
     Console.WriteLine("Windows history and settings checks passed.");
@@ -132,6 +133,60 @@ static void CheckOcrNotes(string root)
         (new Clip { Kind = ClipKind.Files, Files = ["C:\\report.txt"] }).PlainClipboardText == "C:\\report.txt" &&
         (new Clip { Kind = ClipKind.Text, Text = "  Original text  ", Note = "Separate note" }).PlainClipboardText == "  Original text  ",
         "Preserve plain copy for legacy images, files and ordinary text");
+}
+
+static void CheckLifecycleCompression(string root)
+{
+    var now = DateTimeOffset.UtcNow;
+    string folder = Path.Combine(root, "lifecycle-compression");
+    var store = new HistoryStore(folder);
+    var old = new Clip
+    {
+        Text = new string('x', 48_000) + " Original ending", Html = "<p>Original formatting</p>", Rtf = @"{\rtf1 Original}",
+        CapturedAt = now.AddDays(-20)
+    };
+    var favorite = new Clip { Text = "Favorite clip", Favorite = true, CapturedAt = now.AddDays(-30) };
+    var recent = new Clip { Text = "Recently used", CapturedAt = now.AddDays(-30), LastPastedAt = now.AddDays(-1) };
+    byte[] bytes = new byte[128 * 1024];
+    Array.Fill(bytes, (byte)0x73);
+    string hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes));
+    var image = new Clip { Kind = ClipKind.Image, ImageSize = bytes.Length, ImageHash = hash, CapturedAt = now.AddDays(-20) };
+    Check(store.Capture(old) && store.Capture(favorite) && store.Capture(recent) && store.Capture(image, bytes),
+        "Seed aged, protected and recently used clipboard payloads");
+    var representation = new ClipboardRepresentation(Guid.NewGuid(), "com.example.data", hash, bytes.Length);
+    ClipboardItem[] shared = [new(Guid.NewGuid(), 0, [representation])];
+    Check(store.ImportClips([new Clip { Kind = ClipKind.Mixed, CapturedAt = now.AddDays(-20), OriginalItems = shared },
+            new Clip { Kind = ClipKind.Files, CapturedAt = now, OriginalItems = shared }], [], _ => [], _ => bytes) == 2,
+        "Keep multiple owners of a single original representation");
+    string sharedPath = Path.Combine(folder, "representations", hash + ".bin");
+    var sharedFlags = File.GetAttributes(sharedPath);
+
+    var first = store.CompressEligibleContent(new ActivityPreferences(), now, batchSize: 1);
+    var rest = store.CompressEligibleContent(new ActivityPreferences(), now, batchSize: 1);
+    var reopened = new HistoryStore(folder);
+    var packed = reopened.Clips.Single(clip => clip.Id == old.Id);
+    Check(first.TextClips == 1 && first.HasMore && rest is { TextClips: 0, Attachments: 0, HasMore: false } &&
+        packed.CompressedTextAt == now && packed.Text == old.Text && packed.Html == old.Html && packed.Rtf == old.Rtf &&
+        reopened.Clips.Count(clip => clip.CompressedTextAt is not null) == 1 && reopened.SearchIds("original ending").Contains(old.Id),
+        "Compress only cold unprotected text and retain the original formats and search index across restarts");
+    Check(reopened.ReadImage(image).SequenceEqual(bytes) && reopened.ReadRepresentation(representation).SequenceEqual(bytes) &&
+        File.GetAttributes(sharedPath) == sharedFlags, "Keep attachment bytes intact and honor the current owner of shared data");
+    if (first.Attachments == 1)
+    {
+        string imagePath = Path.Combine(folder, "images", image.ImageFileName);
+        Check(File.GetAttributes(imagePath).HasFlag(FileAttributes.Compressed) && LocalStorage.AllocatedBytes(imagePath) < bytes.Length,
+            "Use native lossless compression on the managed file when available");
+        Console.WriteLine("Verified native compression and byte-for-byte reads for an aged managed attachment.");
+    }
+
+    string backup = Path.Combine(root, "lifecycle-compression.zip");
+    reopened.ExportBackup(backup);
+    var restored = new HistoryStore(Path.Combine(root, "lifecycle-restored"));
+    Check(restored.ImportBackup(backup) == 6 && restored.ReadImage(image).SequenceEqual(bytes) &&
+        restored.Clips.Single(clip => clip.Id == old.Id).Html == old.Html, "Back up and restore losslessly compressed history");
+    reopened.RecordPaste(old.Id);
+    Check(!Directory.EnumerateFiles(Path.Combine(folder, "archives"), "*.br").Any() &&
+        reopened.Clips.Single(clip => clip.Id == old.Id).Text == old.Text, "Reusing compressed text restores its active representation");
 }
 
 static void CheckLinkSessionSchedule(string root)

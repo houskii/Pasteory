@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
+using System.Windows.Threading;
 using Pasteory.Core;
 
 namespace Pasteory.Windows;
@@ -11,9 +13,39 @@ public partial class App
     private ActivityPreferences? activityPreferences;
     private DateTimeOffset activityTime;
     private readonly Dictionary<Guid, (double Score, int Percentile)> activityRank = [];
+    private bool compressingContent;
 
     internal (double Score, int Percentile)? ClipRank(Clip clip) =>
         ComputeActivity().TryGetValue(clip.Id, out var value) ? value : null;
+
+    internal async Task CompressEligibleContentAsync(bool manual)
+    {
+        if (compressingContent || Ai.Running)
+        {
+            if (manual) Notify("A storage or AI task is already running.");
+            return;
+        }
+
+        var prefs = Settings.Ai.Activity;
+        var now = DateTimeOffset.UtcNow;
+        int text = 0, attachments = 0;
+        compressingContent = true;
+        try
+        {
+            while (!Exiting && !systemSuspended && !sessionLocked && !Ai.Running &&
+                (manual || Settings.Ai is { LifecycleEnabled: true, AutomaticCompression: true }))
+            {
+                CompressionResult? batch = null;
+                if (!ChangeHistory(() => batch = history.CompressEligibleContent(prefs, now, batchSize: 16)) || batch is null) return;
+                text += batch.TextClips;
+                attachments += batch.Attachments;
+                if (!batch.HasMore) break;
+                await System.Windows.Threading.Dispatcher.Yield(DispatcherPriority.Background);
+            }
+            if (manual && !Exiting) Notify(Labels.Format("Compressed {0} text records and {1} attachments.", text, attachments));
+        }
+        finally { compressingContent = false; }
+    }
 
     internal IEnumerable<ClipCollection> RankedAiGroups()
     {

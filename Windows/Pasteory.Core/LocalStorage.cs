@@ -51,6 +51,32 @@ public static class LocalStorage
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return null; }
     }
 
+    internal static bool TryCompressFile(string path)
+    {
+        if (!OperatingSystem.IsWindows()) return false;
+        const FileAttributes excluded = FileAttributes.Directory | FileAttributes.ReparsePoint | FileAttributes.Offline |
+            FileAttributes.Encrypted | FileAttributes.Compressed | FileAttributes.SparseFile;
+        if (Attributes(path) is not { } flags || (flags & excluded) != 0) return false;
+
+        const uint readWrite = 0xC0000000, shareRead = 1, openExisting = 3, openReparsePoint = 0x00200000;
+        using var handle = CreateFile(path, readWrite, shareRead, IntPtr.Zero, openExisting, openReparsePoint, IntPtr.Zero);
+        if (handle.IsInvalid || !GetAttributeInfo(handle, 9, out var attributes, (uint)Marshal.SizeOf<AttributeTagInfo>()) ||
+            (attributes.Attributes & excluded) != 0 ||
+            !GetStandardInfo(handle, 1, out var info, (uint)Marshal.SizeOf<StandardInfo>()) || info.NumberOfLinks != 1 ||
+            info.EndOfFile <= 4096 || info.DeletePending != 0) return false;
+
+        const uint setCompression = 0x0009C040;
+        ushort defaultCompression = 1;
+        return DeviceIoControl(handle, setCompression, ref defaultCompression, sizeof(ushort), IntPtr.Zero, 0, out _, IntPtr.Zero);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct AttributeTagInfo
+    {
+        internal FileAttributes Attributes;
+        internal uint ReparseTag;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct StandardInfo
     {
@@ -81,6 +107,18 @@ public static class LocalStorage
     [DllImport("kernel32.dll", EntryPoint = "GetFileInformationByHandleEx")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetCompressionInfo(SafeFileHandle handle, int code, out CompressionInfo info, uint size);
+
+    [DllImport("kernel32.dll", EntryPoint = "GetFileInformationByHandleEx")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetAttributeInfo(SafeFileHandle handle, int code, out AttributeTagInfo info, uint size);
+
+    [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern SafeFileHandle CreateFile(string name, uint access, uint share, IntPtr security, uint creation, uint flags, IntPtr template);
+
+    [DllImport("kernel32.dll", ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DeviceIoControl(SafeFileHandle handle, uint code, ref ushort input, uint inputSize,
+        IntPtr output, uint outputSize, out uint returned, IntPtr overlapped);
 
     [DllImport("kernel32.dll", EntryPoint = "GetDiskFreeSpaceExW", CharSet = CharSet.Unicode, ExactSpelling = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

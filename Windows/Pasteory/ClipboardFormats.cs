@@ -16,7 +16,7 @@ internal static class ClipboardFormats
     internal const string Exclude = "ExcludeClipboardContentFromMonitorProcessing";
     internal const string IncludeInHistory = "CanIncludeInClipboardHistory";
     internal const string UploadToCloud = "CanUploadToCloudClipboard";
-    internal const int MaxTextBytes = 1024 * 1024;
+    internal const int MaxTextBytes = 10 * 1024 * 1024;
     internal const int MaxImageBytes = 16 * 1024 * 1024;
     private const long MaxPixels = 16_000_000;
     private static readonly (ClipImageFormat Format, string[] Names)[] ImageFormats =

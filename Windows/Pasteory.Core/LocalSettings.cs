@@ -36,10 +36,15 @@ public sealed record AiPreferences
     public bool Story { get; init; } = true;
     public int RecentLimit { get; init; } = 100;
     public int TargetGroupCount { get; init; } = 7;
+    public int RecommendedGroupCount { get; init; } = 3;
     public int TaskRounds { get; init; } = 80;
+    public int MaxInputTokens { get; init; } = 24_000;
+    public int MaxOutputTokens { get; init; } = 4_000;
     public int DailyTokens { get; init; } = 300_000;
     public int NightlyTokens { get; init; } = 300_000;
     public int DailyAutomaticTasks { get; init; } = 3;
+    public bool LifecycleEnabled { get; init; } = true;
+    public bool AutomaticCompression { get; init; }
     public ActivityPreferences Activity { get; init; } = new();
 }
 
@@ -59,6 +64,9 @@ public sealed record LocalSettings
     public bool GroupSidebar { get; init; }
     public string? QuickGroupPlacement { get; init; }
     public string GroupDisplay { get; init; } = "Common groups";
+    public bool RecommendAiGroups { get; init; } = true;
+    public double GroupSidebarWidth { get; init; } = 224;
+    public bool CompactGroupRows { get; init; }
     public bool RecognizeImages { get; init; }
     public ImageOcrMode OcrMode { get; init; } = ImageOcrMode.Accurate;
     public bool IncludeBrowserContext { get; init; }
@@ -79,6 +87,7 @@ public sealed record LocalSettings
     public double SettingsWidth { get; init; } = 1360;
     public double SettingsHeight { get; init; } = 820;
     public double PanelWidth { get; init; } = 380;
+    public double? PanelContentWidth { get; init; }
     public double PanelHeight { get; init; } = 660;
     public string LastSettingsPage { get; init; } = "General";
     public int LastAiTab { get; init; }
@@ -122,6 +131,8 @@ public sealed record LocalSettings
     public static LocalSettings Load(string dataDirectory) =>
         LocalJson.Read<LocalSettings>(Path.Combine(dataDirectory, "settings.json")) ?? new()
         {
+            QuickGroupPlacement = "Left",
+            GroupSidebar = true,
             CompletedOnboarding = File.Exists(Path.Combine(dataDirectory, HistoryStore.CatalogFileName)) ||
                 File.Exists(Path.Combine(dataDirectory, "history.json"))
         };

@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Threading;
 using Pasteory.Core;
@@ -21,6 +22,7 @@ public partial class LibraryPage : UserControl
     private readonly Dictionary<string, (Scope Scope, ClipKind? Kind, Guid? Group, string Query, ClipViewPosition Position)> profilePositions = [];
     private ClipCollection[] visibleGroups = [];
     private string currentProfile = "";
+    private int aiGroupCount;
     private bool showUngrouped;
     private Scope scope = Scope.All;
     private ClipKind? kind;
@@ -28,6 +30,7 @@ public partial class LibraryPage : UserControl
     private Clip? detailsClip;
     private bool composing;
     private bool compact;
+    private double? draggedSidebarWidth;
     private Point dragOrigin;
     private Guid? dragId;
 
@@ -92,7 +95,7 @@ public partial class LibraryPage : UserControl
         }
         bool hasThemes = app.Collections.Any(group => group.IsAi);
         ClipCollection[] ranked = hasThemes ? app.RankedAiGroups().ToArray() : [];
-        var shown = GroupNavigation.Visible(display, app.Collections, ranked, library: true, groupId);
+        var shown = GroupNavigation.Visible(app.Settings, app.Collections, ranked, library: true, groupId);
         if (groupId is { } selectedGroup && !shown.Any(group => group.Id == selectedGroup))
         {
             groupId = null;
@@ -101,10 +104,11 @@ public partial class LibraryPage : UserControl
             reset = true;
         }
         bool filter = app.Settings.Ai.Enabled || scope == Scope.Ungrouped || display == "AI groups" || hasThemes;
-        if (viewChanged || filter != showUngrouped || !visibleGroups.SequenceEqual(shown))
+        if (viewChanged || filter != showUngrouped || aiGroupCount != ranked.Length || !visibleGroups.SequenceEqual(shown))
         {
             showUngrouped = filter;
             visibleGroups = shown;
+            aiGroupCount = ranked.Length;
             BuildNav();
         }
         var selected = navButtons.First(item => item.Scope == scope && item.Kind == kind && item.Collection == groupId);
@@ -120,6 +124,9 @@ public partial class LibraryPage : UserControl
             nav.Button.Content = row;
             nav.Button.ToolTip = hint.Length > 0 ? $"{nav.Name} · {hint}" : nav.Name;
         }
+        foreach (var button in Navigation.Children.OfType<Button>()) button.MinHeight = GroupNavigation.RowHeight(app.Settings);
+        UpdateColumns();
+        FindGroup.Content = Ui.WithIcon(Glyph.Search, Labels.Get(scope == Scope.Ungrouped ? "Ungrouped" : "Search groups"), "Muted");
         var collection = app.Collections.FirstOrDefault(group => group.Id == groupId);
         var refresh = results.Refresh(Search.Text, reset, scope, kind, collection, select, focusChildren, restored);
         Heading.Text = selected.Name;
@@ -208,35 +215,31 @@ public partial class LibraryPage : UserControl
     {
         Navigation.Children.Clear();
         navButtons.Clear();
+        GroupViews.Content = GroupNavigation.ProfileStrip(app);
         AddHeading("Library");
-        var profiles = new UniformGrid { Rows = 1, Margin = new Thickness(0, 5, 0, 8) };
-        foreach (string profile in GroupNavigation.Profiles)
-        {
-            var button = Ui.Button(GroupNavigation.ProfileTitle(profile), () => app.SetGroupProfile(profile),
-                app.Settings.GroupDisplay == profile ? "PrimaryButton" : null);
-            button.FontSize = 10.5;
-            button.Padding = new Thickness(2);
-            button.MinHeight = 25;
-            button.Margin = new Thickness(0, 0, 3, 0);
-            button.ToolTip = Labels.Get(profile);
-            profiles.Children.Add(button);
-        }
-        Navigation.Children.Add(profiles);
         AddNav("All clips", Glyph.Library);
         if (showUngrouped) AddNav("Ungrouped", Glyph.Group, Scope.Ungrouped);
-        AddNav("Favorites", Glyph.Favorite, Scope.Favorite);
-        AddNav("Recently used", Glyph.Recent, Scope.Recent);
-        AddNav("Archive", Glyph.Archive, Scope.Archive);
-        AddNav("Trash", Glyph.Trash, Scope.Trash);
-        AddHeading("Content types");
-        foreach (var clipKind in new[] { ClipKind.Text, ClipKind.Image, ClipKind.Link, ClipKind.Color,
-            ClipKind.Code, ClipKind.Files, ClipKind.Mixed })
-            AddNav(clipKind.ToString(), Glyph.ForKind(clipKind), filter: clipKind);
+        var standard = currentProfile == "AI groups" ? Visibility.Collapsed : Visibility.Visible;
+        AddNav("Favorites", Glyph.Favorite, Scope.Favorite).Visibility = standard;
+        AddNav("Recently used", Glyph.Recent, Scope.Recent).Visibility = standard;
+        AddNav("Archive", Glyph.Archive, Scope.Archive).Visibility = standard;
+        AddNav("Trash", Glyph.Trash, Scope.Trash).Visibility = standard;
         if (visibleGroups.Any(group => group.IsAi))
         {
             AddHeading(currentProfile == "Common groups" ? "Recommended AI groups" : "AI groups");
             foreach (var group in visibleGroups.Where(group => group.IsAi)) AddGroup(group);
         }
+        if (currentProfile == "Common groups" && aiGroupCount > 0)
+        {
+            var allThemes = Ui.Button(Labels.Format("All AI groups ({0})", aiGroupCount), () => app.SetGroupProfile("AI groups"), "NavButton");
+            allThemes.SetResourceReference(ForegroundProperty, "Muted");
+            Navigation.Children.Add(allThemes);
+        }
+
+        if (standard == Visibility.Visible) AddHeading("Content types");
+        foreach (var clipKind in new[] { ClipKind.Text, ClipKind.Image, ClipKind.Link, ClipKind.Color,
+            ClipKind.Code, ClipKind.Files, ClipKind.Mixed })
+            AddNav(clipKind.ToString(), Glyph.ForKind(clipKind), filter: clipKind).Visibility = standard;
         if (currentProfile is "AI groups" or "Minimal") return;
         AddHeading("Groups");
         foreach (var group in visibleGroups.Where(group => !group.IsSmart && !group.IsAi)) AddGroup(group);
@@ -313,11 +316,40 @@ public partial class LibraryPage : UserControl
 
     private void UpdateColumns()
     {
-        compact = ActualWidth < 1050;
+        bool minimal = app.Settings.GroupDisplay == "Minimal";
+        double requested = draggedSidebarWidth ?? GroupNavigation.SidebarWidth(app.Settings);
+        double sidebar = minimal ? 0 : Math.Min(requested, Math.Max(152, ActualWidth - 430));
+        bool right = GroupNavigation.Placement(app.Settings) == "Right";
+        var pane = new GridLength(sidebar);
+        var fill = new GridLength(1, GridUnitType.Star);
+        FirstColumn.Width = right ? fill : pane;
+        SecondColumn.Width = right ? pane : fill;
+        Grid.SetColumn(NavigationPane, right ? 1 : 0);
+        Grid.SetColumn(MainPane, right ? 0 : 1);
+        NavigationPane.Visibility = minimal ? Visibility.Collapsed : Visibility.Visible;
+        NavigationSurface.BorderThickness = right ? new Thickness(1, 0, 0, 0) : new Thickness(0, 0, 1, 0);
+        SidebarDivider.HorizontalAlignment = right ? HorizontalAlignment.Left : HorizontalAlignment.Right;
+        GroupViewOptions.Visibility = minimal ? Visibility.Visible : Visibility.Collapsed;
+        compact = ActualWidth < Math.Max(1050, sidebar + 430 + 336);
         DetailsColumn.Width = compact ? new GridLength(0) : new GridLength(336);
         DetailsPane.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
-        NavigationColumn.Width = new GridLength(ActualWidth < 700 ? 152 : 232);
         UpdateActions();
+    }
+
+    private void ResizeSidebar(object sender, DragDeltaEventArgs e)
+    {
+        double delta = GroupNavigation.Placement(app.Settings) == "Right" ? -e.HorizontalChange : e.HorizontalChange;
+        draggedSidebarWidth = Math.Clamp((draggedSidebarWidth ?? NavigationPane.ActualWidth) + delta,
+            GroupNavigation.MinSidebarWidth, GroupNavigation.MaxSidebarWidth);
+        UpdateColumns();
+    }
+
+    private void SaveSidebarSize(object sender, DragCompletedEventArgs e)
+    {
+        double? width = draggedSidebarWidth;
+        draggedSidebarWidth = null;
+        if (!e.Canceled && width is { } value) app.SaveSettings(app.Settings with { GroupSidebarWidth = Math.Round(value) });
+        UpdateColumns();
     }
 
     private void UpdateActions()
@@ -426,6 +458,67 @@ public partial class LibraryPage : UserControl
         menu.PlacementTarget = Tools;
         menu.Placement = PlacementMode.Bottom;
         menu.IsOpen = true;
+    }
+
+    private void ShowGroupViewOptions(object sender, RoutedEventArgs e)
+    {
+        var menu = new ContextMenu { PlacementTarget = GroupViewOptions, Placement = PlacementMode.Bottom };
+        foreach (string profile in GroupNavigation.Profiles)
+            ClipMenus.Add(menu, GroupNavigation.ProfileTitle(profile), () => app.SetGroupProfile(profile));
+        menu.Items.Add(new Separator());
+        ClipMenus.Add(menu, "Search groups", () => ShowGroupFinder(this, new RoutedEventArgs()));
+        foreach (var nav in navButtons.Where(item => item.Kind is null && item.Collection is null))
+            ClipMenus.Add(menu, nav.Name, () => nav.Button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+        menu.IsOpen = true;
+    }
+
+    private void ShowGroupFinder(object sender, RoutedEventArgs e) => LibraryEditors.ShowModal(Owner, "Search groups", close =>
+    {
+        var body = new StackPanel();
+        var search = Ui.Field("Search by name or theme definition", "", 160);
+        body.Children.Add(search);
+        var ungrouped = new CheckBox { Content = Labels.Get("Only show ungrouped clips"), IsChecked = scope == Scope.Ungrouped,
+            Margin = new Thickness(0, 9, 0, 8) };
+        ungrouped.Click += (_, _) =>
+        {
+            SelectScope(ungrouped.IsChecked == true ? Scope.Ungrouped : Scope.All);
+            close();
+        };
+        body.Children.Add(ungrouped);
+        var items = new Style(typeof(ListBoxItem));
+        items.Setters.Add(new Setter(AutomationProperties.NameProperty, new Binding(nameof(ClipCollection.Name))));
+        var list = new ListBox { DisplayMemberPath = nameof(ClipCollection.Name), ItemContainerStyle = items, MinHeight = 50, MaxHeight = 235 };
+        AutomationProperties.SetName(list, Labels.Get("Matching groups"));
+        body.Children.Add(list);
+        var empty = Ui.Text(Labels.Get("No groups match."), 12, "Muted");
+        empty.Margin = new Thickness(6);
+        body.Children.Add(empty);
+        void Filter()
+        {
+            var matches = app.Collections.Where(group => GroupNavigation.Matches(group, search.Text.Trim())).ToArray();
+            list.ItemsSource = matches;
+            list.SelectedIndex = 0;
+            empty.Visibility = matches.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+            list.Visibility = matches.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+        }
+        bool OpenSelected()
+        {
+            if (list.SelectedItem is not ClipCollection group || !app.SetGroupProfile(GroupNavigation.ProfileForGroup(app.Settings, group))) return false;
+            SelectScope(Scope.All, group.Id);
+            return true;
+        }
+        search.TextChanged += (_, _) => Filter();
+        list.MouseDoubleClick += (_, _) => { if (OpenSelected()) close(); };
+        Filter();
+        return LibraryEditors.Wrap("Search groups", body, search, OpenSelected, close, "Open group");
+    }, 400, 449);
+
+    private void SelectScope(Scope next, Guid? collection = null)
+    {
+        scope = next;
+        kind = null;
+        groupId = collection;
+        Refresh(reset: true);
     }
 
     private void ShowDetails(object sender, RoutedEventArgs e)

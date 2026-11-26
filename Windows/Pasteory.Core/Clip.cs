@@ -29,6 +29,8 @@ public sealed record Clip
     public DateTimeOffset? CreatedAt { get; init; }
     public DateTimeOffset? LastPastedAt { get; init; }
     public DateTimeOffset? ArchivedAt { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? CompressedTextAt { get; init; }
     public DateTimeOffset? TrashedAt { get; init; }
     public ClipKind Kind { get; init; }
     public string Source { get; init; } = "";
@@ -184,10 +186,11 @@ public sealed record Clip
 
     private bool SamePaths(Clip other) => Files.SequenceEqual(other.Files, StringComparer.OrdinalIgnoreCase);
 
-    internal long Size => IndexSize + ImageSize + OriginalRepresentations.DistinctBy(rep => rep.Hash).Sum(rep => (long)rep.Size);
+    internal long Size => IndexSize + Bytes(Html) + Bytes(Rtf) + ImageSize +
+        OriginalRepresentations.DistinctBy(rep => rep.Hash).Sum(rep => (long)rep.Size);
 
     internal long IndexSize => 256L + Encoding.UTF8.GetByteCount(Title) + Encoding.UTF8.GetByteCount(Note) +
-        Encoding.UTF8.GetByteCount(Group) + Encoding.UTF8.GetByteCount(Source) + Bytes(Text) + Bytes(Html) + Bytes(Rtf) +
+        Encoding.UTF8.GetByteCount(Group) + Encoding.UTF8.GetByteCount(Source) + Bytes(Text) +
         Bytes(RecognizedText) + Bytes(LinkDetails?.Title) + Bytes(LinkDetails?.FallbackTitle) +
         (LinkDetails?.Attempts?.Length ?? 0) * 96L + Files.Sum(path => (long)Encoding.UTF8.GetByteCount(path)) +
         Uses.Length * 32L +

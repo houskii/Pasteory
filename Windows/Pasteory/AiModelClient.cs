@@ -53,24 +53,33 @@ internal sealed class AiModelClient(HttpClient? transport = null)
             }).Where(model => model.Id.Length > 0).DistinctBy(model => model.Id).OrderBy(model => model.Id).ToArray();
     }
 
-    internal async Task<Completion> CompleteAsync(AiPreferences settings, string key,
-        string system, string input, int outputLimit, CancellationToken cancel,
-        IReadOnlyList<object>? conversation = null, object[]? tools = null)
+    private static Dictionary<string, object?> ChatBody(AiPreferences settings, int outputLimit,
+        IReadOnlyList<object> conversation, object[]? tools)
     {
-        using var request = Request(settings.Endpoint, "chat/completions", key, HttpMethod.Post);
         var body = new Dictionary<string, object?>
         {
             ["model"] = settings.Model, ["max_tokens"] = outputLimit, ["stream"] = false,
-            ["messages"] = conversation ?? (object[])new[]
-            {
-                new { role = "system", content = system },
-                new { role = "user", content = input }
-            }
+            ["messages"] = conversation
         };
         if (!string.IsNullOrWhiteSpace(settings.Reasoning) && settings.Reasoning != "auto")
             body["reasoning_effort"] = settings.Reasoning;
         if (tools is { Length: > 0 }) body["tools"] = tools;
-        request.Content = JsonContent.Create(body);
+        return body;
+    }
+
+    internal static int EstimateRequest(AiPreferences settings, int outputLimit, IReadOnlyList<object> conversation, object[]? tools)
+    {
+        var text = conversation.Where(message => message is not AiResourceMessage).ToArray();
+        int bytes = JsonSerializer.SerializeToUtf8Bytes(ChatBody(settings, outputLimit, text, tools), AiFile.Wire).Length;
+        // Image URLs contain encoded pixels. Count their estimated model cost separately.
+        return (bytes + 1) / 2 + 1500 * (conversation.Count - text.Length);
+    }
+
+    internal async Task<Completion> CompleteAsync(AiPreferences settings, string key, int outputLimit, int estimatedInput,
+        IReadOnlyList<object> conversation, object[]? tools, CancellationToken cancel)
+    {
+        using var request = Request(settings.Endpoint, "chat/completions", key, HttpMethod.Post);
+        request.Content = JsonContent.Create(ChatBody(settings, outputLimit, conversation, tools), options: AiFile.Wire);
         using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancel);
         using var document = await ReadJsonAsync(response, cancel);
         var root = document.RootElement;
@@ -86,18 +95,16 @@ internal sealed class AiModelClient(HttpClient? transport = null)
             }).ToArray() : [];
         if (content.Length == 0 && requested.Length == 0) throw new InvalidDataException("The model returned no content.");
         bool usage = root.TryGetProperty("usage", out var tokens) && tokens.ValueKind == JsonValueKind.Object;
-        return new Completion(content, usage ? Number(tokens, "prompt_tokens") :
-            Estimate(conversation is null ? system + input : JsonSerializer.Serialize(conversation)),
-            usage ? Number(tokens, "completion_tokens") : Estimate(content),
-            usage && tokens.TryGetProperty("prompt_tokens_details", out var details) ? Number(details, "cached_tokens") : 0,
-            usage && tokens.TryGetProperty("completion_tokens_details", out var output) ? Number(output, "reasoning_tokens") : 0,
-            !usage, requested);
+        int? inputCount = TokenCount(tokens, "prompt_tokens"), outputCount = TokenCount(tokens, "completion_tokens");
+        return new Completion(content, inputCount ?? estimatedInput, outputCount ?? outputLimit,
+            usage && tokens.TryGetProperty("prompt_tokens_details", out var details) ? TokenCount(details, "cached_tokens") ?? 0 : 0,
+            usage && tokens.TryGetProperty("completion_tokens_details", out var output) ? TokenCount(output, "reasoning_tokens") ?? 0 : 0,
+            inputCount is null || outputCount is null, requested);
     }
 
-    internal static int Estimate(params string[] text) => Math.Max(1, text.Sum(value => Encoding.UTF8.GetByteCount(value)) / 3 + 30);
-
-    private static int Number(JsonElement element, string name) => element.ValueKind == JsonValueKind.Object &&
-        element.TryGetProperty(name, out var value) && value.TryGetInt32(out int number) ? Math.Max(0, number) : 0;
+    private static int? TokenCount(JsonElement element, string name) => element.ValueKind == JsonValueKind.Object &&
+        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out int number)
+        ? Math.Max(0, number) : null;
 
     private static HttpRequestMessage Request(string endpoint, string suffix, string key, HttpMethod method)
     {

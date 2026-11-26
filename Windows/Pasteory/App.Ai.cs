@@ -211,7 +211,7 @@ public partial class App
     {
         var active = Clips.Where(clip => clip.TrashedAt is null && ClipActivity.LastUsed(clip) >= now.AddDays(-7))
             .SelectMany(clip => clip.CollectionIds).ToHashSet();
-        active.UnionWith(RankedAiGroups().Take(3).Select(group => group.Id));
+        active.UnionWith(RankedAiGroups().Take(GroupNavigation.RecommendationCount(Settings)).Select(group => group.Id));
         var eligible = Collections.Where(group => group.IsAi && !group.Locked && !active.Contains(group.Id))
             .Select(group => group.Id).ToHashSet();
         return Clips.Where(clip => clip.CollectionIds.Any(eligible.Contains)).Select(clip => clip.Id).ToHashSet();

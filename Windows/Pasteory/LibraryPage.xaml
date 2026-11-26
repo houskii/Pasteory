@@ -4,25 +4,37 @@
              xmlns:local="clr-namespace:Pasteory.Windows">
     <Grid Background="{DynamicResource Workspace}">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition x:Name="NavigationColumn" Width="232"/><ColumnDefinition Width="*"/>
+            <ColumnDefinition x:Name="FirstColumn" Width="224"/><ColumnDefinition x:Name="SecondColumn" Width="*"/>
             <ColumnDefinition x:Name="DetailsColumn" Width="336"/>
         </Grid.ColumnDefinitions>
-        <Border BorderBrush="{DynamicResource Line}" BorderThickness="0,0,1,0" Background="{DynamicResource SubNav}">
-            <DockPanel>
-                <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0" Padding="10,8">
-                    <TextBlock x:Name="CollectionCount" HorizontalAlignment="Right" Foreground="{DynamicResource Quiet}" FontSize="11"/>
-                </Border>
-                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                    <StackPanel x:Name="Navigation" Margin="10,8,10,10"/>
-                </ScrollViewer>
-            </DockPanel>
-        </Border>
-        <DockPanel Grid.Column="1">
+        <Grid x:Name="NavigationPane">
+            <Border x:Name="NavigationSurface" BorderBrush="{DynamicResource Line}" BorderThickness="0,0,1,0" Background="{DynamicResource SubNav}">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Top" Margin="10,10,10,4">
+                        <ContentControl x:Name="GroupViews" HorizontalContentAlignment="Stretch"/>
+                        <Button x:Name="FindGroup" Click="ShowGroupFinder" Style="{StaticResource NavButton}"
+                                MinHeight="26" Padding="5,2" Content="{local:Label 'Search groups'}" AutomationProperties.Name="{local:Label 'Search groups'}"/>
+                    </StackPanel>
+                    <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0" Padding="10,8">
+                        <TextBlock x:Name="CollectionCount" HorizontalAlignment="Right" Foreground="{DynamicResource Quiet}" FontSize="11"/>
+                    </Border>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel x:Name="Navigation" Margin="10,4,10,10"/>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+            <Thumb x:Name="SidebarDivider" Style="{StaticResource GroupSidebarDivider}" HorizontalAlignment="Right"
+                   ToolTip="{local:Label 'Drag to resize the group sidebar'}" AutomationProperties.Name="{local:Label 'Group sidebar width'}"
+                   DragDelta="ResizeSidebar" DragCompleted="SaveSidebarSize"/>
+        </Grid>
+        <DockPanel x:Name="MainPane" Grid.Column="1">
             <Border DockPanel.Dock="Top" BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1"
                     Background="{DynamicResource Nav}" Padding="18,14,18,14">
                 <StackPanel>
                     <DockPanel Margin="0,0,0,3">
                         <WrapPanel DockPanel.Dock="Right" HorizontalAlignment="Right" VerticalAlignment="Center">
+                            <Button x:Name="GroupViewOptions" Style="{StaticResource IconButton}" Content="&#xE8FD;" Click="ShowGroupViewOptions"
+                                    ToolTip="{local:Label 'Group view'}" AutomationProperties.Name="{local:Label 'Group view'}" Margin="0,0,5,0" Visibility="Collapsed"/>
                             <Button x:Name="NewText" Style="{StaticResource IconButton}" Content="&#xE710;" Click="CreateText"
                                     ToolTip="{local:Label 'New text clip'}" AutomationProperties.Name="{local:Label 'New text clip'}" Margin="0,0,5,0"/>
                             <Button x:Name="Tools" Click="ShowTools" Foreground="{DynamicResource AccentInk}" Padding="8,3" MinHeight="24"

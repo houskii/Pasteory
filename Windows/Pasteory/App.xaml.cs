@@ -152,6 +152,8 @@ public partial class App : Application
         maintenance.Tick += (_, _) =>
         {
             ChangeHistory(() => history.RunMaintenance(DateTimeOffset.Now, Settings.ArchiveAfterDays));
+            if (Settings.Ai is { LifecycleEnabled: true, AutomaticCompression: true })
+                _ = CompressEligibleContentAsync(manual: false);
             CheckUpdateIfDue();
             ScheduleWebCacheCheck();
             _ = CheckDueLinkSessionsAsync();
@@ -267,7 +269,8 @@ public partial class App : Application
         _ = Dispatcher.BeginInvoke(new Action(() =>
         {
             if (Exiting) return;
-            sessionLocked = args.Reason == SessionSwitchReason.SessionLock;
+            if (args.Reason == SessionSwitchReason.SessionLock) sessionLocked = true;
+            else if (args.Reason == SessionSwitchReason.SessionUnlock) sessionLocked = false;
             ResetClipboardObservation();
         }));
     }
@@ -512,6 +515,9 @@ public partial class App : Application
     {
         bool shortcutChanged = Shortcuts.Text(Settings, Command.ShowPanel) != Shortcuts.Text(next, Command.ShowPanel);
         bool groupViewChanged = Settings.GroupDisplay != next.GroupDisplay ||
+            GroupNavigation.Placement(Settings) != GroupNavigation.Placement(next) || Settings.GroupSidebarWidth != next.GroupSidebarWidth ||
+            Settings.CompactGroupRows != next.CompactGroupRows || Settings.RecommendAiGroups != next.RecommendAiGroups ||
+            Settings.Ai.RecommendedGroupCount != next.Ai.RecommendedGroupCount ||
             !Settings.Shortcuts.SequenceEqual(next.Shortcuts);
         bool pausedChanged = Settings.Paused != next.Paused;
         bool captureIntervalChanged = Settings.CaptureInterval() != next.CaptureInterval();

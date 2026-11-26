@@ -249,6 +249,8 @@ internal sealed partial class SettingsWindow
     private void BuildActivityPreferences(Panel layout, ActivityPreferences activity)
     {
         var card = SettingsCard(layout, "Activity calculation");
+        Switch(card, "Enable content lifecycle", app.Settings.Ai.LifecycleEnabled,
+            (settings, flag) => settings with { Ai = settings.Ai with { LifecycleEnabled = flag } });
         var presets = Picker("Lifecycle preset", ["Aggressive", "Standard", "Conservative"], activity.RetainDays switch
         { <= 3 => "Aggressive", >= 14 => "Conservative", _ => "Standard" });
         card.Children.Add(Row("Lifecycle preset", presets));
@@ -291,6 +293,12 @@ internal sealed partial class SettingsWindow
             } });
             SetStatus(Labels.Get("Settings saved."));
         }, "PrimaryButton")));
+
+        var compression = SettingsCard(layout, "Lossless compression");
+        Switch(compression, "Automatically compress eligible content", app.Settings.Ai.AutomaticCompression,
+            (settings, flag) => settings with { Ai = settings.Ai with { AutomaticCompression = flag } },
+            "Uses the saved compression threshold and content activity. Favorites and pins are excluded.");
+        compression.Children.Add(Row("Local history", Ui.Button("Compress eligible content", async () => await app.CompressEligibleContentAsync(manual: true))));
     }
 
     private void BuildAiUsage(Panel layout)
@@ -300,10 +308,14 @@ internal sealed partial class SettingsWindow
         var budget = Ui.Field("Daily token limit", app.Settings.Ai.DailyTokens.ToString(CultureInfo.InvariantCulture), 9);
         var nightly = Ui.Field("Nightly token limit", app.Settings.Ai.NightlyTokens.ToString(CultureInfo.InvariantCulture), 8);
         var count = Ui.Field("Daily automatic tasks", app.Settings.Ai.DailyAutomaticTasks.ToString(CultureInfo.InvariantCulture), 4);
-        budget.Width = count.Width = nightly.Width = 124;
+        var input = Ui.Field("Input tokens per request", app.Settings.Ai.MaxInputTokens.ToString(CultureInfo.InvariantCulture), 6);
+        var output = Ui.Field("Output tokens per request", app.Settings.Ai.MaxOutputTokens.ToString(CultureInfo.InvariantCulture), 5);
+        budget.Width = count.Width = nightly.Width = input.Width = output.Width = 124;
         card.Children.Add(Row("Daily token limit", budget));
         card.Children.Add(Row("Nightly token limit", nightly));
         card.Children.Add(Row("Daily automatic tasks", count));
+        card.Children.Add(Row("Input tokens per request", input, "The request estimate includes the prompt, recent tool turns and tool definitions."));
+        card.Children.Add(Row("Output tokens per request", output));
         card.Children.Add(Row("Token usage", Ui.Button("Save", () =>
         {
             if (!int.TryParse(budget.Text, out int tokens) || tokens is < 1000 or > 50_000_000 ||
@@ -313,9 +325,15 @@ internal sealed partial class SettingsWindow
                 SetStatus(Labels.Get("Enter a valid token budget and automatic task limit."));
                 return;
             }
+            if (!int.TryParse(input.Text, out int maxInput) || maxInput is < 1_000 or > 128_000 ||
+                !int.TryParse(output.Text, out int maxOutput) || maxOutput is < 256 or > 16_384)
+            {
+                SetStatus(Labels.Get("Use 1,000–128,000 input tokens and 256–16,384 output tokens per request."));
+                return;
+            }
             app.SaveSettings(app.Settings with { Ai = app.Settings.Ai with
             {
-                DailyTokens = tokens, NightlyTokens = night, DailyAutomaticTasks = jobs
+                DailyTokens = tokens, NightlyTokens = night, DailyAutomaticTasks = jobs, MaxInputTokens = maxInput, MaxOutputTokens = maxOutput
             } });
         }, "PrimaryButton")));
 
