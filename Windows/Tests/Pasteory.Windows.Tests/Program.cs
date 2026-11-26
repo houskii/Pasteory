@@ -61,7 +61,7 @@ internal static partial class Program
         var capture = ClipboardFormats.Read(data, "Notepad");
         Check(capture?.Clip.Text == content && capture?.Clip.Rtf == rich, "Read Unicode and RTF");
 
-        var plain = ClipboardFormats.Create(capture!.Value.Clip, plainText: true, png: null);
+        var plain = ClipboardFormats.Create(capture!.Value.Clip, plainText: true, image: null);
         Check(plain.GetText() == content && !plain.GetDataPresent(DataFormats.Rtf, false), "Write plain text only");
         Check(ClipboardFormats.Read(plain, "Pasteory") is null, "Ignore Pasteory writes");
         data.SetData(ClipboardFormats.IncludeInHistory, new MemoryStream(new byte[4]), false);
@@ -98,7 +98,7 @@ internal static partial class Program
         string[] paths = [Path.Combine(Path.GetTempPath(), "clipboard-file.txt"),
             Path.Combine(Path.GetTempPath(), "clipboard-other.txt")];
         var files = ClipboardFormats.Create(new Clip { Kind = ClipKind.Files, Files = paths },
-            plainText: false, png: null);
+            plainText: false, image: null);
         Check(files.GetFileDropList().Cast<string>().SequenceEqual(paths), "Write Windows file references");
 
         var image = new DataObject();
@@ -108,13 +108,14 @@ internal static partial class Program
         Check(capturedImage?.Clip.Kind == ClipKind.Image && capturedImage?.Image is { Length: > 0 },
             "Read native bitmaps");
         var replay = ClipboardFormats.Create(capturedImage!.Value.Clip, plainText: false,
-            png: capturedImage.Value.Image);
+            image: capturedImage.Value.Image);
         Check(replay.GetImage().PixelWidth == 1 && replay.GetDataPresent("PNG", false), "Write image formats");
         image.SetText("Image caption");
         var mixed = ClipboardFormats.Read(image, "Paint")!.Value;
         var mixedReplay = ClipboardFormats.Create(mixed.Clip, false, mixed.Image);
         Check(mixed.Clip.Kind == ClipKind.Mixed && mixedReplay.GetText() == "Image caption" &&
             mixedReplay.GetImage().PixelHeight == 1, "Preserve both text and image in a mixed copy");
+        var originalImage = CheckOriginalImages();
 
         app.InitializeComponent();
         var panel = new HistoryWindow(app);
@@ -133,6 +134,11 @@ internal static partial class Program
                 Check(Clipboard.GetText() == content, "Read back data from the Windows clipboard");
                 Check(Clipboard.GetDataObject() is { } systemData &&
                     ClipboardFormats.Read(systemData, "Pasteory") is null, "Keep the opt-out markers on the real clipboard");
+                Clipboard.SetDataObject(originalImage.Replay, copy: true);
+                var systemImage = Clipboard.GetDataObject()!;
+                Check(ReadClipboardBytes(systemImage, "JFIF").SequenceEqual(originalImage.Bytes) &&
+                    Clipboard.GetFileDropList().Cast<string>().SequenceEqual(originalImage.Files) && Clipboard.GetImage()?.PixelWidth == 13,
+                    "Round-trip original JPEG, bitmap, and file references through the real clipboard");
             }
             finally
             {
@@ -378,14 +384,14 @@ internal static partial class Program
         var bitmap = new RenderTargetBitmap(360, 160, 96, 96, PixelFormats.Pbgra32);
         bitmap.Render(palette);
         using var stream = new MemoryStream();
-        var png = new PngBitmapEncoder();
-        png.Frames.Add(BitmapFrame.Create(bitmap));
-        png.Save(stream);
+        var jpeg = new JpegBitmapEncoder { QualityLevel = 92 };
+        jpeg.Frames.Add(BitmapFrame.Create(bitmap));
+        jpeg.Save(stream);
         byte[] bytes = stream.ToArray();
         store.Capture(new Clip
         {
             Kind = ClipKind.Image, Source = "Paint", SourcePath = sourceIcons["Paint"], CapturedAt = now.AddMinutes(-3),
-            ImageSize = bytes.Length, ImageWidth = 360, ImageHeight = 160, RecognizedText = "Pasteory · 配色灵感",
+            ImageFormat = ClipImageFormat.Jpeg, ImageSize = bytes.Length, ImageWidth = 360, ImageHeight = 160, RecognizedText = "Pasteory · 配色灵感",
             Title = "主题预览", Note = "保留原图，方便回看",
             ImageHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes))
         }, bytes);
@@ -401,12 +407,19 @@ internal static partial class Program
         var aggregate = store.SaveAggregation(null, "测试素材", "用于验证匹配成员", store.Clips
             .Where(clip => clip.Kind is ClipKind.Code or ClipKind.Link).Select(clip => clip.Id), "Manual");
         Check(aggregate is not null, "Save fixture aggregation");
+        byte[] archivedImage = SampleImage(new TiffBitmapEncoder { Compression = TiffCompressOption.None }, 900, 500);
+        store.Capture(new Clip
+        {
+            Kind = ClipKind.Image, Source = "Paint", SourcePath = sourceIcons["Paint"], CapturedAt = now.AddDays(-45),
+            ArchivedAt = now.AddDays(-1), Title = "旧图片清理验收", ImageFormat = ClipImageFormat.Tiff, ImageSize = archivedImage.Length,
+            ImageWidth = 900, ImageHeight = 500, ImageHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(archivedImage))
+        }, archivedImage);
         new LocalSettings
         {
             Language = "简体中文", Appearance = "Light", BrowserPath = File.Exists(chrome) ? chrome : null,
             Shortcuts = new Dictionary<string, string> { ["ShowPanel"] = "Ctrl+Alt+Shift+V" }
         }.Save(directory);
-        Console.WriteLine("Prepared eight synthetic clips, an aggregation, and four groups.");
+        Console.WriteLine("Prepared eight active clips, an archived TIFF, an aggregation, and four groups.");
     }
 
     private static void Check(bool condition, string description)

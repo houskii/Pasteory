@@ -45,6 +45,15 @@ public partial class App
     internal void EmptyTrash() => ChangeHistory(history.EmptyTrash);
     internal void ToggleArchive(Clip clip) => ChangeHistory(() => history.SetArchived(clip.Id, clip.ArchivedAt is null));
     internal void RunArchiveNow() => ChangeHistory(() => history.RunMaintenance(DateTimeOffset.Now, Settings.ArchiveAfterDays));
+    internal Task<HistoryCleanupPreview> PreviewCleanupAsync(DateTimeOffset cutoff, long bytes) =>
+        history.PreviewCleanupAsync(cutoff, bytes, lifetime.Token);
+
+    internal HistoryCleanupResult? CleanHistory(HistoryCleanupPreview preview)
+    {
+        HistoryCleanupResult? result = null;
+        return ChangeHistory(() => result = history.CleanHistory(preview)) ? result : null;
+    }
+
     internal void ExportBackup(string path)
     {
         try { history.ExportBackup(path); Notify("Backup exported."); }
@@ -180,13 +189,13 @@ public partial class App
         {
             byte[] bytes = ReadImage(clip);
             size = bytes.Length;
-            var (actualWidth, actualHeight) = ClipboardFormats.PngDimensions(bytes);
+            var (actualWidth, actualHeight) = ClipboardImage.Dimensions(bytes);
             if (actualWidth > 0 && actualHeight > 0) (width, height) = (actualWidth, actualHeight);
-            return new(ClipboardFormats.DecodePreview(bytes, maximumDimension), width, height, size);
+            return new(ClipboardImage.Preview(bytes, maximumDimension, width, height), width, height, size, clip.ImageExtension);
         }
-        catch (Exception error) when (IsLocalError(error) || error is NotSupportedException or ArgumentException or FileFormatException)
+        catch (Exception error) when (IsLocalError(error) || ClipboardImage.DecoderFailure(error))
         {
-            return new(null, width, height, size);
+            return new(null, width, height, size, clip.ImageExtension);
         }
     }
 
@@ -226,7 +235,7 @@ public partial class App
                     MarkOpened(clip);
                     break;
                 case ClipKind.Image:
-                    string image = WritePreviewFile("png", ReadImage(clip));
+                    string image = WritePreviewFile(clip.ImageExtension, ReadImage(clip));
                     if (string.IsNullOrWhiteSpace(Settings.ImageViewerPath)) OpenInShell(image);
                     else StartApp(Settings.ImageViewerPath, image);
                     MarkOpened(clip);

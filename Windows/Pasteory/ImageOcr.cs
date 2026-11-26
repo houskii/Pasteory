@@ -13,7 +13,7 @@ internal static class ImageOcr
 {
     private static readonly SemaphoreSlim SingleImage = new(1);
 
-    internal static async Task<string?> ReadAsync(byte[] png, string language, CancellationToken cancellation)
+    internal static async Task<string?> ReadAsync(byte[] image, string language, CancellationToken cancellation)
     {
         await SingleImage.WaitAsync(cancellation).ConfigureAwait(false);
         string stage = "language selection";
@@ -32,11 +32,11 @@ internal static class ImageOcr
             if (engine is null && installed.FirstOrDefault() is { } fallback) engine = OcrEngine.TryCreateFromLanguage(fallback);
             if (engine is null) return null;
 
-            stage = "PNG input";
+            stage = "image input";
             using var stream = new InMemoryRandomAccessStream();
             using (var writer = new DataWriter(stream))
             {
-                writer.WriteBytes(png);
+                writer.WriteBytes(image);
                 await writer.StoreAsync().AsTask(cancellation).ConfigureAwait(false);
                 writer.DetachStream();
             }

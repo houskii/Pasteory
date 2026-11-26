@@ -164,10 +164,10 @@ internal static class Ui
     }
 }
 
-internal sealed record ImagePreview(BitmapSource? Bitmap, int Width, int Height, long Bytes)
+internal sealed record ImagePreview(BitmapSource? Bitmap, int Width, int Height, long Bytes, string Format)
 {
     internal string Details => string.Join("\n",
-        Labels.Format("Image format: {0}", "png"),
+        Labels.Format("Image format: {0}", Format),
         Labels.Format("Image dimensions: {0}", Width > 0 && Height > 0 ? $"{Width} * {Height}" : "—"),
         Labels.Format("File size: {0}", ClipCard.Bytes(Bytes)));
 }

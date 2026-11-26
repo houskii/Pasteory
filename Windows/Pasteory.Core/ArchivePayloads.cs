@@ -8,6 +8,7 @@ public sealed partial class HistoryStore
 {
     private sealed record PackedPayload(string Hash, int Size);
     private sealed record ArchiveText(string? Text, string? Html, string? Rtf);
+    private string ArchivePath(string hash) => Path.Combine(archiveDirectory, hash + ".br");
 
     public void SetAiGroupCompression(Guid id, bool enabled)
     {
@@ -26,7 +27,7 @@ public sealed partial class HistoryStore
         byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(new ArchiveText(clip.Text, clip.Html, clip.Rtf));
         if (bytes.Length > 128 * 1024 * 1024) return null;
         string hash = Convert.ToHexString(SHA256.HashData(bytes));
-        string path = Path.Combine(archiveDirectory, hash + ".br");
+        string path = ArchivePath(hash);
         if (!File.Exists(path))
             LocalJson.WriteFile(path, output =>
             {
@@ -40,7 +41,7 @@ public sealed partial class HistoryStore
     {
         if (entry.Hash is not { Length: 64 } || !entry.Hash.All(char.IsAsciiHexDigit) || entry.Size is < 1 or > 128 * 1024 * 1024)
             throw new JsonException("Invalid archived content reference.");
-        using var file = File.OpenRead(Path.Combine(archiveDirectory, entry.Hash + ".br"));
+        using var file = File.OpenRead(ArchivePath(entry.Hash));
         using var decompressed = new BrotliStream(file, CompressionMode.Decompress);
         byte[] bytes = new byte[entry.Size];
         decompressed.ReadExactly(bytes);
@@ -54,11 +55,11 @@ public sealed partial class HistoryStore
     {
         try
         {
-            if (!Directory.Exists(archiveDirectory)) return;
+            if (!LocalStorage.IsOrdinaryDirectory(archiveDirectory)) return;
             foreach (string file in Directory.EnumerateFiles(archiveDirectory, "*.br"))
             {
                 string name = Path.GetFileNameWithoutExtension(file);
-                if (name.Length == 64 && name.All(char.IsAsciiHexDigit) && !retained.Contains(name)) LocalJson.Discard(file);
+                if (name.Length == 64 && name.All(char.IsAsciiHexDigit) && !retained.Contains(name)) DiscardManagedFile(file);
             }
         }
         catch (IOException) { }

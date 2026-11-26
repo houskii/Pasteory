@@ -44,7 +44,7 @@ internal static class AiTaskResources
         foreach (var clip in clips)
         {
             var files = clip.Files.Select(path => Describe(path)).OfType<AiResource>().Take(20).ToList();
-            if (clip.HasImage && Describe(Path.Combine(root, "images", $"{clip.Id:N}.png"), "Clipboard image.png") is { } image)
+            if (clip.HasImage && Describe(Path.Combine(root, "images", clip.ImageFileName), "Clipboard image." + clip.ImageExtension) is { } image)
                 files.Insert(0, image);
             if (files.Count > 0) result.Add(clip.Id, files.ToArray());
         }
@@ -62,6 +62,7 @@ internal static class AiTaskResources
             string? mime = ext switch
             {
                 ".png" => "image/png", ".jpg" or ".jpeg" => "image/jpeg", ".webp" => "image/webp", ".gif" => "image/gif",
+                ".tif" or ".tiff" => "image/tiff", ".bmp" => "image/bmp", ".heic" or ".heif" => "image/heic", ".avif" => "image/avif",
                 ".pdf" => "application/pdf", _ => TextTypes.Contains(ext) ? "text/plain" : null
             };
             if (mime is null || !file.Exists || file.Length > (mime == "text/plain" ? MaxTextBytes : MaxBinaryBytes) ||
@@ -93,11 +94,25 @@ internal static class AiTaskResources
         if (!allowAttachment) return Error("This batch already contains a binary resource");
         var bytes = new byte[(int)file.Length];
         stream.ReadExactly(bytes);
-        string encoded = $"data:{file.MimeType};base64,{Convert.ToBase64String(bytes)}";
+        string mime = file.MimeType;
+        if (mime is "image/tiff" or "image/bmp" or "image/heic" or "image/avif")
+        {
+            try
+            {
+                var (width, height) = ClipboardImage.Dimensions(bytes);
+                if (width <= 0 || height <= 0 || (long)width * height > 48_000_000)
+                    return Error("The image format is unavailable or its dimensions exceed the resource limit");
+                bytes = ClipboardImage.EncodePng(ClipboardImage.Preview(bytes, 900, width, height));
+                if (bytes.Length > MaxBinaryBytes) return Error("The converted image exceeds the resource limit");
+                mime = "image/png";
+            }
+            catch (Exception error) when (ClipboardImage.DecoderFailure(error)) { return Error("The image encoding is unavailable"); }
+        }
+        string encoded = $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
         object item = file.MimeType == "application/pdf" ? new { type = "file", file = new { filename = file.Name, file_data = encoded } } :
             new { type = "image_url", image_url = new { url = encoded, detail = "low" } };
         var message = new AiResourceMessage("user", [new { type = "text", text = "Requested Pasteory resource: " + file.Name }, item]);
-        return new AiResourceReply(JsonSerializer.Serialize(new { file.Name, file.MimeType, attached = true }), message);
+        return new AiResourceReply(JsonSerializer.Serialize(new { file.Name, MimeType = mime, attached = true }), message);
     }
 
     private static AiResourceReply Error(string text) => new(JsonSerializer.Serialize(new { error = text }));

@@ -37,7 +37,7 @@ public sealed partial class HistoryStore
         Clips = state.Clips.AsReadOnly();
         aiUndo = state.AiUndo;
         RemoveOrphanedImages();
-        RemoveOrphanedArchives((state.Payloads ?? []).Values.Select(payload => payload.Hash).ToHashSet());
+        RemoveOrphanedArchives((state.Payloads ?? []).Values.Select(payload => payload.Hash).ToHashSet(StringComparer.OrdinalIgnoreCase));
     }
 
     private LibraryState ReadLegacyState(string indexPath)
@@ -87,15 +87,22 @@ public sealed partial class HistoryStore
         int count = active.Count;
         long size = active.Sum(item => item.Size);
         long indexSize = active.Sum(item => item.IndexSize);
-        for (int index = next.Count - 1; index > 0 && OverLimit(); index--)
+        if (OverLimit())
         {
-            var candidate = next[index];
-            if (!IsActiveContent(candidate) || ProtectedFromArchive(candidate, protectedGroups)) continue;
-            count--;
-            size -= candidate.Size;
-            indexSize -= candidate.IndexSize;
-            if (archiveOverflow) next[index] = candidate with { ArchivedAt = DateTimeOffset.UtcNow };
-            else next.RemoveAt(index);
+            var indices = Enumerable.Range(1, next.Count - 1).Reverse();
+            if (archiveOverflow)
+                indices = indices.OrderBy(index => next[index].CreatedAt ?? next[index].CapturedAt).ToArray();
+            foreach (int index in indices)
+            {
+                var candidate = next[index];
+                if (!IsActiveContent(candidate) || ProtectedFromArchive(candidate, protectedGroups)) continue;
+                count--;
+                size -= candidate.Size;
+                indexSize -= candidate.IndexSize;
+                if (archiveOverflow) next[index] = candidate with { ArchivedAt = DateTimeOffset.UtcNow };
+                else next.RemoveAt(index);
+                if (!OverLimit()) break;
+            }
         }
         if (OverLimit()) return false;
 
@@ -103,7 +110,7 @@ public sealed partial class HistoryStore
         string? newImage = null;
         if (png is not null)
         {
-            string path = ImagePath(updated.Id);
+            string path = ImagePath(updated);
             if (!File.Exists(path))
             {
                 LocalJson.WriteFile(path, stream => stream.Write(png));
@@ -257,14 +264,19 @@ public sealed partial class HistoryStore
         var next = Remove(expiredIds);
         DateTimeOffset cutoff = now.AddDays(-Math.Clamp(archiveAfterDays, 0, 3650));
         bool changed = expiredIds.Length > 0;
-        if (archiveAfterDays > 0)
+        int overflow = archiveOverflow ? Math.Max(0, next.Count(IsActiveContent) - maxClips) : 0;
+        if (archiveAfterDays > 0 || overflow > 0)
         {
             var protectedGroups = RegularGroups();
-            for (int index = 0; index < next.Count; index++)
+            var candidates = Enumerable.Range(0, next.Count)
+                .Where(index => IsActiveContent(next[index]) && !ProtectedFromArchive(next[index], protectedGroups))
+                .OrderBy(index => next[index].CreatedAt ?? next[index].CapturedAt).ToArray();
+            foreach (int index in candidates)
             {
                 var clip = next[index];
-                if (!IsActiveContent(clip) || ProtectedFromArchive(clip, protectedGroups) || clip.CapturedAt >= cutoff) continue;
+                if (overflow <= 0 && (archiveAfterDays <= 0 || (clip.CreatedAt ?? clip.CapturedAt) >= cutoff)) break;
                 next[index] = clip with { ArchivedAt = now };
+                overflow--;
                 changed = true;
             }
         }
@@ -353,7 +365,7 @@ public sealed partial class HistoryStore
         return false;
     }
 
-    public byte[] ReadImage(Clip clip) => File.ReadAllBytes(ImagePath(clip.Id));
+    public byte[] ReadImage(Clip clip) => File.ReadAllBytes(ImagePath(clip));
 
     public void UpdateLinkDetails(Func<Clip, LinkDetails?> update)
     {
@@ -369,32 +381,36 @@ public sealed partial class HistoryStore
         if (changed) Commit(next);
     }
 
-    private string ImagePath(Guid id) => Path.Combine(imageDirectory, id.ToString("N") + ".png");
+    private string ImagePath(Clip clip) => Path.Combine(imageDirectory, clip.ImageFileName);
 
-    private void Commit(List<Clip> next, List<ClipCollection>? groups = null, bool replaceAiUndo = false, AiUndoRecord? nextUndo = null)
+    private void Commit(List<Clip> next, List<ClipCollection>? groups = null, bool replaceAiUndo = false,
+        AiUndoRecord? nextUndo = null, bool discardOrphans = true)
     {
         var collections = groups ?? Collections.ToList();
         var undo = replaceAiUndo ? nextUndo : aiUndo;
         var packed = WriteCatalog(next, collections, undo, null, Collections);
-        var retained = next.Where(clip => clip.HasImage).Select(clip => clip.Id).ToHashSet();
-        foreach (var clip in Clips)
+        if (discardOrphans)
         {
-            if (clip.HasImage && !retained.Contains(clip.Id)) LocalJson.Discard(ImagePath(clip.Id));
+            var retained = next.Where(clip => clip.HasImage).Select(clip => clip.ImageFileName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var clip in Clips)
+                if (clip.HasImage && !retained.Contains(clip.ImageFileName)) DiscardManagedFile(ImagePath(clip));
+            RemoveOrphanedArchives(packed.Values.Select(payload => payload.Hash).ToHashSet(StringComparer.OrdinalIgnoreCase));
         }
         Clips = next.AsReadOnly();
         Collections = collections.AsReadOnly();
         aiUndo = undo;
-        RemoveOrphanedArchives(packed.Values.Select(payload => payload.Hash).ToHashSet());
     }
 
     private void RemoveOrphanedImages()
     {
-        if (!Directory.Exists(imageDirectory)) return;
-        var retained = Clips.Where(clip => clip.HasImage).Select(clip => clip.Id).ToHashSet();
-        foreach (string path in Directory.EnumerateFiles(imageDirectory, "*.png"))
+        if (!LocalStorage.IsOrdinaryDirectory(imageDirectory)) return;
+        var retained = Clips.Where(clip => clip.HasImage).Select(clip => clip.ImageFileName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (string path in Directory.EnumerateFiles(imageDirectory))
         {
-            if (Guid.TryParseExact(Path.GetFileNameWithoutExtension(path), "N", out var id) && !retained.Contains(id))
-                LocalJson.Discard(path);
+            string extension = Path.GetExtension(path).ToLowerInvariant();
+            if (extension is ".png" or ".jpeg" or ".tiff" or ".gif" or ".bmp" or ".webp" or ".heic" or ".avif" &&
+                Guid.TryParseExact(Path.GetFileNameWithoutExtension(path), "N", out _) && !retained.Contains(Path.GetFileName(path)))
+                DiscardManagedFile(path);
         }
     }
 

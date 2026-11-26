@@ -65,6 +65,7 @@ try
         settings.ShouldIgnore("KEEPASSXC") && settings.ShouldIgnore("") && !settings.ShouldIgnore("Notepad"),
         "Persist settings and honor exclusions");
     CheckLibrary(root);
+    await CheckCleanup(root);
     Console.WriteLine("Windows history and settings checks passed.");
 }
 finally
@@ -75,6 +76,57 @@ finally
 static void Check(bool condition, string description)
 {
     if (!condition) throw new InvalidOperationException(description);
+}
+
+static async Task CheckCleanup(string root)
+{
+    string folder = Path.Combine(root, "cleanup");
+    var store = new HistoryStore(folder);
+    var today = DateTimeOffset.UtcNow;
+    var old = today.AddDays(-45);
+    var shared = new string('a', 4096) + " shared archive";
+    var expired = new Clip { Text = shared, CapturedAt = old, ArchivedAt = old };
+    var retained = new Clip { Kind = ClipKind.Code, Text = shared, CapturedAt = old, ArchivedAt = old, Favorite = true };
+    var attachment = new Clip { Kind = ClipKind.Image, ImageHash = "synthetic", ImageSize = 32_768, CapturedAt = old };
+    var protectedGroup = store.SaveCollection(null, "Protected", null);
+    var grouped = new Clip { Text = "grouped", CapturedAt = old, CollectionIds = [protectedGroup.Id] };
+    var member = new Clip { Text = "aggregate member", CapturedAt = old };
+    var pinned = new Clip { Text = "pinned", CapturedAt = old, Pinned = true };
+    var recentlyUsed = new Clip { Text = "recent paste", CapturedAt = old, LastPastedAt = today };
+    string original = Path.Combine(root, "referenced external file.txt");
+    File.WriteAllText(original, "external file kept by cleanup");
+    var reference = new Clip { Kind = ClipKind.Files, Files = [original], CapturedAt = old };
+    foreach (var clip in new[] { expired, retained, grouped, member, pinned, recentlyUsed, reference })
+        Check(store.Capture(clip), "Seed cleanup fixture");
+    Check(store.Capture(attachment, new byte[attachment.ImageSize]), "Seed a managed attachment");
+    store.SaveAggregation(null, "Protected aggregation", "", [member.Id, pinned.Id], null);
+
+    var cutoff = today.AddDays(-30);
+    var selection = await store.PreviewCleanupAsync(cutoff, 0);
+    var selectedIds = new HashSet<Guid> { expired.Id, attachment.Id, reference.Id };
+    Check(selection.Entries.Select(entry => entry.Id).ToHashSet().SetEquals(selectedIds), "Preview excludes recent use and protected history");
+    Check(store.SearchIds("referenced external file").SequenceEqual([reference.Id]), "Index the external file reference");
+    Check((await store.PreviewCleanupAsync(cutoff, 32_768)).Entries.Count == 0, "Match both conditions and respect an exact size boundary");
+    string image = Directory.GetFiles(Path.Combine(folder, "images")).Single();
+    Check(selection.ReclaimableBytes == LocalStorage.AllocatedBytes(image) && selection.ReclaimableBytes > 0,
+        "Estimate allocated space for only the unshared attachment");
+    Check(store.Update(attachment.Id, clip => clip with { Favorite = true }), "Change protection after preview");
+    try
+    {
+        store.CleanHistory(selection);
+        throw new InvalidOperationException("Expected a stale cleanup preview to fail");
+    }
+    catch (IOException) { }
+    Check(store.Clips.Any(clip => clip.Id == attachment.Id) && File.Exists(image), "Stale cleanup leaves the catalog and files intact");
+
+    Check(store.Update(attachment.Id, clip => clip with { Favorite = false }), "Restore the fixture selection");
+    var current = await store.PreviewCleanupAsync(cutoff, 0);
+    var result = store.CleanHistory(current);
+    var reopened = new HistoryStore(folder);
+    Check(result is { DeletedCount: 3, FailedFiles: 0 } && result.ReclaimedBytes == current.ReclaimableBytes &&
+        !File.Exists(image) && File.Exists(original) && reopened.Clips.Single(clip => clip.Id == retained.Id).Text == shared &&
+        reopened.SearchIds("referenced external file").Count == 0 && reopened.Clips.All(clip => !selectedIds.Contains(clip.Id)),
+        "Delete only previewed records, keeping shared archives and original external files");
 }
 
 static void CheckLibrary(string root)

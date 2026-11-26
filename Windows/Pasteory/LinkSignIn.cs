@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading;
@@ -15,8 +17,24 @@ namespace Pasteory.Windows;
 internal sealed class LinkSignIn
 {
     private readonly SemaphoreSlim queue = new(1);
+    private int interactiveWindows;
+    private TaskCompletionSource? cacheClearance;
+    internal bool IsBusy => interactiveWindows != 0 || queue.CurrentCount == 0;
+    internal event Action? BecameIdle;
 
     internal async Task<bool> ShowAsync(string root, LinkSignInRule rule, Window owner)
+    {
+        if (cacheClearance is { } clearing) await clearing.Task;
+        interactiveWindows++;
+        try { return await ShowWindowAsync(root, rule, owner); }
+        finally
+        {
+            interactiveWindows--;
+            SignalIdle();
+        }
+    }
+
+    private async Task<bool> ShowWindowAsync(string root, LinkSignInRule rule, Window owner)
     {
         if (!Uri.TryCreate(rule.SignInUrl, UriKind.Absolute, out var uri) || !LinkResolver.Allowed(uri)) return false;
         var web = new WebView2();
@@ -101,8 +119,8 @@ internal sealed class LinkSignIn
         }
         finally
         {
-            controller?.Close();
-            queue.Release();
+            try { controller?.Close(); }
+            finally { queue.Release(); SignalIdle(); }
         }
     }
 
@@ -120,9 +138,68 @@ internal sealed class LinkSignIn
         }
         finally
         {
-            controller?.Close();
+            try { controller?.Close(); }
+            finally { queue.Release(); SignalIdle(); }
+        }
+    }
+
+    internal async Task<int?> ClearNetworkCachesAsync(string root, nint parent, CancellationToken cancellation)
+    {
+        await queue.WaitAsync(cancellation);
+        try
+        {
+            if (interactiveWindows != 0) return null;
+            cacheClearance = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            int cleaned = 0;
+            foreach (string folder in ExistingProfiles(root))
+            {
+                cancellation.ThrowIfCancellationRequested();
+                var environment = await CoreWebView2Environment.CreateAsync(userDataFolder: folder);
+                var controller = await environment.CreateCoreWebView2ControllerAsync(parent);
+                try
+                {
+                    controller.IsVisible = false;
+                    await controller.CoreWebView2.Profile.ClearBrowsingDataAsync(CoreWebView2BrowsingDataKinds.DiskCache);
+                    cleaned++;
+                }
+                finally { controller.Close(); }
+            }
+            return cleaned;
+        }
+        finally
+        {
+            cacheClearance?.TrySetResult();
+            cacheClearance = null;
             queue.Release();
         }
+    }
+
+    internal static long NetworkCacheBytes(string root)
+    {
+        var options = new EnumerationOptions
+        {
+            RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint
+        };
+        return ExistingProfiles(root).SelectMany(profile => Directory.EnumerateFiles(profile, "*", options).Where(path =>
+            Path.GetRelativePath(profile, path).Split(Path.DirectorySeparatorChar).SkipLast(1)
+                .Any(part => part is "Cache" or "Code Cache"))).Sum(LocalStorage.AllocatedBytes);
+    }
+
+    private static IEnumerable<string> ExistingProfiles(string root)
+    {
+        string sessions = Path.Combine(root, "web-sessions");
+        var parent = new DirectoryInfo(sessions);
+        if (!parent.Exists || parent.Attributes.HasFlag(FileAttributes.ReparsePoint)) yield break;
+        foreach (var folder in parent.EnumerateDirectories())
+        {
+            if (Guid.TryParseExact(folder.Name, "N", out _) && !folder.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                yield return folder.FullName;
+        }
+    }
+
+    private void SignalIdle()
+    {
+        if (!IsBusy) BecameIdle?.Invoke();
     }
 
     private static Task<CoreWebView2Environment> CreateEnvironment(string root, LinkSignInRule rule) =>

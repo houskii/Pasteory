@@ -108,6 +108,7 @@ internal static partial class Program
         using var server = new TcpListener(IPAddress.Loopback, 0);
         server.Start();
         int port = ((IPEndPoint)server.LocalEndpoint).Port;
+        int cacheRequests = 0;
         var serve = Task.Run(async () =>
         {
             try
@@ -125,12 +126,15 @@ internal static partial class Program
                         hasSession |= line.Contains("pasteory_qa=1", StringComparison.Ordinal);
                     bool signin = first.StartsWith("GET /session ", StringComparison.Ordinal);
                     bool needsSession = first.StartsWith("GET /private ", StringComparison.Ordinal);
+                    bool cacheable = first.StartsWith("GET /cache ", StringComparison.Ordinal);
+                    if (cacheable) Interlocked.Increment(ref cacheRequests);
                     int status = needsSession && !hasSession ? 401 : 200;
                     string title = signin ? "Sign-in test fixture" : needsSession ? "Authenticated sample" : "Anonymous sample";
                     const string type = "Content-Type: text/html; charset=utf-8\r\n";
                     var body = Encoding.UTF8.GetBytes($"<!doctype html><title>{title}</title>");
                     string cookie = signin ? "Set-Cookie: pasteory_qa=1; Path=/; Max-Age=120\r\n" : "";
-                    var head = Encoding.ASCII.GetBytes($"HTTP/1.1 {status} {(status == 200 ? "OK" : "Unauthorized")}\r\n{type}{cookie}Content-Length: {body.Length}\r\nConnection: close\r\n\r\n");
+                    string cache = cacheable ? "Cache-Control: public, max-age=3600\r\n" : "Cache-Control: no-store\r\n";
+                    var head = Encoding.ASCII.GetBytes($"HTTP/1.1 {status} {(status == 200 ? "OK" : "Unauthorized")}\r\n{type}{cookie}{cache}Content-Length: {body.Length}\r\nConnection: close\r\n\r\n");
                     await stream.WriteAsync(head, stop.Token);
                     await stream.WriteAsync(body, stop.Token);
                 }
@@ -151,8 +155,16 @@ internal static partial class Program
             await sessions.ResolveAsync(root, rule, new Uri(url + "/session"), hwnd, stop.Token);
             var authenticated = await sessions.ResolveAsync(root, rule, new Uri(url + "/private"), hwnd, stop.Token);
             Check(authenticated.Title == "Authenticated sample", "Keep WebView2 site cookies in the isolated resolution profile");
+            var cacheUrl = new Uri(url + "/cache");
+            await sessions.ResolveAsync(root, rule, cacheUrl, hwnd, stop.Token);
+            await sessions.ResolveAsync(root, rule, cacheUrl, hwnd, stop.Token);
+            Check(Volatile.Read(ref cacheRequests) == 1 && LinkSignIn.NetworkCacheBytes(root) > 0, "Use and measure the WebView2 network cache");
+            Check(await sessions.ClearNetworkCachesAsync(root, hwnd, stop.Token) == 1, "Clear network cache for the managed profile");
+            await sessions.ResolveAsync(root, rule, cacheUrl, hwnd, stop.Token);
+            Check(Volatile.Read(ref cacheRequests) == 2 && (await sessions.ResolveAsync(root, rule, new Uri(url + "/private"), hwnd, stop.Token)).Title == "Authenticated sample",
+                "Refetch a cached page while keeping the authenticated session");
             Check((await anonymous.ResolveAsync(url + "/private", stop.Token)).Status == "Sign-in required", "Separate anonymous link requests from WebView2 cookies");
-            Console.WriteLine("Anonymous and isolated WebView2 link resolution passed.");
+            Console.WriteLine("Anonymous title resolution, WebView2 login, and cache clearance passed.");
         }
         finally
         {

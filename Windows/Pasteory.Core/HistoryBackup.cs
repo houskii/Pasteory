@@ -13,12 +13,13 @@ public sealed partial class HistoryStore
         LocalJson.WriteFile(destination, file =>
         {
             using var zip = new ZipArchive(file, ZipArchiveMode.Create, leaveOpen: true);
+            int version = Clips.Any(clip => clip.HasImage && clip.ImageFormat != ClipImageFormat.Png) ? 3 : 2;
             using (var index = zip.CreateEntry("pasteory-history.json").Open())
-                JsonSerializer.Serialize(index, new LibraryState(Clips.ToList(), Collections.ToList()));
+                JsonSerializer.Serialize(index, new LibraryState(Clips.ToList(), Collections.ToList(), Version: version));
             foreach (var clip in Clips.Where(clip => clip.HasImage))
             {
-                using var image = File.OpenRead(ImagePath(clip.Id));
-                using var exported = zip.CreateEntry($"images/{clip.Id:N}.png", CompressionLevel.NoCompression).Open();
+                using var image = File.OpenRead(ImagePath(clip));
+                using var exported = zip.CreateEntry($"images/{clip.ImageFileName}", CompressionLevel.NoCompression).Open();
                 image.CopyTo(exported);
             }
         });
@@ -30,13 +31,15 @@ public sealed partial class HistoryStore
         var entry = zip.GetEntry("pasteory-history.json") ?? throw new InvalidDataException("Missing backup catalog.");
         using var index = entry.Open();
         var state = JsonSerializer.Deserialize<LibraryState>(index) ?? throw new InvalidDataException("Missing backup catalog.");
-        if (state.Version != 2 || state.Clips.Select(clip => clip.Id).Distinct().Count() != state.Clips.Count ||
+        if (state.Version is not (2 or 3) || state.Clips.Any(clip => !Enum.IsDefined(clip.ImageFormat) ||
+                state.Version == 2 && clip.ImageFormat != ClipImageFormat.Png) ||
+            state.Clips.Select(clip => clip.Id).Distinct().Count() != state.Clips.Count ||
             state.Collections.Select(group => group.Id).Distinct().Count() != state.Collections.Count)
             throw new InvalidDataException("Unsupported or invalid backup.");
 
         return ImportClips(state.Clips, state.Collections, clip =>
         {
-            var entry = zip.GetEntry($"images/{clip.Id:N}.png");
+            var entry = zip.GetEntry($"images/{clip.ImageFileName}");
             if (entry is null || entry.Length is < 1 or > MaxImageBytes || entry.Length != clip.ImageSize)
                 throw new InvalidDataException("Missing or invalid image in backup.");
             using var payload = entry.Open();
@@ -95,7 +98,7 @@ public sealed partial class HistoryStore
                 if (clip.HasImage)
                 {
                     byte[] image = readImage(item);
-                    string path = ImagePath(clip.Id);
+                    string path = ImagePath(clip);
                     LocalJson.WriteFile(path, file => file.Write(image));
                     written.Add(path);
                 }

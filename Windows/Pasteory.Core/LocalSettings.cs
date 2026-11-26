@@ -46,6 +46,8 @@ public sealed record LocalSettings
     public bool ResolveLinks { get; init; }
     public LinkSignInRule[] LinkSignIns { get; init; } = [];
     public LinkFallbackRule[] LinkFallbacks { get; init; } = [];
+    public bool AutomaticWebCacheCleanup { get; init; } = true;
+    public DateTimeOffset? LastWebCacheCleanup { get; init; }
     public int ArchiveAfterDays { get; init; } = 30;
     public string? BrowserPath { get; init; }
     public string? CodeEditorPath { get; init; }

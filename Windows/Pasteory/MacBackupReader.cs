@@ -6,7 +6,6 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Windows.Media.Imaging;
 using LzfseSharp;
 using Pasteory.Core;
 
@@ -48,7 +47,7 @@ internal sealed class MacBackupReader(string root)
             var existing = collections.Select(group => group.Id).ToHashSet();
             foreach (var missing in clips.SelectMany(clip => clip.CollectionIds).Distinct().Where(id => !existing.Contains(id)))
                 collections.Add(new ClipCollection(missing, "Recovered " + missing.ToString("D")));
-            int count = store.ImportClips(clips, collections, clip => File.ReadAllBytes(Path.Combine(staging, $"{clip.Id:N}.png")));
+            int count = store.ImportClips(clips, collections, clip => File.ReadAllBytes(Path.Combine(staging, clip.ImageFileName)));
             return (count, fallback);
         }
         finally
@@ -83,11 +82,10 @@ internal sealed class MacBackupReader(string root)
 
         string? text = null, html = null, rtf = null;
         var files = new List<string>();
-        byte[]? png = null;
-        int width = 0, height = 0;
+        ClipboardImage? image = null;
         foreach (var selection in Array(item, "items").OrderBy(selection => Int(selection, "order")))
         {
-            foreach (var rep in Array(selection, "representations"))
+            foreach (var rep in Array(selection, "representations").OrderBy(rep => ImagePriority(String(rep, "uti"))))
             {
                 string uti = String(rep, "uti");
                 var storage = Child(rep, "storage");
@@ -113,8 +111,9 @@ internal sealed class MacBackupReader(string root)
                         files.Add(Uri.TryCreate(file, UriKind.Absolute, out var reference) && reference.IsFile
                             ? Uri.UnescapeDataString(reference.AbsolutePath) : file);
                         break;
-                    case "public.png" or "public.jpeg" or "public.tiff" or "com.compuserve.gif" or "com.microsoft.bmp" when png is null:
-                        (png, width, height) = ToPng(ReadRepresentation(storage));
+                    case var type when image is null && (kind is ClipKind.Image or ClipKind.Mixed) && ImagePriority(type) < int.MaxValue:
+                        image = ClipboardImage.Read(ReadRepresentation(storage), 48_000_000)
+                            ?? throw new InvalidDataException("The Mac backup contains an invalid or oversized image.");
                         break;
                 }
             }
@@ -124,35 +123,30 @@ internal sealed class MacBackupReader(string root)
         if (paths.Length > 0) files = paths.ToList();
         else if (files.Count == 0) files.AddRange(Strings(fileDetails, "fileNames"));
 
-        if (png is not null)
+        if (image is not null)
         {
-            File.WriteAllBytes(Path.Combine(staging, $"{id:N}.png"), png);
-            clip = clip with { ImageSize = png.Length, ImageWidth = width, ImageHeight = height,
-                ImageHash = Convert.ToHexString(SHA256.HashData(png)) };
+            clip = clip with
+            {
+                ImageFormat = image.Format, ImageSize = image.Bytes.Length, ImageWidth = image.Width, ImageHeight = image.Height,
+                ImageHash = Convert.ToHexString(SHA256.HashData(image.Bytes))
+            };
+            File.WriteAllBytes(Path.Combine(staging, clip.ImageFileName), image.Bytes);
         }
         else if (kind == ClipKind.Image)
         {
             clip = clip with { Kind = ClipKind.Text };
             text ??= $"[Mac image] {String(item, "previewText")}";
         }
-        if (text is null && html is null && rtf is null && png is null && files.Count == 0) text = String(item, "previewText");
+        if (text is null && html is null && rtf is null && image is null && files.Count == 0) text = String(item, "previewText");
         return clip with { Text = text, Html = html, Rtf = rtf, Files = files.Where(path => path.Length > 0).Distinct().ToArray() };
     }
 
-    private static (byte[] Png, int Width, int Height) ToPng(byte[] bytes)
+    private static int ImagePriority(string uti) => uti switch
     {
-        using var stream = new MemoryStream(bytes, writable: false);
-        var decoder = BitmapDecoder.Create(stream, BitmapCreateOptions.DelayCreation, BitmapCacheOption.None);
-        var frame = decoder.Frames[0];
-        if (frame.PixelWidth <= 0 || frame.PixelHeight <= 0 || (long)frame.PixelWidth * frame.PixelHeight > 48_000_000)
-            throw new InvalidDataException("The Mac backup contains an oversized image.");
-        var output = new PngBitmapEncoder();
-        output.Frames.Add(frame);
-        using var encoded = new MemoryStream();
-        output.Save(encoded);
-        if (encoded.Length > MaximumRepresentation) throw new InvalidDataException("The Mac backup contains an oversized image.");
-        return (encoded.ToArray(), frame.PixelWidth, frame.PixelHeight);
-    }
+        "public.png" => 0, "public.jpeg" => 1, "public.heic" or "public.heif" => 2, "public.tiff" => 3,
+        "com.compuserve.gif" or "com.microsoft.bmp" or "org.webmproject.webp" or "public.webp" or "public.avif" => 4,
+        _ => int.MaxValue
+    };
 
     private byte[] ReadRepresentation(JsonElement storage)
     {

@@ -1,6 +1,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Collections.Specialized;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -22,6 +23,65 @@ using Pasteory.Windows;
 
 internal static partial class Program
 {
+    private static (DataObject Replay, byte[] Bytes, string[] Files) CheckOriginalImages()
+    {
+        byte[] jpeg = SampleImage(new JpegBitmapEncoder { QualityLevel = 93 });
+        string temporary = Path.Combine(Path.GetTempPath(), "pasteory-qa-image.jpeg");
+        string[] paths = [temporary, Path.Combine(Path.GetTempPath(), "pasteory-qa-companion.txt")];
+        var source = new DataObject();
+        source.SetText("Mixed image with file references");
+        source.SetData("JFIF", new MemoryStream(jpeg, writable: false), false);
+        var references = new StringCollection();
+        references.AddRange(paths);
+        source.SetFileDropList(references);
+        var captured = ClipboardFormats.Read(source, "Weixin")!.Value;
+        Check(captured.Clip is { Kind: ClipKind.Mixed, ImageFormat: ClipImageFormat.Jpeg, ImageWidth: 13, ImageHeight: 7 } &&
+            captured.Clip.Files.SequenceEqual(paths) && captured.Image!.SequenceEqual(jpeg),
+            "Keep a JPEG and its dimensions when files and text are also present");
+        var explorer = ClipboardFormats.Read(source, "explorer")!.Value;
+        Check(explorer.Clip.Kind == ClipKind.Files && explorer.Clip.Files.SequenceEqual(paths) && explorer.Image is null,
+            "Do not treat an Explorer file icon as a clipboard image");
+        var replay = ClipboardFormats.Create(captured.Clip, false, captured.Image);
+        Check(ReadClipboardBytes(replay, "JFIF").SequenceEqual(jpeg) && replay.GetFileDropList().Cast<string>().SequenceEqual(paths) &&
+            replay.GetImage().PixelWidth == 13 && replay.GetText() == captured.Clip.Text, "Restore the full Windows clipboard selection");
+
+        using var image = new MemoryStream(SampleImage(new TiffBitmapEncoder()), writable: false);
+        var tiff = new DataObject(DataFormats.Tiff, image);
+        var alternate = ClipboardFormats.Read(tiff, "Editor")!.Value;
+        Check(alternate.Clip.ImageFormat == ClipImageFormat.Tiff && alternate.Clip.ImageHeight == 7 &&
+            ReadClipboardBytes(ClipboardFormats.Create(alternate.Clip, false, alternate.Image), DataFormats.Tiff).SequenceEqual(image.ToArray()),
+            "Restore a TIFF without converting or changing its bytes");
+
+        string root = Directory.CreateTempSubdirectory("Pasteory-original-images-").FullName;
+        try
+        {
+            var library = new HistoryStore(Path.Combine(root, "capture"));
+            string backup = Path.Combine(root, "backup.zip");
+            Check(library.Capture(captured.Clip, captured.Image), "Keep the original file in managed storage");
+            library.ExportBackup(backup);
+            var restored = new HistoryStore(Path.Combine(root, "restored"));
+            Check(restored.ImportBackup(backup) == 1 && restored.Clips[0].ImageFormat == ClipImageFormat.Jpeg &&
+                restored.ReadImage(restored.Clips[0]).SequenceEqual(jpeg), "Round-trip the versioned backup with original encoded bytes");
+        }
+        finally { Directory.Delete(root, recursive: true); }
+        return (replay, jpeg, paths);
+    }
+
+    private static byte[] ReadClipboardBytes(IDataObject clipboard, string format) => clipboard.GetData(format, false) switch
+    {
+        MemoryStream stream => stream.ToArray(), byte[] bytes => bytes, _ => []
+    };
+
+    private static byte[] SampleImage(BitmapEncoder encoder, int width = 13, int height = 7)
+    {
+        var bitmap = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgr24, null,
+            Enumerable.Repeat((byte)140, width * height * 3).ToArray(), width * 3);
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        using var output = new MemoryStream();
+        encoder.Save(output);
+        return output.ToArray();
+    }
+
     private static void CheckMacBackup()
     {
         string root = Directory.CreateTempSubdirectory("Pasteory-MacBackup-QA-").FullName;
@@ -55,7 +115,27 @@ internal static partial class Program
                     type = "archived", relativePath = "clip.lzfse", checksum = Convert.ToHexString(SHA256.HashData(raw)), size = raw.Length
                 } } } } }
             };
-            Add("clips.jsonl", JsonSerializer.SerializeToUtf8Bytes(clip));
+            byte[] jpeg = SampleImage(new JpegBitmapEncoder());
+            Guid pictureId = Guid.NewGuid(), referenceId = Guid.NewGuid();
+            object ImageClip(Guid clipId, string kind) => new
+            {
+                id = clipId, createdAt = DateTimeOffset.UtcNow, primaryKind = kind,
+                source = new { appName = "Finder" },
+                items = new[]
+                {
+                    new
+                    {
+                        order = 0, representations = new[]
+                        {
+                            new { uti = "public.jpeg", storage = new { type = "inline", data = jpeg } },
+                            new { uti = "public.file-url", storage = new
+                                { type = "inline", data = Encoding.UTF8.GetBytes("file:///Users/qa/picture.jpeg") } }
+                        }
+                    }
+                }
+            };
+            Add("clips.jsonl", Encoding.UTF8.GetBytes(string.Join("\n", new object[] { clip, ImageClip(pictureId, "image"), ImageClip(referenceId, "file") }
+                .Select(item => JsonSerializer.Serialize(item)))));
             Add("collections.json", JsonSerializer.SerializeToUtf8Bytes(new[]
             {
                 new { id = group, name = "Mac group", kind = "normal", sortOrder = 0 }
@@ -63,9 +143,15 @@ internal static partial class Program
             File.WriteAllBytes(Path.Combine(backup, "manifest.json"),
                 JsonSerializer.SerializeToUtf8Bytes(new { formatVersion = 5, fileChecksums = manifest }));
             var store = new HistoryStore(Path.Combine(root, "history"));
-            Check(new MacBackupReader(backup).Import(store).Count == 1 && store.Clips.Single().Text == text &&
-                store.Clips[0].ArchivedAt is not null && store.Clips[0].CollectionIds.SequenceEqual([group]) &&
-                store.Clips[0].CopyCount == 3, "Import Mac v5 archive and its metadata");
+            Check(new MacBackupReader(backup).Import(store).Count == 3, "Import Mac v5 archived and inline items");
+            var archived = store.Clips.Single(item => item.Id == id);
+            Check(archived.Text == text && archived.ArchivedAt is not null && archived.CollectionIds.SequenceEqual([group]) &&
+                archived.CopyCount == 3, "Import Mac v5 archive and its metadata");
+            var picture = store.Clips.Single(item => item.Id == pictureId);
+            var reference = store.Clips.Single(item => item.Id == referenceId);
+            Check(picture is { ImageFormat: ClipImageFormat.Jpeg, ImageWidth: 13, ImageHeight: 7 } &&
+                store.ReadImage(picture).SequenceEqual(jpeg) && reference.Kind == ClipKind.Files &&
+                !reference.HasImage && reference.Files.Length == 1, "Keep Mac image bytes and leave file references as files");
             File.AppendAllText(Path.Combine(backup, "clips.jsonl"), "\n");
             try
             {
@@ -73,7 +159,7 @@ internal static partial class Program
                 throw new InvalidOperationException("Expected Mac backup checksum rejection");
             }
             catch (InvalidDataException) { }
-            Check(store.Clips.Count == 1, "Reject altered Mac backup without changing existing clips");
+            Check(store.Clips.Count == 3, "Reject altered Mac backup without changing existing clips");
         }
         finally { Directory.Delete(root, recursive: true); }
     }

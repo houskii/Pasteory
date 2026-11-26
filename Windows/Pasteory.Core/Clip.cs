@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 namespace Pasteory.Core;
 
 public enum ClipKind { Text, Link, Image, Files, Color, Code, Mixed, Aggregate }
+public enum ClipImageFormat { Png, Jpeg, Tiff, Gif, Bmp, WebP, Heif, Avif }
 
 public sealed record CaptureEvent(DateTimeOffset CapturedAt, string Source, string? Context = null, string? Url = null,
     Dictionary<string, string>? Details = null);
@@ -34,6 +35,8 @@ public sealed record Clip
     public string[] Files { get; init; } = [];
     public string? FileIdentity { get; init; }
     public string? ImageHash { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public ClipImageFormat ImageFormat { get; init; }
     public int ImageSize { get; init; }
     public int ImageWidth { get; init; }
     public int ImageHeight { get; init; }
@@ -63,6 +66,17 @@ public sealed record Clip
 
     [JsonIgnore]
     public bool HasImage => ImageSize > 0 || Kind == ClipKind.Image;
+
+    [JsonIgnore]
+    public string ImageExtension => ImageFormat switch
+    {
+        ClipImageFormat.Jpeg => "jpeg", ClipImageFormat.Tiff => "tiff", ClipImageFormat.Gif => "gif",
+        ClipImageFormat.Bmp => "bmp", ClipImageFormat.WebP => "webp", ClipImageFormat.Heif => "heic",
+        ClipImageFormat.Avif => "avif", _ => "png"
+    };
+
+    [JsonIgnore]
+    public string ImageFileName => $"{Id:N}.{ImageExtension}";
 
     [JsonIgnore]
     public string DisplayTitle => Title.Length > 0 ? Title : LinkDetails?.Title ?? LinkDetails?.FallbackTitle ?? "";

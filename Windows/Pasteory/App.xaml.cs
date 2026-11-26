@@ -109,7 +109,7 @@ public partial class App : Application
             Settings = LocalSettings.Load(dataDirectory);
             Labels.Language = Settings.Language;
             Theme.Apply(Resources, Settings);
-            history = new HistoryStore(dataDirectory, maxClips: 20_000, maxBytes: 1024L * 1024 * 1024, archiveOverflow: true);
+            history = new HistoryStore(dataDirectory, maxClips: 10_000, maxBytes: 1024L * 1024 * 1024, archiveOverflow: true);
             history.RunMaintenance(DateTimeOffset.Now, Settings.ArchiveAfterDays);
             history.UpdateLinkDetails(LinkFallback);
             Ai = new AiTasks(dataDirectory);
@@ -136,8 +136,10 @@ public partial class App : Application
         {
             ChangeHistory(() => history.RunMaintenance(DateTimeOffset.Now, Settings.ArchiveAfterDays));
             CheckUpdateIfDue();
+            ScheduleWebCacheCheck();
         };
         maintenance.Start();
+        StartWebCache();
         aiTimer.Tick += (_, _) => AiTick();
         aiTimer.Start();
         _ = ChromeBridge.ReceiveAsync(dataDirectory, ChromeEventAsync, lifetime.Token);
@@ -402,6 +404,7 @@ public partial class App : Application
         bool pausedChanged = Settings.Paused != next.Paused;
         bool themeChanged = Settings.Theme != next.Theme || Settings.Appearance != next.Appearance;
         bool linkRulesChanged = !Settings.LinkFallbacks.SequenceEqual(next.LinkFallbacks);
+        bool enableWebCacheCleanup = !Settings.AutomaticWebCacheCleanup && next.AutomaticWebCacheCleanup;
         bool aiScopeChanged = Settings.Ai.Enabled != next.Ai.Enabled || Settings.Ai.ShareNotes != next.Ai.ShareNotes ||
             Settings.Ai.ShareOcr != next.Ai.ShareOcr || Settings.Ai.ShareSource != next.Ai.ShareSource ||
             Settings.Ai.ShareResources != next.Ai.ShareResources || Settings.Ai.Endpoint != next.Ai.Endpoint ||
@@ -419,6 +422,7 @@ public partial class App : Application
             return false;
         }
         Settings = next;
+        if (enableWebCacheCleanup) ScheduleWebCacheCheck();
         if (linkRulesChanged) ChangeHistory(() => history.UpdateLinkDetails(LinkFallback));
         if (aiScopeChanged) Ai?.Pause();
         if (themeChanged) Theme.Apply(Resources, Settings);
@@ -474,6 +478,7 @@ public partial class App : Application
     {
         Exiting = true;
         maintenance.Stop();
+        StopWebCache();
         aiTimer.Stop();
         lifetime.Cancel();
         SystemEvents.UserPreferenceChanged -= OnSystemPreferenceChanged;
