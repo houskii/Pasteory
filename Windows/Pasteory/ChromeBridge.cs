@@ -204,6 +204,6 @@ internal static class ChromeBridge
         element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var field) &&
         field.ValueKind == JsonValueKind.String && field.GetString() is { } value ? value.Trim()[..Math.Min(value.Trim().Length, limit)] : "";
 
-    private static string PipeName(string root) => "Pasteory.Chrome." + Convert.ToHexString(
+    internal static string PipeName(string root) => "Pasteory.Chrome." + Convert.ToHexString(
         SHA256.HashData(Encoding.UTF8.GetBytes(root.ToUpperInvariant())))[..24];
 }

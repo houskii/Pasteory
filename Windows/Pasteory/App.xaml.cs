@@ -269,8 +269,7 @@ public partial class App : Application
         _ = Dispatcher.BeginInvoke(new Action(() =>
         {
             if (Exiting) return;
-            if (args.Reason == SessionSwitchReason.SessionLock) sessionLocked = true;
-            else if (args.Reason == SessionSwitchReason.SessionUnlock) sessionLocked = false;
+            sessionLocked = args.Reason == SessionSwitchReason.SessionLock;
             ResetClipboardObservation();
         }));
     }

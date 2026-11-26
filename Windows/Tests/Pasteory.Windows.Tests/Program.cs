@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Pipes;
 using System.Linq;
 using System.Text.Json;
 using System.Threading;
@@ -182,7 +183,9 @@ internal static partial class Program
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start the portable build");
         try
         {
-            Check(process.WaitForInputIdle(10000), "Start the portable app message loop");
+            // The app exposes this pipe after registering the clipboard listener.
+            using (var ready = new NamedPipeClientStream(".", ChromeBridge.PipeName(directory), PipeDirection.Out, PipeOptions.CurrentUserOnly))
+                ready.Connect(10_000);
             if (superseded is not null)
             {
                 Clipboard.SetText(superseded);
