@@ -255,12 +255,10 @@
             <Setter.Value>
                 <ControlTemplate TargetType="TabControl">
                     <DockPanel>
-                        <WrapPanel DockPanel.Dock="Top">
-                            <Border Padding="3" CornerRadius="9" Background="{DynamicResource SoftSurface}">
-                                <UniformGrid Rows="1" IsItemsHost="True" KeyboardNavigation.TabNavigation="Once"/>
-                            </Border>
-                            <ContentPresenter Content="{TemplateBinding Tag}" VerticalAlignment="Center"/>
-                        </WrapPanel>
+                        <Border DockPanel.Dock="Top" HorizontalAlignment="Left" Padding="3"
+                                CornerRadius="9" Background="{DynamicResource SoftSurface}">
+                            <UniformGrid Rows="1" IsItemsHost="True" KeyboardNavigation.TabNavigation="Once"/>
+                        </Border>
                         <ContentPresenter x:Name="PART_SelectedContentHost" ContentSource="SelectedContent"/>
                     </DockPanel>
                 </ControlTemplate>

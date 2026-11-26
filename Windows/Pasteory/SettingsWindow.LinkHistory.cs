@@ -38,6 +38,11 @@ internal sealed partial class SettingsWindow
         AutomationProperties.SetName(tabs, Labels.Get("Link resolution sections"));
         string[] sections = ["All links", "Pending", "Resolved", "Fallback rules", "Connections"];
         foreach (string section in sections) tabs.Items.Add(new TabItem { Header = Labels.Get(section) });
+        var sectionHost = new ContentControl
+        {
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalContentAlignment = VerticalAlignment.Stretch
+        };
 
         var counts = new System.Windows.Controls.Primitives.UniformGrid { Rows = 1, Margin = new Thickness(0, 5, 0, 0) };
         var resolved = Metric("Resolved", LinkHistorySection.Resolved, LinkHistoryIssue.All);
@@ -60,26 +65,29 @@ internal sealed partial class SettingsWindow
             inaccessible.Text = cannotAccess.ToString("N0");
         };
 
-        var commands = new WrapPanel { Margin = new Thickness(9, 0, 0, 0) };
+        var commands = new WrapPanel { Margin = new Thickness(9, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         AddAction(commands, "Refresh records", () =>
         {
             linkSnapshot = null;
-            if (linkSection is LinkHistorySection.Connections) BuildLinkTab((TabItem)tabs.SelectedItem);
+            if (linkSection == LinkHistorySection.Connections) BuildLinkTab(sectionHost);
             else RefreshLinkHistory();
         });
         AddAction(commands, "Add sign-in rule…", async () => await EditSignInAsync(null));
-        tabs.Tag = commands;
+        var toolbar = new WrapPanel();
+        toolbar.Children.Add(tabs);
+        toolbar.Children.Add(commands);
+        DockPanel.SetDock(toolbar, Dock.Top);
+        view.Children.Add(toolbar);
 
         tabs.SelectedIndex = (int)linkSection;
         tabs.SelectionChanged += (_, e) =>
         {
-            if (e.Source != tabs || tabs.SelectedItem is not TabItem selected) return;
-            if (e.RemovedItems.Count > 0 && e.RemovedItems[0] is TabItem previous) previous.Content = null;
+            if (e.Source != tabs || tabs.SelectedIndex < 0) return;
             linkSection = (LinkHistorySection)tabs.SelectedIndex;
-            BuildLinkTab(selected);
+            BuildLinkTab(sectionHost);
         };
-        BuildLinkTab((TabItem)tabs.SelectedItem);
-        view.Children.Add(tabs);
+        BuildLinkTab(sectionHost);
+        view.Children.Add(sectionHost);
         return view;
 
         TextBlock Metric(string title, LinkHistorySection section, LinkHistoryIssue issue)
@@ -104,7 +112,7 @@ internal sealed partial class SettingsWindow
         }
     }
 
-    private void BuildLinkTab(TabItem tab)
+    private void BuildLinkTab(ContentControl sectionHost)
     {
         linkHistoryList = null;
         linkIssuePicker = null;
@@ -115,9 +123,9 @@ internal sealed partial class SettingsWindow
             var settings = new StackPanel { Margin = new Thickness(0, 10, 5, 0) };
             if (linkSection == LinkHistorySection.Rules) BuildLinkRules(settings);
             else BuildLinkConnections(settings);
-            tab.Content = new ScrollViewer { Content = settings, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            sectionHost.Content = new ScrollViewer { Content = settings, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         }
-        else tab.Content = BuildLinkRecords();
+        else sectionHost.Content = BuildLinkRecords();
         RefreshLinkHistory();
     }
 
