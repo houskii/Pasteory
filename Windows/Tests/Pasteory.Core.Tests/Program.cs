@@ -16,6 +16,8 @@ try
     Check(reopened.Clips.Count == 2 && reopened.Clips[0].Id == first.Id && reopened.Clips[0].Pinned &&
         reopened.Clips[0].Favorite && reopened.Clips[0].Matches("项目") == false &&
         reopened.Clips[0].Matches("测试 meeting work neweditor project"), "Retain metadata and search all fields");
+    Check(reopened.SearchIds("测试 ＭＥＥＴＩＮＧ Work project").SequenceEqual([first.Id]) &&
+        reopened.SearchIds("测试 absence").Count == 0, "Index short Chinese and folded text across fields");
 
     byte[] png = [1, 2, 3];
     var image = new Clip { Kind = ClipKind.Image, ImageHash = "test-image", ImageSize = png.Length };
@@ -34,7 +36,7 @@ try
 
     string failure = Path.Combine(root, "write-failure");
     var failingStore = new HistoryStore(failure);
-    Directory.CreateDirectory(Path.Combine(failure, "history.json"));
+    Directory.CreateDirectory(Path.Combine(failure, HistoryStore.CatalogFileName));
     try
     {
         failingStore.Capture(image, png);
@@ -84,6 +86,12 @@ static void CheckLibrary(string root)
     var store = new HistoryStore(folder, maxClips: 3, archiveOverflow: true);
     var group = store.Collections.Single();
     Check(group.Name == "Design" && store.Clips[0].CollectionIds.SequenceEqual([group.Id]), "Migrate legacy groups");
+    string copied = File.ReadAllText(Path.Combine(folder, "history.json"));
+    Check(copied.Contains(text.Id.ToString()) && File.Exists(Path.Combine(folder, HistoryStore.CatalogFileName)) &&
+        store.SearchIds("design notes").SequenceEqual([text.Id]), "Migrate and index the original clip and group");
+    store.SaveCollection(group.Id, "DesignRetitled", null);
+    Check(store.SearchIds("DesignRetitled notes").SequenceEqual([text.Id]) &&
+        store.SearchIds("\"unknown\"").Count == 0, "Reindex group names and quote punctuation");
     var docs = new Clip { Kind = ClipKind.Link, Text = "https://EXAMPLE.com/project/?view=all", Source = "Chrome" };
     Check(store.Capture(docs) && store.Capture(docs with { Id = Guid.NewGuid(), Text = "https://example.com/project#latest" }),
         "Capture repeated link with different query and tracking");

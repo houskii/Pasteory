@@ -47,17 +47,54 @@ public static partial class TextTools
 
         if (text.Length > 128) return false;
         var match = Rgb().Match(text);
-        if (!match.Success || !byte.TryParse(match.Groups[2].Value, out byte r) ||
+        if (!match.Success) return TryHsl(text, out color);
+        if (!byte.TryParse(match.Groups[2].Value, out byte r) ||
             !byte.TryParse(match.Groups[3].Value, out byte g) || !byte.TryParse(match.Groups[4].Value, out byte b))
             return false;
-        bool hasAlpha = match.Groups[5].Success;
-        if (match.Groups[1].Success != hasAlpha) return false;
-        double opacity = 1;
-        if (hasAlpha && (!double.TryParse(match.Groups[5].Value, NumberStyles.AllowDecimalPoint,
-            CultureInfo.InvariantCulture, out opacity) || opacity is < 0 or > 1)) return false;
-        color = new(r, g, b, (byte)Math.Round(opacity * 255, MidpointRounding.AwayFromZero), hasAlpha);
+        if (!ReadAlpha(match, out byte opacity)) return false;
+        color = new(r, g, b, opacity, match.Groups[1].Success);
         return true;
     }
+
+    private static bool TryHsl(string text, out ColorValue color)
+    {
+        color = default;
+        var match = Hsl().Match(text);
+        if (!match.Success || !ReadAlpha(match, out byte alpha) ||
+            !ReadNumber(match.Groups[2].Value, out double hue) ||
+            !ReadNumber(match.Groups[3].Value, out double saturation) ||
+            !ReadNumber(match.Groups[4].Value, out double lightness)) return false;
+
+        hue = ((hue % 360) + 360) % 360 / 30;
+        saturation = Math.Clamp(saturation / 100, 0, 1);
+        lightness = Math.Clamp(lightness / 100, 0, 1);
+        double amplitude = saturation * Math.Min(lightness, 1 - lightness);
+        byte Component(int offset)
+        {
+            double sector = (offset + hue) % 12;
+            return ColorByte(lightness - amplitude * Math.Clamp(Math.Min(sector - 3, 9 - sector), -1, 1));
+        }
+        color = new(Component(0), Component(8), Component(4), alpha, match.Groups[1].Success);
+        return true;
+    }
+
+    private static bool ReadAlpha(Match match, out byte alpha)
+    {
+        alpha = 255;
+        var opacity = match.Groups[5];
+        if (match.Groups[1].Success != opacity.Success) return false;
+        if (!opacity.Success) return true;
+        if (!ReadNumber(opacity.Value, out double value) || value is < 0 or > 1) return false;
+        alpha = ColorByte(value);
+        return true;
+    }
+
+    private static bool ReadNumber(string text, out double value) =>
+        double.TryParse(text, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint,
+            CultureInfo.InvariantCulture, out value) && double.IsFinite(value);
+
+    private static byte ColorByte(double value) =>
+        (byte)Math.Round(Math.Clamp(value, 0, 1) * 255, MidpointRounding.AwayFromZero);
 
     public static (ClipKind Kind, string? Language) Classify(string? text)
     {
@@ -112,6 +149,8 @@ public static partial class TextTools
 
     [GeneratedRegex(@"^rgb(a)?\(\s*([0-9]{1,3})\s*,\s*([0-9]{1,3})\s*,\s*([0-9]{1,3})(?:\s*,\s*([0-9]*\.?[0-9]+))?\s*\)$", RegexOptions.IgnoreCase)]
     private static partial Regex Rgb();
+    [GeneratedRegex(@"^hsl(a)?\(\s*([-+]?[0-9]+(?:\.[0-9]+)?)(?:deg)?\s*,\s*([0-9]+(?:\.[0-9]+)?)%\s*,\s*([0-9]+(?:\.[0-9]+)?)%(?:\s*,\s*([0-9]*\.?[0-9]+))?\s*\)$", RegexOptions.IgnoreCase)]
+    private static partial Regex Hsl();
     [GeneratedRegex(@"%(?![0-9a-fA-F]{2})")]
     private static partial Regex InvalidEscape();
     [GeneratedRegex(@"(?:%[0-9a-fA-F]{2})+")]

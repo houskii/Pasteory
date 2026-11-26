@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -163,93 +164,95 @@ internal static class Ui
     }
 }
 
-internal sealed class ClipCard
+internal sealed record ImagePreview(BitmapSource? Bitmap, int Width, int Height, long Bytes)
+{
+    internal string Details => string.Join("\n",
+        Labels.Format("Image format: {0}", "png"),
+        Labels.Format("Image dimensions: {0}", Width > 0 && Height > 0 ? $"{Width} * {Height}" : "—"),
+        Labels.Format("File size: {0}", ClipCard.Bytes(Bytes)));
+}
+
+internal sealed class ClipCard : INotifyPropertyChanged
 {
     private readonly App app;
-    private readonly int? matchCount;
-    private readonly int memberCount;
-    private readonly bool expanded;
+    private readonly ClipListRow row;
+    private readonly bool compact;
 
-    internal ClipCard(App app, Clip clip, int memberCount, bool expanded, int? matchCount, Guid? parent)
+    internal ClipCard(App app, ClipListRow row, bool compact)
     {
         this.app = app;
-        this.memberCount = memberCount;
-        this.expanded = expanded;
-        this.matchCount = matchCount;
-        Clip = clip;
-        Parent = parent;
+        this.row = row;
+        this.compact = compact;
     }
 
-    public Clip Clip { get; }
-    public Guid? Parent { get; }
+    public Clip Clip => row.Clip;
+    public event PropertyChangedEventHandler? PropertyChanged;
+    public bool IsMissingFile { get; private set; }
+    internal void SetFileMissing(bool missing)
+    {
+        if (IsMissingFile == missing) return;
+        IsMissingFile = missing;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsMissingFile)));
+    }
+    public Guid? Parent => row.Parent;
     public bool IsChild => Parent is not null;
     public string Source => Clip.Kind == ClipKind.Aggregate ? Labels.Get("Aggregation") :
         Clip.Source.Equals("explorer", StringComparison.OrdinalIgnoreCase) ? Labels.Get("Explorer") : Clip.Source;
     public string Glyph => Windows.Glyph.ForKind(Clip.Kind);
-    public string Chevron => Clip.Kind == ClipKind.Aggregate ? expanded ? "⌄" : "›" : "";
-    public bool HasTitle => Clip.DisplayTitle.Length > 0 && Clip.Kind != ClipKind.Aggregate;
+    public string Chevron => Clip.Kind == ClipKind.Aggregate ? row.Expanded ? "⌄" : "›" : "";
+    public bool HasTitle => !IsChild && Clip.DisplayTitle.Length > 0 && Clip.Kind != ClipKind.Aggregate;
     public string Title => "◆  " + Clip.DisplayTitle;
-    public string Note => "▫  " + Short(Clip.Note, 100, 1);
-    public bool HasNote => Clip.Note.Length > 0;
+    public string Note => row.MatchSummary ?? ("▫  " + Short(Clip.Note, 100, 1));
+    public bool HasNote => IsChild ? row.MatchSummary is not null : Clip.Note.Length > 0;
+    public bool IsEditedChild => IsChild && (Clip.Title.Length > 0 || Clip.Note.Length > 0);
+    public bool HasGroups => Clip.CollectionIds.Length > 0;
     public bool IsFile => Clip.Files.Length > 0 && !Clip.HasImage;
+    public bool HasImage => Clip.HasImage;
+    public bool IsPlainPreview => !IsFile && !HasImage;
     public bool IsCode => Clip.Kind == ClipKind.Code;
     public bool IsLink => Clip.Kind == ClipKind.Link;
     public bool IsColor => Clip.Kind == ClipKind.Color;
-    public int CompactHeight => Clip.Kind switch
+    public double SourceWidth => compact ? 54 : 60;
+    public double SourceIconSize => compact ? 38 : 46;
+    public double ContentImageWidth => compact ? 52 : 60;
+    public int CompactHeight => HasImage ? Math.Max(102, 90 + (HasTitle ? 18 : 0) + (HasNote ? 17 : 0)) : Clip.Kind switch
     {
-        ClipKind.Code or ClipKind.Files => 94, ClipKind.Image or ClipKind.Mixed => 88, ClipKind.Link => 84, _ => 74
+        ClipKind.Code or ClipKind.Files => 96, ClipKind.Link => 86, _ => 72
     };
-    public int LibraryHeight => Clip.Kind switch
+    public int LibraryHeight => HasImage ? Math.Max(132, 109 + (HasTitle ? 19 : 0) + (HasNote ? 18 : 0)) : Clip.Kind switch
     {
-        ClipKind.Code or ClipKind.Files => 104, ClipKind.Image or ClipKind.Mixed => 95, ClipKind.Link => 92, _ => 84
+        ClipKind.Code or ClipKind.Files => 104, ClipKind.Link => 92, _ => 82
     };
-    public bool HasThumbnail => Clip.HasImage && Thumbnail is not null;
-    public ImageSource? Thumbnail => Clip.HasImage ? app.ClipThumbnail(Clip) : null;
+    public bool NeedsImageFallback => HasImage && Thumbnail is null;
+    public ImageSource? Thumbnail => HasImage ? app.ClipThumbnail(Clip).Bitmap : null;
+    public string ImageDetails => HasImage ? app.ClipThumbnail(Clip).Details : "";
+    public string ImageText => !HasImage ? "" : Clip.RecognizedText switch
+    {
+        null => Labels.Get("No recognized text yet"),
+        "" => Labels.Get("No text detected"),
+        var value => Short(value.Trim(), 1200, 3)
+    };
     public ImageSource? AppIcon => app.SourceIcon(Clip.SourcePath);
     public Brush? ColorSwatch => IsColor && TextTools.TryColor(Clip.Text, out var value)
         ? new SolidColorBrush(Color.FromArgb(value.A, value.R, value.G, value.B)) : null;
-
-    public string FileExtension => Clip.Files.Length > 1 ? $"+{Clip.Files.Length}" :
-        Clip.Files.Length == 1 ? Path.GetExtension(Clip.Files[0]).TrimStart('.').ToUpperInvariant() : "";
-    public bool HasFileDetails => IsFile && Clip.Files.Length == 1;
-    public string FileDetails
-    {
-        get
-        {
-            if (!HasFileDetails) return "";
-            string path = Clip.Files[0];
-            string folder = Path.GetDirectoryName(path) ?? "";
-            if (folder.Length > 36) folder = folder[..14] + "…" + folder[^20..];
-            try
-            {
-                if (!path.StartsWith(@"\\", StringComparison.Ordinal) && new FileInfo(path) is { Exists: true } file)
-                    return $"{folder}  {Bytes(file.Length)}";
-            }
-            catch (Exception error) when (App.IsLocalError(error) || error is ArgumentException) { }
-            return folder;
-        }
-    }
 
     public string Body
     {
         get
         {
             if (Clip.Kind == ClipKind.Aggregate) return Clip.Title.Length > 0 ? Clip.Title : Labels.Get("Aggregation");
-            if (Clip.HasImage)
-            {
-                if (!string.IsNullOrWhiteSpace(Clip.RecognizedText)) return Short(Clip.RecognizedText, 140, 3);
-                string dimensions = Clip.ImageWidth > 0 ? $"{Clip.ImageWidth} × {Clip.ImageHeight}" : Labels.Get("Image");
-                string label = Clip.Kind == ClipKind.Mixed ? Labels.Get("Mixed content") : "PNG";
-                return $"{label}\n{dimensions}\n{Bytes(Clip.ImageSize)}";
-            }
-            if (Clip.Files.Length > 1) return Labels.Format("{0} files", Clip.Files.Length) + "\n" +
-                Short(string.Join(", ", Clip.Files.Take(3).Select(Path.GetFileName)), 96, 1);
-            if (Clip.Files.Length == 1)
-            {
-                string file = Clip.Files[0];
-                return Path.GetFileName(file);
-            }
             return Short(Clip.Text ?? Labels.Get("Rich text"), 240, IsCode ? 3 : IsLink ? 2 : 1);
+        }
+    }
+
+    public string AccessibleName
+    {
+        get
+        {
+            string content = HasImage ? Labels.Get("Image") :
+                IsFile ? string.Join(", ", Clip.Files.Take(3).Select(path => FileReference.FromPath(path).Name)) : Body;
+            return string.Join(" · ", new[] { Source, Clip.DisplayTitle, content, Metadata }
+                .Where(value => value.Length > 0).Distinct());
         }
     }
 
@@ -257,8 +260,13 @@ internal sealed class ClipCard
     {
         get
         {
-            if (Clip.Kind == ClipKind.Aggregate) return matchCount is { } matched
-                ? Labels.Format("{0} / {1} matches", matched, memberCount) : Labels.Format("{0} items", memberCount);
+            if (Clip.Kind == ClipKind.Aggregate)
+            {
+                if (row.MatchCount is not { } matched) return Labels.Format("{0} items", row.MemberCount);
+                string matches = Labels.Format("{0} / {1} matches", matched, row.MemberCount);
+                int hidden = row.MemberCount - matched;
+                return hidden > 0 ? matches + " · " + Labels.Format("{0} more items", hidden) : matches;
+            }
             return $"{Clip.CapturedAt.ToLocalTime():MM-dd HH:mm}   " + Labels.Format("Copy ×{0} · Paste ×{1}",
                 Count(Clip.CopyCount), Count(Clip.PasteCount));
         }
@@ -276,7 +284,7 @@ internal sealed class ClipCard
         >= 1_000_000_000 => $"{bytes / 1_000_000_000d:F1} GB",
         >= 1_000_000 => $"{bytes / 1_000_000d:F1} MB",
         >= 1_000 => $"{bytes / 1_000d:F1} KB",
-        _ => $"{bytes} B"
+        _ => $"{bytes:F1} B"
     };
 
     private static string Count(int count) => count >= 1000 ? $"{count / 1000d:F1}K" : count.ToString(CultureInfo.CurrentCulture);

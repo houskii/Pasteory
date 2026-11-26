@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
 using System.Windows;
@@ -33,6 +34,10 @@ public partial class HistoryWindow : Window
     private EditorView? editor;
     private Window? help;
     private string lastStatus = "";
+    private Guid? undoAggregationId;
+    private IReadOnlyList<Clip>? statsSource;
+    private DateTime statsDate;
+    private string statsText = "";
     private Guid? currentGroupId;
     private GroupTab[] tabs = [];
     private Guid[] recommendedAi = [];
@@ -41,7 +46,7 @@ public partial class HistoryWindow : Window
     {
         this.app = app;
         InitializeComponent();
-        results = new ClipResults(app, History);
+        results = new ClipResults(app, History, compact: true);
         helpTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         helpTimer.Tick += (_, _) =>
         {
@@ -49,11 +54,12 @@ public partial class HistoryWindow : Window
             if (IsActive && Keyboard.Modifiers == ModifierKeys.Control && editor is null && !transientMenu) OpenHelp();
         };
         statusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3.5) };
-        statusTimer.Tick += (_, _) => { statusTimer.Stop(); lastStatus = ""; UpdateFooter(); };
+        statusTimer.Tick += (_, _) => { statusTimer.Stop(); lastStatus = ""; undoAggregationId = null; UpdateFooter(); };
         PreviewKeyDown += HandleKeys;
         PreviewKeyUp += (_, e) => { if (e.Key is Key.LeftCtrl or Key.RightCtrl) HideHelp(); };
         TextCompositionManager.AddPreviewTextInputStartHandler(Query, (_, _) => composing = true);
         TextCompositionManager.AddPreviewTextInputHandler(Query, (_, _) => composing = false);
+        Query.LostKeyboardFocus += (_, _) => composing = false;
         Closing += HideInsteadOfClose;
         Deactivated += (_, _) =>
         {
@@ -85,6 +91,7 @@ public partial class HistoryWindow : Window
             Height = Math.Clamp(app.Settings.PanelHeight, MinHeight, 760);
             PositionNearPointer();
             lastStatus = "";
+            undoAggregationId = null;
         }
         Refresh(reset: newPresentation);
         Show();
@@ -94,7 +101,8 @@ public partial class HistoryWindow : Window
         if (newPresentation)
             Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() =>
             {
-                if (IsActive && IsVisible && editor is null) Keyboard.Focus(FocusArea);
+                if (IsActive && IsVisible && editor is null && !Query.IsKeyboardFocusWithin && !Query.IsMouseOver)
+                    Keyboard.Focus(FocusArea);
             }));
     }
 
@@ -159,10 +167,17 @@ public partial class HistoryWindow : Window
             ((Button)SidebarGroups.Children[i]).SetResourceReference(BackgroundProperty, i == index ? "PanelTint" : "TransparentBrush");
     }
 
-    private void RefreshResults(bool reset, Guid? select = null)
+    private async void RefreshResults(bool reset, Guid? select = null, Guid? focusChildren = null)
     {
         RefreshSearchHint();
-        results.Refresh(Query.Text, reset, collection: (Groups.SelectedItem as GroupTab)?.Collection, select: select);
+        var refresh = results.Refresh(Query.Text, reset, collection: (Groups.SelectedItem as GroupTab)?.Collection,
+            select: select, focusChildren: focusChildren);
+        if (!refresh.IsCompleted)
+        {
+            EmptyMessage.Text = "";
+            QuickTools.IsEnabled = false;
+        }
+        if (!await refresh) return;
         EmptyMessage.Text = results.Count > 0 ? "" : Labels.Get(app.Clips.Count == 0 ?
             "Copy something to start your history." : "No clips match.");
         QuickTools.IsEnabled = results.Selected?.Clip.PlainText is { Length: > 0 };
@@ -172,27 +187,51 @@ public partial class HistoryWindow : Window
     internal void SetStatus(string message)
     {
         lastStatus = message;
+        undoAggregationId = null;
         if (Status is null) return;
         statusTimer.Stop();
         statusTimer.Start();
         UpdateFooter();
     }
 
+    internal void OfferAggregationUndo(Guid id)
+    {
+        if (!IsVisible) return;
+        undoAggregationId = id;
+        UpdateFooter();
+    }
+
+    private void UndoAggregation(object sender, RoutedEventArgs e)
+    {
+        if (undoAggregationId is { } id) app.UndoAggregation(id);
+        undoAggregationId = null;
+        UpdateFooter();
+    }
+
     private void UpdateFooter()
     {
         var today = DateTime.Now.Date;
-        int totalToday = 0, totalWeek = 0;
-        foreach (var clip in app.Clips.Where(clip => clip.TrashedAt is null && clip.Kind != ClipKind.Aggregate))
+        var clips = app.Clips;
+        if (!ReferenceEquals(statsSource, clips) || statsDate != today)
         {
-            var copied = clip.CapturedAt.LocalDateTime.Date;
-            if (copied >= today.AddDays(-6)) totalWeek++;
-            if (copied == today) totalToday++;
+            int totalToday = 0, totalWeek = 0;
+            DateTime since = today.AddDays(-6);
+            foreach (var clip in clips)
+            {
+                if (clip.TrashedAt is not null || clip.Kind == ClipKind.Aggregate) continue;
+                var copied = clip.CapturedAt.LocalDateTime.Date;
+                if (copied >= since) totalWeek++;
+                if (copied == today) totalToday++;
+            }
+            statsSource = clips;
+            statsDate = today;
+            statsText = Labels.Format("Today {0} · 7 days {1}", totalToday, totalWeek);
         }
-        string counts = Labels.Format("Today {0} · 7 days {1}", totalToday, totalWeek);
         Status.Text = lastStatus.Length > 0 ? lastStatus : multiple
-            ? Labels.Format("{0} selected", History.SelectedItems.Count) : counts;
+            ? Labels.Format("{0} selected", History.SelectedItems.Count) : statsText;
         Status.ToolTip = Status.Text;
         NavigationHint.Visibility = lastStatus.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        UndoAggregationButton.Visibility = undoAggregationId.HasValue ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -260,13 +299,14 @@ public partial class HistoryWindow : Window
             return;
         }
         HideHelp();
+        if (Query.IsKeyboardFocused && (e.Key == Key.ImeProcessed ||
+            composing && key is Key.Enter or Key.Up or Key.Down or Key.Left or Key.Right or Key.Escape))
+            return;
         if (key == Key.Escape)
         {
             if (multiple) { StopMultiple(); UpdateFooter(); }
             else Dismiss(restoreTarget: true);
         }
-        else if (composing && Query.IsKeyboardFocused && key is Key.Enter or Key.Up or Key.Down or Key.Left or Key.Right)
-            return;
         else if (modifiers == ModifierKeys.None && key is Key.Up or Key.Down)
         {
             int step = key == Key.Up ? -1 : 1;
@@ -344,6 +384,7 @@ public partial class HistoryWindow : Window
 
     private void ActivateRow(ClipCard row, bool paste)
     {
+        if (results.IsLoading) return;
         if (row.Clip.Kind == ClipKind.Aggregate) Expand(row);
         else if (paste) _ = app.UseClipAsync(row.Clip, true, false);
         else
@@ -357,10 +398,7 @@ public partial class HistoryWindow : Window
     private void Expand(ClipCard row)
     {
         results.Expand(row.Clip.Id);
-        RefreshResults(reset: false);
-        var children = results.Rows.Where(child => child.Parent == row.Clip.Id).ToArray();
-        var selected = children.FirstOrDefault(child => child.Clip.Id == row.Clip.LastSelectedMember) ?? children.FirstOrDefault();
-        if (selected is not null) results.Select(selected);
+        RefreshResults(reset: false, focusChildren: row.Clip.Id);
     }
 
     private void Collapse(ClipCard row)
@@ -374,6 +412,7 @@ public partial class HistoryWindow : Window
 
     private void Aggregate()
     {
+        if (results.IsLoading) return;
         var clip = results.Selected?.Clip;
         if (clip?.Kind == ClipKind.Aggregate && !multiple && !results.HasMultipleSelection)
         {
@@ -387,7 +426,7 @@ public partial class HistoryWindow : Window
             else ShowAggregation(null, selected, Labels.Get("Aggregation"), "Manual", false);
         }
         else if (!string.IsNullOrWhiteSpace(Query.Text))
-            ShowAggregation(null, results.SearchMembers(Query.Text), Query.Text.Trim(), Query.Text, false);
+            ShowAggregation(null, results.SearchMembers, Query.Text.Trim(), Query.Text, false);
         else if (clip is not null)
         {
             StartMultiple();

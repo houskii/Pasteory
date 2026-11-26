@@ -13,20 +13,24 @@ internal sealed partial class SettingsWindow
     private void BuildLinkRules(Panel layout)
     {
         var sessions = SettingsCard(layout, "Pasteory sign-in sessions");
-        foreach (var rule in app.Settings.LinkSignIns)
+        foreach (var rule in LinkTitles.BuiltInSignIns.Select(preset =>
+            app.Settings.LinkSignIns.FirstOrDefault(item => item.Id == preset.Id) ?? preset)
+            .Concat(app.Settings.LinkSignIns.Where(rule => !LinkTitles.IsBuiltInSignIn(rule))))
         {
             var actions = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
             AddAction(actions, rule.Enabled ? "Sign in again…" : "Sign in…", async () =>
             {
                 if (!await app.LinkSessions.ShowAsync(app.DataDirectory, rule, this)) return;
-                var next = app.Settings with { LinkSignIns = app.Settings.LinkSignIns.Select(item =>
-                    item.Id == rule.Id ? item with { Enabled = true } : item).ToArray() };
+                var next = app.Settings with
+                {
+                    LinkSignIns = [.. app.Settings.LinkSignIns.Where(item => item.Id != rule.Id), rule with { Enabled = true }]
+                };
                 if (!app.SaveSettings(next)) return;
                 Select(SettingsPage.Links, rebuild: true);
                 int count = await app.ResolveMatchingLinksAsync(rule.Pattern);
                 SetStatus(Labels.Format("Retried {0} links.", count));
             });
-            AddAction(actions, "Edit", () => EditSignIn(rule));
+            if (!LinkTitles.IsBuiltInSignIn(rule)) AddAction(actions, "Edit", () => EditSignIn(rule));
             if (rule.Enabled)
             {
                 AddAction(actions, "Clear session", async () =>
@@ -42,7 +46,7 @@ internal sealed partial class SettingsWindow
                     catch (Exception error) when (LinkSignIn.WebError(error)) { SetStatus(error.Message); }
                 });
             }
-            actions.Children.Add(Ui.IconButton(Glyph.Close, "Remove sign-in rule", async () =>
+            if (!LinkTitles.IsBuiltInSignIn(rule)) actions.Children.Add(Ui.IconButton(Glyph.Close, "Remove sign-in rule", async () =>
             {
                 if (!ClipMenus.Confirm(this, "Remove this sign-in rule and clear its session?")) return;
                 try
@@ -53,7 +57,8 @@ internal sealed partial class SettingsWindow
                 }
                 catch (Exception error) when (LinkSignIn.WebError(error)) { SetStatus(error.Message); }
             }));
-            sessions.Children.Add(Row(rule.Name, actions, Labels.Get(rule.Enabled ? "Session ready" : "Sign-in required") + " · " + rule.Pattern));
+            sessions.Children.Add(Row(rule.Name, actions, Labels.Get(rule.Enabled ? "Session ready" : "Sign-in required") +
+                " · " + (LinkTitles.IsBuiltInSignIn(rule) ? new Uri(rule.SignInUrl).Host : rule.Pattern)));
         }
         sessions.Children.Add(Row("Site rules", Ui.Button("Add sign-in rule…", () => EditSignIn(null), "PrimaryButton"),
             "Pasteory uses a separate browser profile for each sign-in rule."));
@@ -72,18 +77,66 @@ internal sealed partial class SettingsWindow
         }
         fallbacks.Children.Add(Row("When no useful title is found", Ui.Button("Add fallback rule…", () => EditFallback(null))));
 
-        var failed = app.Clips.Where(clip => clip.TrashedAt is null && clip.Kind == ClipKind.Link &&
-            clip.LinkDetails is { Status: not "Resolved" }).OrderByDescending(clip => clip.LinkDetails!.AttemptedAt).ToArray();
-        if (failed.Length == 0) return;
-        var history = SettingsCard(layout, "Recent resolution failures");
-        foreach (var clip in failed.Take(20))
+        var resolved = app.Clips.Where(clip => clip.TrashedAt is null && clip.Kind == ClipKind.Link &&
+            clip.LinkDetails is { LastResolvedAt: not null, Title: not null })
+            .OrderByDescending(clip => clip.LinkDetails!.LastResolvedAt).Take(100).ToArray();
+        if (resolved.Length > 0)
         {
-            var title = ClipCard.Short(clip.DisplayTitle.Length > 0 ? clip.DisplayTitle : clip.Text ?? "", 72, 1);
-            history.Children.Add(Row(title, Ui.Button("Retry", async () =>
+            var recent = SettingsCard(layout, "Resolved links");
+            foreach (var clip in resolved)
             {
-                await app.ResolveLinkAsync(clip);
+                var details = clip.LinkDetails!;
+                string description = Labels.Format("Last successful resolution {0}", details.LastResolvedAt!.Value.ToLocalTime().ToString("g")) +
+                    " · " + Labels.Get(details.Status);
+                if (Uri.TryCreate(clip.Text, UriKind.Absolute, out var url))
+                    description = LinkTitles.DisplayUrl(url).Replace("%E2%80%A2", "•") + Environment.NewLine + description;
+                recent.Children.Add(Row(details.Title!, Ui.Button("Retry", async () =>
+                {
+                    await app.ResolveLinkAsync(clip);
+                    Select(SettingsPage.Links, rebuild: true);
+                }), description));
+            }
+        }
+
+        var failed = app.Clips.Where(clip => clip.TrashedAt is null && clip.Kind == ClipKind.Link &&
+            clip.LinkDetails is { Status: not "Resolved", Route: not null }).OrderByDescending(clip => clip.LinkDetails!.AttemptedAt).ToArray();
+        if (failed.Length == 0) return;
+        var history = SettingsCard(layout, "Unresolved routes");
+        foreach (var group in failed.GroupBy(clip => clip.LinkDetails!.Route!, StringComparer.Ordinal).Take(40))
+        {
+            var clips = group.ToArray();
+            var links = new StackPanel { Margin = new Thickness(8, 5, 0, 3) };
+            var actions = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
+            AddAction(actions, "Create fallback rule", () => EditFallback(null, LinkTitles.RulePattern(group.Key)));
+            AddAction(actions, "Retry route", async () =>
+            {
+                foreach (var clip in clips)
+                {
+                    if (app.Exiting) return;
+                    await app.ResolveLinkAsync(clip);
+                }
                 Select(SettingsPage.Links, rebuild: true);
-            }), Labels.Get(clip.LinkDetails!.Status)));
+            });
+            links.Children.Add(actions);
+            foreach (var clip in clips.Take(40))
+            {
+                var title = ClipCard.Short(clip.DisplayTitle, 72, 1);
+                string status = Labels.Get(clip.LinkDetails!.Status);
+                if (Uri.TryCreate(clip.Text, UriKind.Absolute, out var url))
+                    status += " · " + LinkTitles.DisplayUrl(url).Replace("%E2%80%A2", "•");
+                links.Children.Add(Row(title, Ui.Button("Retry", async () =>
+                {
+                    await app.ResolveLinkAsync(clip);
+                    Select(SettingsPage.Links, rebuild: true);
+                }), status));
+            }
+            var route = new Expander
+            {
+                Header = group.Key + " · " + Labels.Format("{0} links", clips.Length),
+                Content = links, Margin = new Thickness(0, 0, 0, 8)
+            };
+            route.SetResourceReference(ForegroundProperty, "Ink");
+            history.Children.Add(route);
         }
     }
 
@@ -140,10 +193,10 @@ internal sealed partial class SettingsWindow
         }, close);
     }, 480, 390);
 
-    private void EditFallback(LinkFallbackRule? rule) => LibraryEditors.ShowModal(this, "Fallback rules", close =>
+    private void EditFallback(LinkFallbackRule? rule, string? initialPattern = null) => LibraryEditors.ShowModal(this, "Fallback rules", close =>
     {
         var form = new StackPanel();
-        var pattern = Ui.Field("URL regular expression", rule?.Pattern ?? "", 500);
+        var pattern = Ui.Field("URL regular expression", rule?.Pattern ?? initialPattern ?? "", 500);
         var title = Ui.Field("Title format", rule?.Title ?? "", 220);
         var help = Ui.Text(Labels.Get("Match the host and path. Use $1 for the first capture group."), 11, "Muted");
         Ui.AddField(form, "URL regular expression", pattern);

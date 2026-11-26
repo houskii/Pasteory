@@ -13,8 +13,9 @@ public partial class App
 {
     private readonly List<ChromeSelection> chromeSelections = [];
 
-    private CaptureEvent ReadSourceContext(Clip clip)
+    private CaptureEvent ReadSourceContext(Clip clip, out nint chatWindow)
     {
+        chatWindow = 0;
         var capture = new CaptureEvent(clip.CapturedAt, clip.Source);
         if (Settings.IncludeBrowserContext && clip.Source.Equals("chrome", StringComparison.OrdinalIgnoreCase))
         {
@@ -26,7 +27,7 @@ public partial class App
                 chromeSelections.RemoveAt(match);
             }
         }
-        if (Settings.IncludeChatContext && clip.Source.ToLowerInvariant() is "wechat" or "weixin" or "feishu" or "lark")
+        if (Settings.IncludeChatContext && ChatContext.IsChatApp(clip.Source))
         {
             nint handle = NativeMethods.GetForegroundWindow();
             uint processId = NativeMethods.ProcessId(handle);
@@ -34,6 +35,7 @@ public partial class App
             {
                 using var foreground = Process.GetProcessById((int)processId);
                 if (!foreground.ProcessName.Equals(clip.Source, StringComparison.OrdinalIgnoreCase)) return capture;
+                chatWindow = handle;
                 string title = NativeMethods.WindowTitle(handle).Trim();
                 if (title.Length > 0 && !new[] { "WeChat", "Weixin", "Lark", "Feishu", "微信", "飞书" }
                     .Contains(title, StringComparer.OrdinalIgnoreCase))
@@ -42,6 +44,22 @@ public partial class App
             catch (Exception error) when (error is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) { }
         }
         return capture;
+    }
+
+    private async Task EnrichChatAsync(Guid id, CaptureEvent capture, nint chatWindow)
+    {
+        try
+        {
+            if (NativeMethods.GetForegroundWindow() != chatWindow) return;
+            var context = await ChatContext.InspectAsync(chatWindow, capture, lifetime.Token);
+            if (context is null || Exiting || Settings.Paused || !Settings.IncludeChatContext ||
+                NativeMethods.GetForegroundWindow() != chatWindow) return;
+            UpdateClip(id, clip => clip.Captures.Contains(capture) ? clip with
+            {
+                Captures = clip.Captures.Select(item => item == capture ? context : item).ToArray()
+            } : clip);
+        }
+        catch (OperationCanceledException) when (Exiting) { }
     }
 
     private Task ChromeEventAsync(ChromeSelection selection) => Dispatcher.InvokeAsync(() =>

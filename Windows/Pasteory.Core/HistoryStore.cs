@@ -5,7 +5,8 @@ namespace Pasteory.Core;
 public sealed partial class HistoryStore
 {
     private const long MaxActiveIndexBytes = 12 * 1024 * 1024;
-    private readonly string indexPath;
+    public const string CatalogFileName = "history.sqlite3";
+    private readonly string catalogPath;
     private readonly string imageDirectory;
     private readonly string archiveDirectory;
     private readonly int maxClips;
@@ -25,10 +26,13 @@ public sealed partial class HistoryStore
         this.maxClips = maxClips;
         this.maxBytes = maxBytes;
         this.archiveOverflow = archiveOverflow;
-        indexPath = Path.Combine(dataDirectory, "history.json");
+        catalogPath = Path.Combine(dataDirectory, CatalogFileName);
         imageDirectory = Path.Combine(dataDirectory, "images");
         archiveDirectory = Path.Combine(dataDirectory, "archives");
-        var state = ReadState();
+        string legacyPath = Path.Combine(dataDirectory, "history.json");
+        var state = File.Exists(catalogPath) ? ReadCatalog() : ReadLegacyState(legacyPath);
+        if (!File.Exists(catalogPath) && File.Exists(legacyPath))
+            WriteCatalog(state.Clips, state.Collections, state.AiUndo, state.Payloads ?? [], []);
         Collections = state.Collections.AsReadOnly();
         Clips = state.Clips.AsReadOnly();
         aiUndo = state.AiUndo;
@@ -36,7 +40,7 @@ public sealed partial class HistoryStore
         RemoveOrphanedArchives((state.Payloads ?? []).Values.Select(payload => payload.Hash).ToHashSet());
     }
 
-    private LibraryState ReadState()
+    private LibraryState ReadLegacyState(string indexPath)
     {
         if (!File.Exists(indexPath)) return new([], []);
         using var stream = File.OpenRead(indexPath);
@@ -49,16 +53,20 @@ public sealed partial class HistoryStore
             if (state.Payloads is { Count: > 0 } packed)
                 state = state with { Clips = state.Clips.Select(clip => packed.TryGetValue(clip.Id, out var entry) ?
                     ReadPacked(clip, entry) : clip).ToList() };
-            return state;
+            return state with { Clips = state.Clips.Select(WithCurrentColorKind).ToList() };
         }
 
         var clips = document.RootElement.Deserialize<List<Clip>>() ?? throw new JsonException("Missing clipboard history.");
+        clips = clips.Select(WithCurrentColorKind).ToList();
         var groups = clips.Select(clip => clip.Group).Where(name => !string.IsNullOrWhiteSpace(name))
             .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(name => name, StringComparer.CurrentCultureIgnoreCase)
             .ToDictionary(name => name, name => new ClipCollection(Guid.NewGuid(), name), StringComparer.OrdinalIgnoreCase);
         return new(clips.Select(clip => groups.TryGetValue(clip.Group, out var group)
             ? clip with { CollectionIds = [group.Id] } : clip).ToList(), groups.Values.ToList());
     }
+
+    private static Clip WithCurrentColorKind(Clip clip) =>
+        clip.Kind == ClipKind.Text && TextTools.TryColor(clip.Text, out _) ? clip with { Kind = ClipKind.Color } : clip;
 
     public bool Capture(Clip clip, byte[]? png = null) => Capture(clip, png, out _);
 
@@ -75,13 +83,14 @@ public sealed partial class HistoryStore
         next.Insert(0, updated);
 
         var active = next.Where(IsActiveContent).ToList();
+        var protectedGroups = RegularGroups();
         int count = active.Count;
         long size = active.Sum(item => item.Size);
         long indexSize = active.Sum(item => item.IndexSize);
         for (int index = next.Count - 1; index > 0 && OverLimit(); index--)
         {
             var candidate = next[index];
-            if (!IsActiveContent(candidate) || candidate.Pinned || candidate.Favorite) continue;
+            if (!IsActiveContent(candidate) || ProtectedFromArchive(candidate, protectedGroups)) continue;
             count--;
             size -= candidate.Size;
             indexSize -= candidate.IndexSize;
@@ -113,6 +122,11 @@ public sealed partial class HistoryStore
 
     private static bool IsActiveContent(Clip clip) =>
         clip.ArchivedAt is null && clip.TrashedAt is null && clip.Kind != ClipKind.Aggregate;
+
+    private HashSet<Guid> RegularGroups() => Collections.Where(group => !group.IsSmart && !group.IsAi).Select(group => group.Id).ToHashSet();
+
+    private static bool ProtectedFromArchive(Clip clip, HashSet<Guid> groups) =>
+        clip.Pinned || clip.Favorite || clip.CollectionIds.Any(groups.Contains);
 
     private static Clip MergeCapture(Clip? existing, Clip latest)
     {
@@ -161,7 +175,9 @@ public sealed partial class HistoryStore
             Captures = [.. events.Concat(previous).Take(100)],
             Conversions = existing.Conversions,
             RecognizedText = latest.RecognizedText ?? existing.RecognizedText,
-            LinkDetails = latest.LinkDetails ?? existing.LinkDetails
+            LinkDetails = latest.LinkDetails is { Status: "Not attempted" } fallback && existing.LinkDetails is { } known
+                ? known with { FallbackTitle = fallback.FallbackTitle, FallbackSource = fallback.FallbackSource, Route = fallback.Route }
+                : latest.LinkDetails ?? existing.LinkDetails
         };
     }
 
@@ -183,7 +199,7 @@ public sealed partial class HistoryStore
 
     public bool Update(Guid id, Func<Clip, Clip> change) => EditInternal(id, change);
 
-    public bool UpdateManualText(Guid id, string text)
+    public bool UpdateManualText(Guid id, string text, Func<Clip, LinkDetails?>? linkDetails = null)
     {
         var previous = Clips.FirstOrDefault(clip => clip.Id == id && clip.IsManual && clip.TrashedAt is null);
         if (previous is null || string.IsNullOrWhiteSpace(text)) return false;
@@ -192,6 +208,7 @@ public sealed partial class HistoryStore
         {
             Text = text, Kind = kind, CodeLanguage = language, LinkDetails = text == previous.Text ? previous.LinkDetails : null
         };
+        if (kind == ClipKind.Link && linkDetails is not null) next = next with { LinkDetails = linkDetails(next) };
         if (Clips.Any(clip => clip.Id != id && clip.TrashedAt is null && clip.SameContent(next)))
             throw new ArgumentException("This content is already in the library.");
         return Update(id, _ => next);
@@ -242,10 +259,11 @@ public sealed partial class HistoryStore
         bool changed = expiredIds.Length > 0;
         if (archiveAfterDays > 0)
         {
+            var protectedGroups = RegularGroups();
             for (int index = 0; index < next.Count; index++)
             {
                 var clip = next[index];
-                if (!IsActiveContent(clip) || clip.Favorite || clip.Pinned || clip.CapturedAt >= cutoff) continue;
+                if (!IsActiveContent(clip) || ProtectedFromArchive(clip, protectedGroups) || clip.CapturedAt >= cutoff) continue;
                 next[index] = clip with { ArchivedAt = now };
                 changed = true;
             }
@@ -318,7 +336,38 @@ public sealed partial class HistoryStore
         return aggregate;
     }
 
+    public bool RemoveAggregationMember(Guid parentId, Guid memberId)
+    {
+        var parent = Clips.FirstOrDefault(clip => clip.Id == parentId && clip.Kind == ClipKind.Aggregate && clip.TrashedAt is null);
+        if (parent is null || !parent.Members.Contains(memberId)) return false;
+        Guid[] members = parent.Members.Where(id => id != memberId).ToArray();
+        if (members.Length < 2)
+        {
+            Commit(Clips.Where(clip => clip.Id != parentId).ToList());
+            return true;
+        }
+        Update(parentId, clip => clip with
+        {
+            Members = members, LastSelectedMember = clip.LastSelectedMember == memberId ? null : clip.LastSelectedMember
+        });
+        return false;
+    }
+
     public byte[] ReadImage(Clip clip) => File.ReadAllBytes(ImagePath(clip.Id));
+
+    public void UpdateLinkDetails(Func<Clip, LinkDetails?> update)
+    {
+        bool changed = false;
+        var next = Clips.Select(clip =>
+        {
+            if (clip.Kind != ClipKind.Link || clip.TrashedAt is not null) return clip;
+            var details = update(clip);
+            if (details == clip.LinkDetails) return clip;
+            changed = true;
+            return clip with { LinkDetails = details };
+        }).ToList();
+        if (changed) Commit(next);
+    }
 
     private string ImagePath(Guid id) => Path.Combine(imageDirectory, id.ToString("N") + ".png");
 
@@ -326,9 +375,7 @@ public sealed partial class HistoryStore
     {
         var collections = groups ?? Collections.ToList();
         var undo = replaceAiUndo ? nextUndo : aiUndo;
-        var packed = new Dictionary<Guid, PackedPayload>();
-        var content = PackForDisk(next, collections, packed);
-        LocalJson.Write(indexPath, new LibraryState(content, collections, AiUndo: undo, Payloads: packed.Count > 0 ? packed : null));
+        var packed = WriteCatalog(next, collections, undo, null, Collections);
         var retained = next.Where(clip => clip.HasImage).Select(clip => clip.Id).ToHashSet();
         foreach (var clip in Clips)
         {

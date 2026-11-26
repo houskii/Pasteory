@@ -8,8 +8,10 @@ public enum ClipKind { Text, Link, Image, Files, Color, Code, Mixed, Aggregate }
 public sealed record CaptureEvent(DateTimeOffset CapturedAt, string Source, string? Context = null, string? Url = null,
     Dictionary<string, string>? Details = null);
 public sealed record ConversionRecord(TextTool Tool, string Original, string Source);
+public sealed record LinkAttempt(string Status, DateTimeOffset At, string? Source, string? Quality);
 public sealed record LinkDetails(string Status, string? Title, DateTimeOffset AttemptedAt, string? Source = null,
-    string? Quality = null);
+    string? Quality = null, string? FallbackTitle = null, string? FallbackSource = null, string? Route = null,
+    DateTimeOffset? LastResolvedAt = null, LinkAttempt[]? Attempts = null);
 
 public enum ClipPriority { None, P1, P2, P3 }
 
@@ -63,7 +65,7 @@ public sealed record Clip
     public bool HasImage => ImageSize > 0 || Kind == ClipKind.Image;
 
     [JsonIgnore]
-    public string DisplayTitle => Title.Length > 0 ? Title : LinkDetails?.Title ?? "";
+    public string DisplayTitle => Title.Length > 0 ? Title : LinkDetails?.Title ?? LinkDetails?.FallbackTitle ?? "";
 
     internal bool SameContent(Clip other)
     {
@@ -90,7 +92,8 @@ public sealed record Clip
 
     internal long IndexSize => 256L + Encoding.UTF8.GetByteCount(Title) + Encoding.UTF8.GetByteCount(Note) +
         Encoding.UTF8.GetByteCount(Group) + Encoding.UTF8.GetByteCount(Source) + Bytes(Text) + Bytes(Html) + Bytes(Rtf) +
-        Bytes(RecognizedText) + Bytes(LinkDetails?.Title) + Files.Sum(path => (long)Encoding.UTF8.GetByteCount(path)) +
+        Bytes(RecognizedText) + Bytes(LinkDetails?.Title) + Bytes(LinkDetails?.FallbackTitle) +
+        (LinkDetails?.Attempts?.Length ?? 0) * 96L + Files.Sum(path => (long)Encoding.UTF8.GetByteCount(path)) +
         Uses.Length * 32L +
         Captures.Sum(capture => 48L + Bytes(capture.Source) + Bytes(capture.Context) + Bytes(capture.Url) +
             (capture.Details?.Sum(detail => Bytes(detail.Key) + Bytes(detail.Value)) ?? 0)) +
@@ -102,7 +105,7 @@ public sealed record Clip
         query.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
         .All(term => Contains(Title, term) || Contains(Text, term) || Contains(Note, term) ||
             Contains(Source, term) || Contains(Group, term) || Contains(RecognizedText, term) ||
-            Contains(LinkDetails?.Title, term) || Files.Any(path => Contains(path, term)) ||
+            Contains(LinkDetails?.Title, term) || Contains(LinkDetails?.FallbackTitle, term) || Files.Any(path => Contains(path, term)) ||
             Captures.Any(capture => Contains(capture.Source, term) || Contains(capture.Context, term) || Contains(capture.Url, term) ||
                 capture.Details?.Values.Any(value => Contains(value, term)) == true) ||
             collections?.Any(name => Contains(name, term)) == true);

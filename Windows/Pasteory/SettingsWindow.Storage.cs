@@ -172,9 +172,11 @@ internal sealed partial class SettingsWindow
                 RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint
             }).Sum(file => new FileInfo(file).Exists ? new FileInfo(file).Length : 0) : 0;
         }
-        var catalog = new FileInfo(Path.Combine(root, "history.json"));
-        return [("Database", catalog.Exists ? catalog.Length : 0), ("Images & attachments", Size("images")),
+        long FileSize(string name) => new FileInfo(Path.Combine(root, name)) is { Exists: true } file ? file.Length : 0;
+        long database = FileSize(HistoryStore.CatalogFileName) + FileSize(HistoryStore.CatalogFileName + "-wal") +
+            FileSize(HistoryStore.CatalogFileName + "-shm");
+        return [("Database", database), ("Images & attachments", Size("images")),
             ("Archive", Size("archives")), ("AI task history", Size("AITasks")),
-            ("File command logs", Size("logs")), ("Other", Size("cache"))];
+            ("File command logs", Size("logs")), ("Other", Size("cache") + FileSize("history.json"))];
     }
 }

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -22,7 +23,7 @@ public partial class LibraryPage : UserControl
     private ClipKind? kind;
     private Guid? groupId;
     private Clip? detailsClip;
-    private bool refreshing;
+    private bool composing;
     private bool compact;
     private Point dragOrigin;
     private Guid? dragId;
@@ -35,6 +36,9 @@ public partial class LibraryPage : UserControl
         searchDelay.Tick += (_, _) => { searchDelay.Stop(); Refresh(reset: true); };
         SizeChanged += (_, _) => UpdateColumns();
         PreviewKeyDown += OnKey;
+        TextCompositionManager.AddPreviewTextInputStartHandler(Search, (_, _) => composing = true);
+        TextCompositionManager.AddPreviewTextInputHandler(Search, (_, _) => composing = false);
+        Search.LostKeyboardFocus += (_, _) => composing = false;
         BuildNav();
         Refresh(reset: true);
     }
@@ -51,7 +55,10 @@ public partial class LibraryPage : UserControl
         Refresh(reset: true, select: clip.Id);
     }
 
-    internal void Refresh(bool reset = false, Guid? select = null)
+    internal void Refresh(bool reset = false, Guid? select = null, Guid? focusChildren = null) =>
+        _ = RefreshAsync(reset, select, focusChildren);
+
+    private async Task<bool> RefreshAsync(bool reset = false, Guid? select = null, Guid? focusChildren = null)
     {
         if (!visibleGroups.SequenceEqual(app.Collections))
         {
@@ -67,9 +74,7 @@ public partial class LibraryPage : UserControl
             nav.Button.Content = row;
         }
         var collection = app.Collections.FirstOrDefault(group => group.Id == groupId);
-        refreshing = true;
-        results.Refresh(Search.Text, reset, scope, kind, collection, select);
-        refreshing = false;
+        var refresh = results.Refresh(Search.Text, reset, scope, kind, collection, select, focusChildren);
         Heading.Text = selected.Name;
         Subtitle.Text = Search.Text.Trim().Length > 0 ? Labels.Format("Searching in {0}", selected.Name) :
             Labels.Get(scope switch
@@ -82,12 +87,20 @@ public partial class LibraryPage : UserControl
                     collection.IsAi && collection.Overview.Length > 0 ? collection.Overview :
                     collection.IsSmart ? "Clips matching the rules in this group" : "Clips organized into this group"
             });
+        if (!refresh.IsCompleted)
+        {
+            Count.Text = Labels.Get("Searching…");
+            EmptyMessage.Text = "";
+            UpdateActions();
+        }
+        if (!await refresh) return false;
         Count.Text = Labels.Format("{0} results", results.Count);
         EmptyMessage.Text = results.Count == 0 ? Labels.Get(app.Clips.Count == 0 ?
             "Copy something to start your history." : "No clips match.") : "";
         CollectionCount.Text = Labels.Format("{0} items", app.Clips.Count(clip => clip.TrashedAt is null));
         UpdateDetails();
         UpdateActions();
+        return true;
     }
 
     private void BuildNav()
@@ -193,7 +206,7 @@ public partial class LibraryPage : UserControl
     {
         if (results is null) return;
         DetailsButton.Visibility = compact && results.Selected is not null ? Visibility.Visible : Visibility.Collapsed;
-        AggregateButton.Visibility = scope != Scope.Trash && (Search.Text.Trim().Length > 0 && results.Count > 0 ||
+        AggregateButton.Visibility = !results.IsLoading && scope != Scope.Trash && (Search.Text.Trim().Length > 0 && results.Count > 0 ||
             results.HasMultipleSelection) ? Visibility.Visible : Visibility.Collapsed;
         EmptyTrashButton.Visibility = scope == Scope.Trash && results.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         ResultActions.Visibility = DetailsButton.Visibility == Visibility.Visible || AggregateButton.Visibility == Visibility.Visible ||
@@ -211,7 +224,7 @@ public partial class LibraryPage : UserControl
 
     private void SelectedChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (results is null || refreshing) return;
+        if (results is null || results.IsPublishing || results.IsLoading) return;
         UpdateDetails();
         UpdateActions();
     }
@@ -230,7 +243,7 @@ public partial class LibraryPage : UserControl
     private void ClearQuery(object sender, RoutedEventArgs e) { Search.Clear(); Search.Focus(); }
     private void UseSelected(object sender, MouseButtonEventArgs e)
     {
-        if ((e.OriginalSource as FrameworkElement)?.DataContext is not ClipCard row) return;
+        if (results.IsLoading || (e.OriginalSource as FrameworkElement)?.DataContext is not ClipCard row) return;
         if (!ToggleAggregation(row)) _ = app.UseClipAsync(row.Clip, true, false);
     }
 
@@ -238,16 +251,13 @@ public partial class LibraryPage : UserControl
     {
         if (row.Clip.Kind != ClipKind.Aggregate) return false;
         results.Expand(row.Clip.Id);
-        Refresh();
-        var children = results.Rows.Where(child => child.Parent == row.Clip.Id).ToArray();
-        var selected = children.FirstOrDefault(child => child.Clip.Id == row.Clip.LastSelectedMember) ?? children.FirstOrDefault();
-        if (selected is not null) results.Select(selected);
+        Refresh(focusChildren: row.Clip.Id);
         return true;
     }
 
     private void SelectContextRow(object sender, MouseButtonEventArgs e)
     {
-        if ((e.OriginalSource as FrameworkElement)?.DataContext is not ClipCard row) { ClipList.ContextMenu = null; return; }
+        if (results.IsLoading || (e.OriginalSource as FrameworkElement)?.DataContext is not ClipCard row) { ClipList.ContextMenu = null; return; }
         results.Select(row);
         ClipList.ContextMenu = ClipMenus.ForClip(app, row, Owner, () => EditInfo(row.Clip, false), () => EditInfo(row.Clip, true),
             () => EditAggregation(row.Clip), () => { if (!ToggleAggregation(row)) app.OpenClip(row.Clip, Owner); });
@@ -293,10 +303,15 @@ public partial class LibraryPage : UserControl
             Refresh(reset: true);
         }), smart ? 560 : 380, smart ? 620 : 330);
 
-    private void AggregateResults(object sender, RoutedEventArgs e)
+    private async void AggregateResults(object sender, RoutedEventArgs e)
     {
-        if (searchDelay.IsEnabled) { searchDelay.Stop(); Refresh(reset: false); }
-        Guid[] selected = (results.HasMultipleSelection ? results.SelectedMembers : results.SearchMembers(Search.Text)).ToArray();
+        if (searchDelay.IsEnabled)
+        {
+            searchDelay.Stop();
+            if (!await RefreshAsync()) return;
+        }
+        if (results.IsLoading) return;
+        Guid[] selected = (results.HasMultipleSelection ? results.SelectedMembers : results.SearchMembers).ToArray();
         if (selected.Length < 2)
         {
             app.Notify("Choose at least two different clips.");
@@ -348,6 +363,8 @@ public partial class LibraryPage : UserControl
     {
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
         var modifiers = Keyboard.Modifiers;
+        if (Search.IsKeyboardFocused && (e.Key == Key.ImeProcessed || composing && key is Key.Enter or Key.Up or Key.Down))
+            return;
         bool Match(Command command) => Shortcuts.Match(app.Settings, command, key, modifiers);
         if (Match(Command.Search))
         {

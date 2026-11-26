@@ -16,12 +16,15 @@
   <ItemGroup>
     <ProjectReference Include="../Pasteory.Core/Pasteory.Core.csproj" />
     <Resource Include="Assets/Pasteory.ico" />
+    <PasteoryFileIcon Include="../../Resources/FileIcons/*.png" />
+    <Resource Include="@(PasteoryFileIcon)" Link="FileIcons/%(Filename)%(Extension)" />
     <Content Include="../../ChromeExtension/**/*" Link="ChromeExtension/%(RecursiveDir)%(Filename)%(Extension)"
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4370.26" GeneratePathProperty="true" />
     <PackageReference Include="LzfseSharp" Version="2.0.0" GeneratePathProperty="true" />
     <PackageReference Include="BouncyCastle.Cryptography" Version="2.7.0" GeneratePathProperty="true" />
     <EmbeddedResource Include="../../Config/UpdatePublicKey.txt" LogicalName="Pasteory.UpdatePublicKey.txt" />
+    <None Update="ThirdPartyNotices/*.txt" CopyToPublishDirectory="PreserveNewest" />
     <None Include="$(PkgMicrosoft_Web_WebView2)/LICENSE.txt" Condition="Exists('$(PkgMicrosoft_Web_WebView2)/LICENSE.txt')"
           Link="ThirdPartyNotices/WebView2-LICENSE.txt" CopyToPublishDirectory="PreserveNewest" />
     <None Include="$(PkgMicrosoft_Web_WebView2)/NOTICE.txt" Condition="Exists('$(PkgMicrosoft_Web_WebView2)/NOTICE.txt')"
@@ -32,4 +35,7 @@
           Link="ThirdPartyNotices/BouncyCastle-LICENSE.md" CopyToPublishDirectory="PreserveNewest" />
     <InternalsVisibleTo Include="Pasteory.Windows.Tests" />
   </ItemGroup>
+  <Target Name="ValidatePasteoryFileIcons" BeforeTargets="PrepareResources">
+    <Error Condition="'@(PasteoryFileIcon->Count())' != '49'" Text="Expected 49 Pasteory file icon PNGs." />
+  </Target>
 </Project>

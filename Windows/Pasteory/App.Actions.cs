@@ -21,7 +21,7 @@ namespace Pasteory.Windows;
 
 public partial class App
 {
-    private readonly Dictionary<Guid, ImageSource?> thumbnails = [];
+    private readonly Dictionary<(Guid Id, string? Hash), ImagePreview> thumbnails = [];
     private readonly Dictionary<string, ImageSource?> appIcons = new(StringComparer.OrdinalIgnoreCase);
     private readonly LinkResolver links = new();
     internal LinkSignIn LinkSessions { get; } = new();
@@ -74,8 +74,12 @@ public partial class App
             InvalidOperationException or NotSupportedException or System.Runtime.InteropServices.COMException)
         { Notify(error.Message); }
     }
-    internal void RemoveMember(Guid parent, Guid child) => UpdateClip(parent,
-        clip => clip with { Members = clip.Members.Where(id => id != child).ToArray() });
+    internal void RemoveMember(Guid parent, Guid child)
+    {
+        bool dissolved = false;
+        if (ChangeHistory(() => dissolved = history.RemoveAggregationMember(parent, child)) && dissolved)
+            Notify("Aggregation dissolved. Its clips were kept.");
+    }
     internal void FavoriteMembers(Clip aggregate) => ChangeHistory(() => history.FavoriteMembers(aggregate.Members));
 
     internal ClipCollection? SaveCollection(Guid? id, string name, SmartRules? rules)
@@ -93,17 +97,30 @@ public partial class App
     {
         Clip? clip = null;
         if (ChangeHistory(() => clip = history.SaveAggregation(id, title, note, members, origin)))
+        {
             Notify(Labels.Format("Aggregated {0} clips", clip!.Members.Length));
+            if (id is null) window.OfferAggregationUndo(clip.Id);
+        }
         return clip;
+    }
+
+    internal void UndoAggregation(Guid id)
+    {
+        if (Clips.FirstOrDefault(clip => clip.Id == id && clip.Kind == ClipKind.Aggregate) is { } aggregate &&
+            ChangeHistory(() => history.Delete(aggregate)))
+            Notify("Aggregation undone.");
     }
 
     internal Clip? SaveManual(string text, string title)
     {
         var (kind, language) = TextTools.Classify(text);
         Clip? saved = null;
-        if (!string.IsNullOrWhiteSpace(text) && ChangeHistory(() => history.Capture(new Clip
-            { Kind = kind, CodeLanguage = language, Text = text, Title = title.Trim(), Source = "Pasteory", CopyCount = 0, IsManual = true },
-            null, out saved)) && saved is not null)
+        var clip = new Clip
+        {
+            Kind = kind, CodeLanguage = language, Text = text, Title = title.Trim(), Source = "Pasteory", CopyCount = 0, IsManual = true
+        };
+        if (kind == ClipKind.Link) clip = clip with { LinkDetails = LinkFallback(clip) };
+        if (!string.IsNullOrWhiteSpace(text) && ChangeHistory(() => history.Capture(clip, null, out saved)) && saved is not null)
             _ = EnrichAsync(saved, null);
         return saved;
     }
@@ -111,7 +128,7 @@ public partial class App
     internal bool EditManualText(Guid id, string text)
     {
         bool changed = false;
-        if (ChangeHistory(() => changed = history.UpdateManualText(id, text)) && !changed)
+        if (ChangeHistory(() => changed = history.UpdateManualText(id, text, LinkFallback)) && !changed)
             Notify("Could not save changes to this clip.");
         return changed;
     }
@@ -148,17 +165,29 @@ public partial class App
         }
     }
 
-    internal ImageSource? ClipThumbnail(Clip clip)
+    internal ImagePreview ClipThumbnail(Clip clip)
     {
-        if (thumbnails.TryGetValue(clip.Id, out var cached)) return cached;
-        try { cached = ClipboardFormats.DecodePreview(ReadImage(clip), 126); }
+        var key = (clip.Id, clip.ImageHash);
+        if (thumbnails.TryGetValue(key, out var cached)) return cached;
+        if (thumbnails.Count >= 180) thumbnails.Remove(thumbnails.Keys.First());
+        return thumbnails[key] = ClipImagePreview(clip, 126);
+    }
+
+    internal ImagePreview ClipImagePreview(Clip clip, int maximumDimension)
+    {
+        int width = clip.ImageWidth, height = clip.ImageHeight, size = clip.ImageSize;
+        try
+        {
+            byte[] bytes = ReadImage(clip);
+            size = bytes.Length;
+            var (actualWidth, actualHeight) = ClipboardFormats.PngDimensions(bytes);
+            if (actualWidth > 0 && actualHeight > 0) (width, height) = (actualWidth, actualHeight);
+            return new(ClipboardFormats.DecodePreview(bytes, maximumDimension), width, height, size);
+        }
         catch (Exception error) when (IsLocalError(error) || error is NotSupportedException or ArgumentException or FileFormatException)
         {
-            cached = null;
+            return new(null, width, height, size);
         }
-        if (thumbnails.Count >= 180) thumbnails.Clear();
-        thumbnails[clip.Id] = cached;
-        return cached;
     }
 
     internal ImageSource? SourceIcon(string? file)
@@ -233,11 +262,13 @@ public partial class App
     private bool OpenFiles(string[] files)
     {
         var actions = new List<(string File, FileOpenRule Rule)>();
-        foreach (string path in files)
+        foreach (string reference in files)
         {
-            if (!Path.IsPathFullyQualified(path) || !File.Exists(path))
+            var file = FileReference.FromPath(reference);
+            string path = file.Path;
+            if (!Path.IsPathFullyQualified(path) || (!File.Exists(path) && !Directory.Exists(path)))
             {
-                Notify(Labels.Format("File is missing: {0}", Path.GetFileName(path)));
+                Notify(Labels.Format("File is missing: {0}", file.Name));
                 return false;
             }
             var rule = Settings.FileRules.Where(entry => entry.Extension.Length > 0 && path.EndsWith(
@@ -246,7 +277,7 @@ public partial class App
             if (rule is null || string.IsNullOrWhiteSpace(rule.Command) &&
                 (string.IsNullOrWhiteSpace(rule.ApplicationPath) || !File.Exists(rule.ApplicationPath)))
             {
-                Notify(Labels.Format("Choose an open rule for {0}.", Path.GetFileName(path)));
+                Notify(Labels.Format("Choose an open rule for {0}.", file.Name));
                 return false;
             }
             actions.Add((path, rule));
@@ -254,13 +285,22 @@ public partial class App
         foreach (var (path, rule) in actions)
         {
             if (!string.IsNullOrWhiteSpace(rule.Command))
-                _ = fileCommands.RunAsync(dataDirectory, rule, path);
+                _ = RunFileCommandAsync(rule, path);
             else StartApp(rule.ApplicationPath!, path);
         }
         return actions.Count > 0;
     }
 
     internal FileCommandRunner FileCommands => fileCommands;
+
+    private async Task RunFileCommandAsync(FileOpenRule rule, string path)
+    {
+        var result = await fileCommands.RunAsync(dataDirectory, rule, path);
+        if (Exiting || result is null) return;
+        if (result.Error is { } error) Notify(error);
+        else if (result.ExitCode is not 0)
+            Notify(Labels.Format("File command exited with code {0}. See Command output in Open With.", result.ExitCode));
+    }
 
     private string WritePreviewFile(string extension, byte[] data)
     {
@@ -363,7 +403,9 @@ public partial class App
 
     private async Task EnrichAsync(Clip clip, byte[]? image)
     {
-        if (clip.Kind == ClipKind.Link && Settings.ResolveLinks && clip.LinkDetails?.Status != "Resolved")
+        if (clip.Kind == ClipKind.Link && Settings.ResolveLinks &&
+            (clip.LinkDetails is null or { Status: "Not attempted" } ||
+                DateTimeOffset.UtcNow - clip.LinkDetails.AttemptedAt >= TimeSpan.FromMinutes(clip.LinkDetails.Status == "Resolved" ? 1440 : 5)))
             await ResolveLinkAsync(clip);
         if (image is not null && Settings.RecognizeImages && string.IsNullOrEmpty(clip.RecognizedText))
         {
@@ -386,27 +428,20 @@ public partial class App
             LinkDetails result;
             if (Uri.TryCreate(raw.Trim(), UriKind.Absolute, out var uri) && LinkResolver.Allowed(uri))
             {
-                var signIn = Settings.LinkSignIns.FirstOrDefault(rule => rule.Enabled && LinkResolver.MatchRule(rule.Pattern, uri) is not null);
+                var signIn = Settings.LinkSignIns.Where(rule => rule.Enabled).OrderBy(LinkTitles.IsBuiltInSignIn)
+                    .FirstOrDefault(rule => LinkResolver.MatchRule(rule.Pattern, uri) is not null);
                 result = signIn is null ? await links.ResolveAsync(raw, lifetime.Token) :
                     await LinkSessions.ResolveAsync(dataDirectory, signIn, uri, new WindowInteropHelper(window).EnsureHandle(), lifetime.Token);
-                if (result.Title is null)
-                {
-                    foreach (var rule in Settings.LinkFallbacks)
-                    {
-                        var match = LinkResolver.MatchRule(rule.Pattern, uri);
-                        string? title = match is null ? null : LinkResolver.NormalizeTitle(match.Result(rule.Title));
-                        if (title is null) continue;
-                        result = result with { Title = title, Quality = "Fallback title" };
-                        break;
-                    }
-                }
             }
             else result = new("Invalid link", null, DateTimeOffset.UtcNow);
-            if (!Exiting) UpdateClip(clip.Id, current => current.Text == raw ? current with { LinkDetails = result } : current);
+            if (!Exiting) UpdateClip(clip.Id, current => current.Text == raw ?
+                current with { LinkDetails = LinkTitles.RecordAttempt(current, result, Settings.LinkFallbacks) } : current);
         }
         catch (OperationCanceledException) when (Exiting) { }
         finally { links.Finish(clip.Id); }
     }
+
+    private LinkDetails? LinkFallback(Clip clip) => LinkTitles.UpdateFallback(clip, Settings.LinkFallbacks);
 
     internal async Task<int> ResolveMatchingLinksAsync(string? pattern = null)
     {

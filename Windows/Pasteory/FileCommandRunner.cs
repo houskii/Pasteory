@@ -14,10 +14,11 @@ internal sealed class FileCommandRunner
     internal sealed record Run(string Path, DateTimeOffset StartedAt, int? ExitCode = null, string? Error = null);
     private readonly Dictionary<string, Run> recent = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> active = new(StringComparer.OrdinalIgnoreCase);
+    internal event Action<string>? Changed;
     internal Run? Latest(string extension) => recent.GetValueOrDefault(extension);
     internal static string LogFolder(string root) => Path.Combine(root, "logs", "file-commands");
 
-    internal async Task RunAsync(string root, FileOpenRule rule, string file)
+    internal async Task<Run?> RunAsync(string root, FileOpenRule rule, string file)
     {
         string logPath = "";
         var started = DateTimeOffset.UtcNow;
@@ -43,22 +44,26 @@ internal sealed class FileCommandRunner
                 Directory.CreateDirectory(LogFolder(root));
                 logPath = Path.Combine(LogFolder(root), $"{started:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.log");
                 active.Add(logPath);
-                recent[rule.Extension] = new(logPath, started);
+                Publish(rule.Extension, new(logPath, started));
             }
             using var process = Process.Start(start) ?? throw new IOException("Could not start PowerShell.");
-            if (rule.ShowTerminal) return;
+            if (rule.ShowTerminal) return null;
             process.StandardInput.Close();
             await using var log = new FileStream(logPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read,
                 bufferSize: 8192, useAsync: false);
             var gate = new object();
             await Task.WhenAll(CopyLog(process.StandardOutput.BaseStream, log, gate, 512 * 1024),
                 CopyLog(process.StandardError.BaseStream, log, gate, 512 * 1024), process.WaitForExitAsync());
-            if (recent[rule.Extension].Path == logPath) recent[rule.Extension] = new(logPath, started, process.ExitCode);
+            var complete = new Run(logPath, started, process.ExitCode);
+            if (recent[rule.Extension].Path == logPath) Publish(rule.Extension, complete);
+            return complete;
         }
         catch (Exception error) when (App.IsLocalError(error) || error is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
+            var failed = new Run(logPath, started, Error: error.Message);
             if (!recent.TryGetValue(rule.Extension, out var latest) || latest.Path == logPath)
-                recent[rule.Extension] = new(logPath, started, Error: error.Message);
+                Publish(rule.Extension, failed);
+            return failed;
         }
         finally
         {
@@ -75,6 +80,12 @@ internal sealed class FileCommandRunner
                 catch (UnauthorizedAccessException) { }
             }
         }
+    }
+
+    private void Publish(string extension, Run run)
+    {
+        recent[extension] = run;
+        Changed?.Invoke(extension);
     }
 
     private static async Task CopyLog(Stream source, FileStream log, object gate, int limit)

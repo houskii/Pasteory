@@ -85,8 +85,11 @@ internal sealed partial class LinkResolver
             foreach (Match item in attributes)
             {
                 string value = item.Groups[2].Success ? item.Groups[2].Value : item.Groups[3].Value;
-                if (item.Groups[1].Value.Equals("content", StringComparison.OrdinalIgnoreCase)) content = value;
-                if (item.Groups[1].Value is "property" or "name") type = value.ToLowerInvariant();
+                switch (item.Groups[1].Value.ToLowerInvariant())
+                {
+                    case "content": content = value; break;
+                    case "property" or "name": type = value.ToLowerInvariant(); break;
+                }
             }
             if (content is not null && type is "og:title" or "twitter:title") return NormalizeTitle(WebUtility.HtmlDecode(content));
         }
@@ -108,8 +111,11 @@ internal sealed partial class LinkResolver
         if (LoginTitle().IsMatch(title) || LoginRoute().IsMatch(finalUrl.AbsolutePath))
             return new("Sign-in required", null, DateTimeOffset.UtcNow, source, "Login or error page");
         string brand = finalUrl.Host.StartsWith("www.", StringComparison.OrdinalIgnoreCase) ? finalUrl.Host[4..] : finalUrl.Host;
-        if (finalUrl.AbsolutePath.Length > 1 && (title.Equals(brand, StringComparison.OrdinalIgnoreCase) ||
-            title.Equals(brand.Split('.')[0], StringComparison.OrdinalIgnoreCase)))
+        bool shell = title.Equals(brand, StringComparison.OrdinalIgnoreCase) ||
+            title.Equals(brand.Split('.')[0], StringComparison.OrdinalIgnoreCase) ||
+            brand == "cloud.bytedance.net" && (title.Equals("ByteCloud", StringComparison.OrdinalIgnoreCase) ||
+                title.Equals("ByteCloud Console", StringComparison.OrdinalIgnoreCase));
+        if (finalUrl.AbsolutePath.Length > 1 && shell)
             return new("Generic page title", null, DateTimeOffset.UtcNow, source, "Generic");
         return new("Resolved", title, DateTimeOffset.UtcNow, source, "Distinctive");
     }

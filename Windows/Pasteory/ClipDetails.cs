@@ -93,35 +93,28 @@ internal sealed class ClipDetails : DockPanel
         }
         if (clip.HasImage)
         {
-            try
+            var preview = app.ClipImagePreview(clip, 500);
+            if (preview.Bitmap is { } image)
             {
-                var image = ClipboardFormats.DecodePreview(app.ReadImage(clip));
                 body.Children.Add(new Image { Source = image, MaxHeight = 205, Stretch = Stretch.Uniform,
                     HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 7) });
-                int width = clip.ImageWidth > 0 ? clip.ImageWidth : image.PixelWidth;
-                int height = clip.ImageHeight > 0 ? clip.ImageHeight : image.PixelHeight;
-                body.Children.Add(Ui.Text($"PNG · {width} × {height} · {ClipCard.Bytes(clip.ImageSize)}", 11, "Muted"));
-                if (clip.RecognizedText is { Length: > 0 } recognized) body.Children.Add(ContentPreview.TextBoxFor(recognized));
             }
-            catch (Exception error) when (App.IsLocalError(error) || error is NotSupportedException or ArgumentException or FileFormatException)
-            { body.Children.Add(Ui.Text(Labels.Get("The saved image could not be opened."), 12, "Muted")); }
+            else body.Children.Add(Ui.WithIcon(Glyph.Image, Labels.Get("The saved image could not be opened."), "Muted"));
+            body.Children.Add(Ui.Text(preview.Details, 11, "Muted"));
+            if (clip.RecognizedText is { Length: > 0 } recognized) body.Children.Add(ContentPreview.TextBoxFor(recognized));
         }
-        foreach (var file in clip.Files)
-        {
-            var title = Ui.WithIcon(Glyph.Files, Path.GetFileName(file));
-            var path = Ui.Text(file, 11, "Muted");
-            path.Margin = new Thickness(24, 1, 0, 6);
-            body.Children.Add(title);
-            body.Children.Add(path);
-            if (!file.StartsWith(@"\\", StringComparison.Ordinal) && !File.Exists(file))
-                body.Children.Add(Ui.Text(Labels.Get("File unavailable"), 11, "Danger"));
-        }
+        if (clip.Files.Length > 0)
+            body.Children.Add(new FilePreviewPanel { DataContext = clip });
         if (clip.Kind == ClipKind.Color && TextTools.TryColor(clip.Text, out var color))
-            body.Children.Add(new Border
+        {
+            var swatch = new Border
             {
                 Background = new SolidColorBrush(Color.FromArgb(color.A, color.R, color.G, color.B)), Height = 56,
-                CornerRadius = new CornerRadius(8), Margin = new Thickness(0, 0, 0, 8)
-            });
+                CornerRadius = new CornerRadius(8), Margin = new Thickness(0, 0, 0, 8), BorderThickness = new Thickness(1)
+            };
+            swatch.SetResourceReference(Border.BorderBrushProperty, "Line");
+            body.Children.Add(swatch);
+        }
         if (clip.Text is { } content)
         {
             var field = ContentPreview.TextBoxFor(content, clip.Kind == ClipKind.Code);
@@ -180,8 +173,14 @@ internal sealed class ClipDetails : DockPanel
         if (!string.IsNullOrWhiteSpace(capture.Context)) panel.Children.Add(Ui.Text(capture.Context, 11));
         if (!string.IsNullOrWhiteSpace(capture.Url)) panel.Children.Add(Ui.Text(capture.Url, 11, "LinkInk"));
         if (capture.Details is { } details)
+        {
             foreach (string key in new[] { "repository", "branch", "projectId", "mergeRequestId" })
                 if (details.TryGetValue(key, out var value)) panel.Children.Add(Ui.Text(value, 11, "Muted"));
+            if (details.TryGetValue("conversationType", out string? type))
+                panel.Children.Add(Ui.Text(Labels.Format("Conversation   {0}", Labels.Get(type)), 11, "Muted"));
+            if (details.TryGetValue("participantCount", out string? participants))
+                panel.Children.Add(Ui.Text(Labels.Format("Participants   {0}", participants), 11, "Muted"));
+        }
     }
 
     private void Edit()
@@ -255,10 +254,25 @@ internal sealed class ClipDetails : DockPanel
         var details = clip!.LinkDetails;
         if (details is not null)
         {
-            if (details.Title is { Length: > 0 }) body.Children.Add(Ui.Text(details.Title, 13, strong: true));
+            if (clip.DisplayTitle.Length > 0) body.Children.Add(Ui.Text(clip.DisplayTitle, 13, strong: true));
+            if (details.FallbackSource is { } fallback && details.Title is null)
+                body.Children.Add(Ui.Text(Labels.Get(fallback), 11, "Muted"));
+            if (details.Route is { } route) body.Children.Add(Ui.Text(route, 11, "Muted"));
             body.Children.Add(Ui.Text(Labels.Get(details.Status), 11, "Muted"));
             if (details.Quality is { } quality) body.Children.Add(Ui.Text(Labels.Get(quality), 11, "Muted"));
-            body.Children.Add(Ui.Text($"{details.Source} · {details.AttemptedAt.ToLocalTime():g}", 11, "Muted"));
+            if (details.Status != "Not attempted")
+                body.Children.Add(Ui.Text($"{Labels.Get(details.Source ?? "Anonymous")} · {details.AttemptedAt.ToLocalTime():g}", 11, "Muted"));
+            if (details.Status != "Resolved" && details.LastResolvedAt is { } earlier)
+                body.Children.Add(Ui.Text(Labels.Format("Last successful resolution {0}", earlier.ToLocalTime().ToString("g")), 11, "Muted"));
+            if (details.Attempts is { Length: > 1 } attempts)
+            {
+                var entries = new StackPanel { Margin = new Thickness(9, 4, 0, 0) };
+                foreach (var attempt in attempts)
+                    entries.Children.Add(Ui.Text($"{attempt.At.ToLocalTime():g} · {Labels.Get(attempt.Status)}", 11, "Muted"));
+                var history = new Expander { Header = Labels.Get("Resolution history"), Content = entries };
+                history.SetResourceReference(Control.ForegroundProperty, "Muted");
+                body.Children.Add(history);
+            }
         }
         else body.Children.Add(Ui.Text(Labels.Get("Not resolved"), 11, "Muted"));
         var retry = Ui.Button(details is null ? "Resolve title" : "Retry resolution", () => _ = app.ResolveLinkAsync(clip));

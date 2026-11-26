@@ -48,6 +48,8 @@ public partial class App : Application
     internal LocalSettings Settings { get; private set; } = new();
     internal IReadOnlyList<Clip> Clips => history?.Clips ?? [];
     internal IReadOnlyList<ClipCollection> Collections => history?.Collections ?? [];
+    internal IReadOnlyList<Guid> SearchClipIds(string query, System.Threading.CancellationToken cancellation) =>
+        history?.SearchIds(query, cancellation: cancellation) ?? [];
     internal string DataDirectory => dataDirectory;
     internal bool ShortcutAvailable => hotkeyAvailable;
     internal bool CaptureAvailable => listening;
@@ -109,6 +111,7 @@ public partial class App : Application
             Theme.Apply(Resources, Settings);
             history = new HistoryStore(dataDirectory, maxClips: 20_000, maxBytes: 1024L * 1024 * 1024, archiveOverflow: true);
             history.RunMaintenance(DateTimeOffset.Now, Settings.ArchiveAfterDays);
+            history.UpdateLinkDetails(LinkFallback);
             Ai = new AiTasks(dataDirectory);
         }
         catch (Exception error) when (IsLocalError(error) || error is JsonException or InvalidDataException)
@@ -245,14 +248,20 @@ public partial class App : Application
                 if (clip.Kind == ClipKind.Files)
                     clip = clip with { FileIdentity = await Task.Run(() => FileFingerprint(clip.Files)) };
                 if (Exiting || Settings.Paused || Settings.ShouldIgnore(source)) return;
-                clip = clip with { Captures = [ReadSourceContext(clip)] };
+                var sourceContext = ReadSourceContext(clip, out nint chatWindow);
+                clip = clip with { Captures = [sourceContext] };
+                if (clip.Kind == ClipKind.Link) clip = clip with { LinkDetails = LinkFallback(clip) };
                 Clip? saved = null;
                 ChangeHistory(() =>
                 {
                     if (!history.Capture(clip, item.Image, out saved))
                         Notify("The history limit was reached. Unpin or unfavorite a clip to make room.");
                 });
-                if (saved is not null) _ = EnrichAsync(saved, item.Image);
+                if (saved is not null)
+                {
+                    _ = EnrichAsync(saved, item.Image);
+                    if (chatWindow != 0) _ = EnrichChatAsync(saved.Id, sourceContext, chatWindow);
+                }
             }
             return;
         }
@@ -392,6 +401,7 @@ public partial class App : Application
         bool shortcutChanged = Shortcuts.Text(Settings, Command.ShowPanel) != Shortcuts.Text(next, Command.ShowPanel);
         bool pausedChanged = Settings.Paused != next.Paused;
         bool themeChanged = Settings.Theme != next.Theme || Settings.Appearance != next.Appearance;
+        bool linkRulesChanged = !Settings.LinkFallbacks.SequenceEqual(next.LinkFallbacks);
         bool aiScopeChanged = Settings.Ai.Enabled != next.Ai.Enabled || Settings.Ai.ShareNotes != next.Ai.ShareNotes ||
             Settings.Ai.ShareOcr != next.Ai.ShareOcr || Settings.Ai.ShareSource != next.Ai.ShareSource ||
             Settings.Ai.ShareResources != next.Ai.ShareResources || Settings.Ai.Endpoint != next.Ai.Endpoint ||
@@ -409,6 +419,7 @@ public partial class App : Application
             return false;
         }
         Settings = next;
+        if (linkRulesChanged) ChangeHistory(() => history.UpdateLinkDetails(LinkFallback));
         if (aiScopeChanged) Ai?.Pause();
         if (themeChanged) Theme.Apply(Resources, Settings);
         if (pausedChanged) observedSequence = NativeMethods.GetClipboardSequenceNumber();

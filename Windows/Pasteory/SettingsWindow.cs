@@ -8,6 +8,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Microsoft.Win32;
@@ -253,7 +254,7 @@ internal sealed partial class SettingsWindow : Window
         return fields;
     }
 
-    private static FrameworkElement Row(string title, FrameworkElement field, string? description = null)
+    private static FrameworkElement Row(string title, FrameworkElement field, string? description = null, ImageSource? icon = null)
     {
         var row = new Grid { Margin = new Thickness(0, 8, 0, 6) };
         row.ColumnDefinitions.Add(new ColumnDefinition());
@@ -261,7 +262,16 @@ internal sealed partial class SettingsWindow : Window
         var label = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 14, 0) };
         label.Children.Add(Ui.Text(Labels.Get(title), 13));
         if (description is not null) label.Children.Add(Ui.Text(Labels.Get(description), 11, "Muted"));
-        row.Children.Add(label);
+        if (icon is null) row.Children.Add(label);
+        else
+        {
+            var heading = new DockPanel { VerticalAlignment = VerticalAlignment.Center };
+            var image = new Image { Source = icon, Width = 33, Height = 33, Margin = new Thickness(0, 0, 6, 0) };
+            DockPanel.SetDock(image, Dock.Left);
+            heading.Children.Add(image);
+            heading.Children.Add(label);
+            row.Children.Add(heading);
+        }
         field.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetColumn(field, 1);
         row.Children.Add(field);
@@ -449,7 +459,7 @@ internal sealed partial class SettingsWindow : Window
         AppPath(apps, "Image viewer", app.Settings.ImageViewerPath, (settings, value) => settings with { ImageViewerPath = value });
         AppPath(apps, "Code editor", app.Settings.CodeEditorPath, (settings, value) => settings with { CodeEditorPath = value });
         var files = SettingsCard(layout, "File open rules");
-        foreach (var rule in app.Settings.FileRules)
+        foreach (var rule in app.Settings.FileRules.OrderBy(item => item.Extension, StringComparer.OrdinalIgnoreCase))
         {
             var actions = new StackPanel { Orientation = Orientation.Horizontal };
             var edit = Ui.Button("Edit", () => EditFileRule(rule));
@@ -459,6 +469,16 @@ internal sealed partial class SettingsWindow : Window
             {
                 var log = Ui.Button("Command output", () => ViewCommandLog(rule));
                 log.Margin = new Thickness(0, 0, 5, 0);
+                void Update(string suffix)
+                {
+                    if (!rule.Extension.Equals(suffix, StringComparison.OrdinalIgnoreCase)) return;
+                    var run = app.FileCommands.Latest(suffix);
+                    log.Content = Labels.Get("Command output") + (run is null ? "" : " · " + CommandStatus(run));
+                    log.ToolTip = run?.Error;
+                }
+                Update(rule.Extension);
+                log.Loaded += (_, _) => app.FileCommands.Changed += Update;
+                log.Unloaded += (_, _) => app.FileCommands.Changed -= Update;
                 actions.Children.Add(log);
             }
             actions.Children.Add(Ui.IconButton(Glyph.Close, "Remove file rule", () =>
@@ -466,7 +486,9 @@ internal sealed partial class SettingsWindow : Window
                 if (app.SaveSettings(app.Settings with { FileRules = app.Settings.FileRules.Where(item => item != rule).ToArray() }))
                     Select(SettingsPage.OpenWith, rebuild: true);
             }));
-            files.Children.Add(Row("." + rule.Extension, actions, rule.Command is { Length: > 0 } ? "PowerShell command" : rule.ApplicationPath));
+            var type = FileTypes.ForSuffix(rule.Extension);
+            files.Children.Add(Row("." + rule.Extension, actions, type.Name + " · " +
+                (rule.Command is { Length: > 0 } ? Labels.Get("PowerShell command") : rule.ApplicationPath), FileTypes.Image(type)));
         }
         files.Children.Add(Row("Match by file extension", Ui.Button("Add rule", () => EditFileRule(null), "PrimaryButton")));
     }
@@ -515,7 +537,7 @@ internal sealed partial class SettingsWindow : Window
         script.AcceptsReturn = true;
         script.MinHeight = 84;
         script.TextWrapping = TextWrapping.Wrap;
-        var terminal = new CheckBox { Content = Labels.Get("Show terminal"), IsChecked = existing?.ShowTerminal == true };
+        var terminal = new CheckBox { Content = Labels.Get("Show terminal"), IsChecked = existing?.ShowTerminal ?? true };
         var scriptPanel = new StackPanel();
         scriptPanel.Children.Add(script);
         scriptPanel.Children.Add(Ui.Text(Labels.Get("$file is the full file path. The working directory is its containing folder."), 11, "Muted"));
@@ -526,7 +548,24 @@ internal sealed partial class SettingsWindow : Window
             pathRow.Visibility = command ? Visibility.Collapsed : Visibility.Visible;
             scriptPanel.Visibility = command ? Visibility.Visible : Visibility.Collapsed;
         }
-        Ui.AddField(form, "File extension", extension);
+        var suffixEntry = new DockPanel();
+        var (catalog, search) = FileExtensionPicker(extension);
+        var presets = Ui.Button("Preset file extensions", () =>
+        {
+            catalog.Visibility = catalog.IsVisible ? Visibility.Collapsed : Visibility.Visible;
+            if (catalog.IsVisible) _ = Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() =>
+            {
+                if (!catalog.IsVisible) return;
+                search.BringIntoView();
+                Keyboard.Focus(search);
+            }));
+        });
+        DockPanel.SetDock(presets, Dock.Right);
+        presets.Margin = new Thickness(6, 0, 0, 0);
+        suffixEntry.Children.Add(presets);
+        suffixEntry.Children.Add(extension);
+        Ui.AddField(form, "File extension", suffixEntry);
+        form.Children.Add(catalog);
         Ui.AddField(form, "Open mode", mode);
         form.Children.Add(pathRow);
         form.Children.Add(scriptPanel);
@@ -549,8 +588,62 @@ internal sealed partial class SettingsWindow : Window
             })) return false;
             Select(SettingsPage.OpenWith, rebuild: true);
             return true;
-        }, close);
+        }, close) with { Submit = null };
     });
+
+    private static (StackPanel Panel, TextBox Search) FileExtensionPicker(TextBox destination)
+    {
+        var panel = new StackPanel { Visibility = Visibility.Collapsed, Margin = new Thickness(0, 0, 0, 6) };
+        var filter = Ui.Field("Search extensions or types", "");
+        var choices = new ListBox { MaxHeight = 178, Margin = new Thickness(0, 3, 0, 0) };
+        AutomationProperties.SetName(choices, Labels.Get("Preset file extensions"));
+        Ui.AddField(panel, "Search extensions or types", filter);
+        panel.Children.Add(choices);
+
+        void Populate()
+        {
+            string query = filter.Text.Trim();
+            choices.Items.Clear();
+            foreach (string suffix in FileTypes.Suffixes)
+            {
+                var type = FileTypes.ForSuffix(suffix);
+                if (!("." + suffix).Contains(query, StringComparison.OrdinalIgnoreCase) &&
+                    !type.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase)) continue;
+                var row = new StackPanel { Orientation = Orientation.Horizontal };
+                row.Children.Add(Ui.Text("." + suffix, 13, strong: true));
+                row.Children.Add(new Image { Source = FileTypes.Image(type), Width = 28, Height = 28, Margin = new Thickness(8, 0, 5, 0) });
+                row.Children.Add(Ui.Text(type.Name, 11, "Muted"));
+                var item = new ListBoxItem { Content = row, Tag = suffix };
+                AutomationProperties.SetName(item, $".{suffix} · {type.Name}");
+                choices.Items.Add(item);
+            }
+        }
+
+        filter.TextChanged += (_, _) => Populate();
+        void Choose()
+        {
+            if (choices.SelectedItem is not ListBoxItem { Tag: string suffix }) return;
+            destination.Text = suffix;
+            choices.SelectedIndex = -1;
+            panel.Visibility = Visibility.Collapsed;
+            destination.Focus();
+        }
+        choices.MouseDoubleClick += (_, _) => Choose();
+        choices.PreviewKeyDown += (_, args) =>
+        {
+            if (args.Key != Key.Enter) return;
+            args.Handled = true;
+            Choose();
+        };
+        var use = Ui.Button("Use extension", Choose);
+        use.HorizontalAlignment = HorizontalAlignment.Right;
+        use.IsEnabled = false;
+        use.Margin = new Thickness(0, 4, 0, 0);
+        choices.SelectionChanged += (_, _) => use.IsEnabled = choices.SelectedItem is not null;
+        panel.Children.Add(use);
+        panel.IsVisibleChanged += (_, _) => { if (panel.IsVisible) Populate(); };
+        return (panel, filter);
+    }
 
     private void ViewCommandLog(FileOpenRule rule)
     {
@@ -571,7 +664,7 @@ internal sealed partial class SettingsWindow : Window
                 label.Text = Labels.Get("No command has run for this rule.");
                 return;
             }
-            label.Text = run.Error ?? (run.ExitCode is { } code ? Labels.Format("Exit code {0}", code) : Labels.Get("Running…"));
+            label.Text = run.Error ?? CommandStatus(run);
             try
             {
                 if (File.Exists(run.Path))
@@ -582,7 +675,7 @@ internal sealed partial class SettingsWindow : Window
                     if (view.Text != next) view.Text = next;
                 }
             }
-            catch (IOException) { }
+            catch (Exception error) when (App.IsLocalError(error)) { }
         }
         timer.Tick += (_, _) => Refresh();
         dialog.Closed += (_, _) => timer.Stop();
@@ -590,6 +683,10 @@ internal sealed partial class SettingsWindow : Window
         timer.Start();
         dialog.ShowDialog();
     }
+
+    private static string CommandStatus(FileCommandRunner.Run run) => run.Error is not null ? Labels.Get("Failed") :
+        run.ExitCode is null ? Labels.Get("Running…") : run.ExitCode is 0 ? Labels.Get("Completed") :
+        Labels.Format("Exit code {0}", run.ExitCode);
 
     private void BuildLinks(Panel layout)
     {

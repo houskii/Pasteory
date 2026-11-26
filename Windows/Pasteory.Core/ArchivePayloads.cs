@@ -15,27 +15,25 @@ public sealed partial class HistoryStore
             ? group with { PackPayloads = enabled } : group).ToList());
     }
 
-    private List<Clip> PackForDisk(List<Clip> clips, List<ClipCollection> groups, Dictionary<Guid, PackedPayload> manifest)
+    private PackedPayload? PackForDisk(Clip clip, HashSet<Guid> compress, CatalogRow? previous)
     {
-        var compress = groups.Where(group => group.PackPayloads).Select(group => group.Id).ToHashSet();
-        return clips.Select(clip =>
-        {
-            bool eligible = clip.ArchivedAt is not null || clip.CollectionIds.Length > 0 &&
-                clip.CollectionIds.All(compress.Contains) && !clip.Pinned && !clip.Favorite && clip.TrashedAt is null;
-            if (!eligible || clip.Text is null && clip.Html is null && clip.Rtf is null) return clip;
-            byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(new ArchiveText(clip.Text, clip.Html, clip.Rtf));
-            if (bytes.Length > 128 * 1024 * 1024) return clip;
-            string hash = Convert.ToHexString(SHA256.HashData(bytes));
-            string path = Path.Combine(archiveDirectory, hash + ".br");
-            if (!File.Exists(path))
-                LocalJson.WriteFile(path, output =>
-                {
-                    using var codec = new BrotliStream(output, CompressionLevel.Fastest, leaveOpen: true);
-                    codec.Write(bytes);
-                });
-            manifest[clip.Id] = new(hash, bytes.Length);
-            return clip with { Text = null, Html = null, Rtf = null };
-        }).ToList();
+        bool eligible = clip.ArchivedAt is not null || clip.CollectionIds.Length > 0 &&
+            clip.CollectionIds.All(compress.Contains) && !clip.Pinned && !clip.Favorite && clip.TrashedAt is null;
+        if (!eligible || clip.Text is null && clip.Html is null && clip.Rtf is null) return null;
+        if (previous is { Packed: { } packed } &&
+            clip.Text == previous.Clip.Text && clip.Html == previous.Clip.Html && clip.Rtf == previous.Clip.Rtf)
+            return packed;
+        byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(new ArchiveText(clip.Text, clip.Html, clip.Rtf));
+        if (bytes.Length > 128 * 1024 * 1024) return null;
+        string hash = Convert.ToHexString(SHA256.HashData(bytes));
+        string path = Path.Combine(archiveDirectory, hash + ".br");
+        if (!File.Exists(path))
+            LocalJson.WriteFile(path, output =>
+            {
+                using var codec = new BrotliStream(output, CompressionLevel.Fastest, leaveOpen: true);
+                codec.Write(bytes);
+            });
+        return new(hash, bytes.Length);
     }
 
     private Clip ReadPacked(Clip clip, PackedPayload entry)

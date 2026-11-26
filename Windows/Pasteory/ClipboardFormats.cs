@@ -95,13 +95,23 @@ internal static class ClipboardFormats
         return data;
     }
 
-    internal static BitmapSource DecodePreview(byte[] png, int width = 500)
+    internal static (int Width, int Height) PngDimensions(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.Length < 24 || bytes[0] != 137 || !bytes.Slice(1, 7).SequenceEqual("PNG\r\n\x1a\n"u8) ||
+            !bytes.Slice(12, 4).SequenceEqual("IHDR"u8)) return (0, 0);
+        return (Math.Max(0, BinaryPrimitives.ReadInt32BigEndian(bytes[16..])),
+            Math.Max(0, BinaryPrimitives.ReadInt32BigEndian(bytes[20..])));
+    }
+
+    internal static BitmapSource DecodePreview(byte[] png, int maximumDimension = 500)
     {
         using var stream = new MemoryStream(png, writable: false);
         var image = new BitmapImage();
         image.BeginInit();
         image.CacheOption = BitmapCacheOption.OnLoad;
-        image.DecodePixelWidth = width;
+        var (width, height) = PngDimensions(png);
+        if (width >= height && width > maximumDimension) image.DecodePixelWidth = maximumDimension;
+        else if (height > maximumDimension) image.DecodePixelHeight = maximumDimension;
         image.StreamSource = stream;
         image.EndInit();
         image.Freeze();
@@ -151,12 +161,11 @@ internal static class ClipboardFormats
                 MemoryStream stream when stream.Length <= MaxImageBytes => stream.ToArray(),
                 _ => null
             };
-            if (png is not null && png.Length is >= 24 and <= MaxImageBytes &&
-                png.AsSpan(0, 8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }) &&
-                png.AsSpan(12, 4).SequenceEqual("IHDR"u8) &&
-                IsAllowedSize(BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(16)),
-                    BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(20))))
-                return png;
+            if (png is { Length: >= 24 and <= MaxImageBytes })
+            {
+                var (width, height) = PngDimensions(png);
+                if (IsAllowedSize(width, height)) return png;
+            }
         }
 
         if (!data.GetDataPresent(DataFormats.Bitmap) ||
