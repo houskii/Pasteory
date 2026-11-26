@@ -30,7 +30,7 @@ internal sealed class ClipDetails : DockPanel
         }
         Preview(expand);
         OriginalItems();
-        if (clip.Kind != ClipKind.Aggregate) Sources();
+        if (clip.Kind != ClipKind.Aggregate) AddSources(Card("Capture source"), clip);
         if (clip.TrashedAt is null)
         {
             Edit();
@@ -108,6 +108,10 @@ internal sealed class ClipDetails : DockPanel
         {
             body.Children.Add(Ui.Text(clip.Title.Length > 0 ? clip.Title : Labels.Get("Aggregation"), 15, strong: true));
             body.Children.Add(Ui.Text(Labels.Format("{0} items", clip.Members.Length), 12, "Muted"));
+            body.Children.Add(Ui.Text(LibraryEditors.AggregationSource(clip.AggregationOrigin, clip.AggregationFromSearch), 11, "Muted"));
+            body.Children.Add(Ui.Text(Labels.Format("Created {0:g}", (clip.CreatedAt ?? clip.CapturedAt).ToLocalTime()), 11, "Muted"));
+            if (clip.AggregationUpdatedAt is { } updated)
+                body.Children.Add(Ui.Text(Labels.Format("Updated {0:g}", updated.ToLocalTime()), 11, "Muted"));
             if (clip.Note.Length > 0) body.Children.Add(Ui.Text(clip.Note));
             if (clip.TrashedAt is null) body.Children.Add(Ui.Button("Expand aggregation", () => expand()));
             return;
@@ -138,12 +142,22 @@ internal sealed class ClipDetails : DockPanel
         }
         if (clip.Text is { } content)
         {
-            var field = ContentPreview.TextBoxFor(content, clip.Kind == ClipKind.Code);
-            field.MinHeight = clip.HasImage ? 48 : 98;
-            field.MaxHeight = 210;
-            field.BorderThickness = new Thickness(0);
-            field.Padding = new Thickness(6);
-            body.Children.Add(field);
+            if (clip.Kind is ClipKind.Text or ClipKind.Code)
+            {
+                var preview = ContentPreview.Create(app, clip, () => ContentPreview.Show(app, clip, Window.GetWindow(this)));
+                preview.MinHeight = 130;
+                preview.MaxHeight = 236;
+                body.Children.Add(preview);
+            }
+            else
+            {
+                var field = ContentPreview.TextBoxFor(content);
+                field.MinHeight = clip.HasImage ? 48 : 98;
+                field.MaxHeight = 210;
+                field.BorderThickness = new Thickness(0);
+                field.Padding = new Thickness(6);
+                body.Children.Add(field);
+            }
             if (clip.IsManual && clip.TrashedAt is null)
             {
                 var edit = Ui.Button("Edit original text", () =>
@@ -168,10 +182,9 @@ internal sealed class ClipDetails : DockPanel
             body.Children.Add(Ui.Text(Labels.Get("Rich text")));
     }
 
-    private void Sources()
+    internal static void AddSources(Panel body, Clip clip)
     {
-        var body = Card("Capture source");
-        var events = clip!.Captures.Length > 0 ? clip.Captures :
+        var events = clip.Captures.Length > 0 ? clip.Captures :
             clip.CopyCount > 0 ? [new CaptureEvent(clip.CapturedAt, clip.Source)] : [];
         foreach (var capture in events.Take(1)) AddCapture(body, capture);
         if (events.Length > 1)
@@ -195,7 +208,7 @@ internal sealed class ClipDetails : DockPanel
         if (!string.IsNullOrWhiteSpace(capture.Url)) panel.Children.Add(Ui.Text(capture.Url, 11, "LinkInk"));
         if (capture.Details is { } details)
         {
-            foreach (string key in new[] { "repository", "branch", "projectId", "mergeRequestId" })
+            foreach (string key in new[] { "repository", "branch", "targetBranch", "projectId", "mergeRequestId" })
                 if (details.TryGetValue(key, out var value)) panel.Children.Add(Ui.Text(value, 11, "Muted"));
             if (details.TryGetValue("conversationType", out string? type))
                 panel.Children.Add(Ui.Text(Labels.Format("Conversation   {0}", Labels.Get(type)), 11, "Muted"));

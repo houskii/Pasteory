@@ -336,16 +336,22 @@ public sealed partial class HistoryStore
         Commit(Clips.ToList(), Collections.Select(item => SameType(item) ? ordered.Dequeue() : item).ToList());
     }
 
-    public Clip SaveAggregation(Guid? id, string title, string note, IEnumerable<Guid> members, string? origin)
+    public Clip SaveAggregation(Guid? id, string title, string note, IEnumerable<Guid> members, string? origin, bool fromSearch = false)
     {
+        title = title.Trim();
+        if (title.Length == 0) throw new ArgumentException("Enter a title for the aggregation.");
         var candidates = Clips.Where(clip => clip.Kind != ClipKind.Aggregate && clip.TrashedAt is null)
             .Select(clip => clip.Id).ToHashSet();
         Guid[] memberIds = members.Where(candidates.Contains).Distinct().ToArray();
         if (memberIds.Length < 2) throw new ArgumentException("Choose at least two different clips.");
-        var previous = Clips.FirstOrDefault(clip => clip.Id == id && clip.Kind == ClipKind.Aggregate);
+        var previous = Clips.FirstOrDefault(clip => clip.Id == id && clip.Kind == ClipKind.Aggregate && clip.TrashedAt is null);
+        if (id is not null && previous is null) throw new ArgumentException("This aggregation is no longer available.");
+        var now = DateTimeOffset.UtcNow;
         var aggregate = (previous ?? new Clip { Kind = ClipKind.Aggregate, CopyCount = 0 }) with
         {
-            Title = title.Trim(), Note = note, Members = memberIds, AggregationOrigin = origin
+            Title = title, Note = note, Members = memberIds, AggregationOrigin = origin, AggregationFromSearch = fromSearch,
+            CreatedAt = previous?.CreatedAt ?? previous?.CapturedAt ?? now, AggregationUpdatedAt = now,
+            LastSelectedMember = previous?.LastSelectedMember is { } child && memberIds.Contains(child) ? child : null
         };
         Commit(Clips.Where(clip => clip.Id != aggregate.Id).Prepend(aggregate).ToList());
         return aggregate;
@@ -363,7 +369,8 @@ public sealed partial class HistoryStore
         }
         Update(parentId, clip => clip with
         {
-            Members = members, LastSelectedMember = clip.LastSelectedMember == memberId ? null : clip.LastSelectedMember
+            Members = members, LastSelectedMember = clip.LastSelectedMember == memberId ? null : clip.LastSelectedMember,
+            AggregationUpdatedAt = DateTimeOffset.UtcNow
         });
         return false;
     }

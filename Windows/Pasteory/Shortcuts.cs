@@ -20,7 +20,7 @@ internal readonly record struct Shortcut(Key Key, ModifierKeys Modifiers)
             (ModifierKeys.Shift, "Shift"), (ModifierKeys.Windows, "Win") };
         string key = Key switch
         {
-            Key.OemComma => ",", Key.Back => "Backspace", Key.Space => "Space",
+            Key.OemComma => ",", Key.Oem3 => "\u0060", Key.Back => "Backspace", Key.Space => "Space",
             Key.Up => "↑", Key.Down => "↓", Key.Left => "←", Key.Right => "→",
             >= Key.D0 and <= Key.D9 => ((int)(Key - Key.D0)).ToString(), _ => Key.ToString()
         };
@@ -47,7 +47,7 @@ internal readonly record struct Shortcut(Key Key, ModifierKeys Modifiers)
         }
         string token = pieces[^1] switch
         {
-            "," => "OemComma", "Backspace" => "Back", "↑" => "Up", "↓" => "Down", "←" => "Left", "→" => "Right",
+            "," => "OemComma", "\u0060" => "Oem3", "Backspace" => "Back", "↑" => "Up", "↓" => "Down", "←" => "Left", "→" => "Right",
             var item when item.Length == 1 && item[0] is >= '0' and <= '9' => "D" + item,
             var item => item
         };
@@ -77,10 +77,26 @@ internal static class Shortcuts
         (Command.Close, "Close quick panel", "Ctrl+W")
     ];
 
-    internal static string Text(LocalSettings settings, Command action) =>
-        settings.Shortcuts.TryGetValue(action.ToString(), out var text) ? text :
-        action == Command.ShowPanel && settings.UseAlternateShortcut ? "Ctrl+Alt+V" :
-        Entries.First(entry => entry.Action == action).Default;
+    internal static readonly (string Title, Command[] Actions)[] Sections =
+    [
+        ("Global shortcut", [Command.ShowPanel]),
+        ("Paste and copy", [Command.Paste, Command.Copy, Command.PastePlain, Command.CopyPlain]),
+        ("Opening clips", [Command.OpenClip]),
+        ("Search", [Command.Search]),
+        ("Organize the selected clip", [Command.Tools, Command.Favorite, Command.Pin, Command.Edit, Command.AssignGroups,
+            Command.NewGroup, Command.Aggregate, Command.Expand, Command.Collapse, Command.Trash]),
+        ("Windows and pages", [Command.Library, Command.Settings, Command.Close])
+    ];
+
+    internal static string Text(LocalSettings settings, Command action) => ConfiguredText(settings, action.ToString(),
+        action == Command.ShowPanel && settings.UseAlternateShortcut ? "Ctrl+Alt+V" : Entries.First(entry => entry.Action == action).Default);
+
+    internal static string ConfiguredText(LocalSettings settings, string setting, string fallback)
+    {
+        if (settings.Shortcuts.TryGetValue(setting, out var configured)) return configured;
+        return Shortcut.TryParse(fallback, out var shortcut) && settings.Shortcuts.Any(entry => entry.Key != setting &&
+            Shortcut.TryParse(entry.Value, out var other) && other == shortcut) ? "" : fallback;
+    }
 
     internal static bool Match(LocalSettings settings, Command action, Key key, ModifierKeys modifiers) =>
         Shortcut.TryParse(Text(settings, action), out var binding) && binding == new Shortcut(key, modifiers);

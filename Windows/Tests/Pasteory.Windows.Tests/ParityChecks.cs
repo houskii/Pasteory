@@ -13,6 +13,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Org.BouncyCastle.Crypto.Parameters;
@@ -23,6 +24,44 @@ using Pasteory.Windows;
 
 internal static partial class Program
 {
+    private const string MarkdownSample = """
+        # 剪贴板试读
+
+        保留 **重点**、*斜体* 和 `原文`。
+
+        - [x] 整理灵感
+        - [ ] 复核资料
+
+        > 从资料库展开，或切换到原文。
+
+        | 类型 | 状态 |
+        | --- | --- |
+        | 文字 | 已保存 |
+
+        [参考网页](https://example.com/) [本地路径](file:///C:/Windows/)
+
+        ![示例图片](https://example.com/image.png)
+        """;
+
+    private static void CheckMarkdownPreview()
+    {
+        var id = Guid.NewGuid();
+        var first = MarkdownPreview.ParseAsync(id, MarkdownSample);
+        Check(ReferenceEquals(first, MarkdownPreview.ParseAsync(id, MarkdownSample)), "Reuse a parsed preview for the same content");
+        var parsed = first.GetAwaiter().GetResult();
+        Check(MarkdownPreview.LooksFormatted(parsed) && !MarkdownPreview.LooksFormatted(
+            MarkdownPreview.ParseAsync(id, "普通文本").GetAwaiter().GetResult()), "Choose source or Markdown based on the parsed content");
+        var document = MarkdownPreview.Render(parsed, _ => throw new InvalidOperationException("Rendering opened a link"));
+        string displayed = new TextRange(document.ContentStart, document.ContentEnd).Text;
+        Check(document.Blocks.OfType<Table>().Single().RowGroups[0].Rows.Count == 2 &&
+            document.Blocks.OfType<System.Windows.Documents.List>().Single() is { ListItems.Count: 2, MarkerStyle: TextMarkerStyle.None } &&
+            document.Blocks.OfType<Section>().Any() && displayed.Contains("☑") && displayed.Contains("示例图片"),
+            "Render tables, quotations, tasks, and image placeholders in the native preview");
+        var links = document.Blocks.OfType<Paragraph>().SelectMany(paragraph => paragraph.Inlines.OfType<Hyperlink>()).ToArray();
+        Check(links.Length == 1 && links[0].NavigateUri.Scheme == "https" && displayed.Contains("本地路径"),
+            "Present safe web links and represent other targets as text");
+    }
+
     private static (DataObject Replay, byte[] Bytes, string[] Files) CheckOriginalImages()
     {
         byte[] jpeg = SampleImage(new JpegBitmapEncoder { QualityLevel = 93 });

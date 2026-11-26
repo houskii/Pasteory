@@ -11,6 +11,8 @@ using Pasteory.Core;
 
 namespace Pasteory.Windows;
 
+internal readonly record struct ClipViewPosition(Guid? Clip, Guid? Parent, int Loaded, double? Offset);
+
 internal sealed class ClipResults
 {
     private const int PageSize = 100;
@@ -19,11 +21,16 @@ internal sealed class ClipResults
     private readonly bool compact;
     private readonly HashSet<Guid> expanded = [];
     private readonly HashSet<Guid> collapsedForSearch = [];
+    private readonly Dictionary<Guid, Guid> lastChildren = [];
+    private readonly HashSet<Guid> marks = [];
+    private (Guid Id, Guid? Parent)? selectionBeforeMarking;
+    private (Guid Id, Guid? Parent)? markAnchor;
     private CancellationTokenSource? pending;
     private string previousQuery = "";
     private ClipListing listing = new([], [], 0);
     private ObservableCollection<ClipCard> page = [];
     private bool pageQueued;
+    private ScrollViewer? scroll;
 
     internal ClipResults(App app, ListBox list, bool compact = false)
     {
@@ -31,6 +38,11 @@ internal sealed class ClipResults
         this.list = list;
         this.compact = compact;
         list.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler(OnScroll));
+        list.SelectionChanged += (_, _) =>
+        {
+            if (list.SelectedItem is ClipCard { Parent: { } parent } child)
+                lastChildren[parent] = child.Clip.Id;
+        };
     }
 
     internal ClipCard? Selected => IsLoading ? null : list.SelectedItem as ClipCard;
@@ -38,17 +50,26 @@ internal sealed class ClipResults
     internal int Count => listing.Count;
     internal bool IsLoading => pending is not null;
     internal bool IsPublishing { get; private set; }
-    internal bool HasMultipleSelection => !IsLoading && list.SelectedItems.Count > 1;
-    internal IEnumerable<Guid> SelectedMembers => IsLoading ? [] : list.SelectedItems.OfType<ClipCard>()
-        .SelectMany(row => row.Clip.Kind == ClipKind.Aggregate ? row.Clip.Members : [row.Clip.Id]).Distinct();
+    internal bool IsMarking { get; private set; }
+    internal int MarkedCount => marks.Count;
+    internal IEnumerable<Guid> SelectedMembers => IsLoading ? [] : listing.Rows.Where(row => marks.Contains(row.Clip.Id))
+        .Select(row => row.Clip.Id).Distinct();
     internal IReadOnlyList<Guid> SearchMembers => IsLoading ? [] : listing.SearchMembers;
+    internal event Action? MarkingChanged;
+    internal ClipViewPosition Position => new((list.SelectedItem as ClipCard)?.Clip.Id, (list.SelectedItem as ClipCard)?.Parent,
+        page.Count, scroll?.VerticalOffset);
 
     internal async Task<bool> Refresh(string input, bool reset, Scope scope = Scope.All, ClipKind? kind = null,
-        ClipCollection? collection = null, Guid? select = null, Guid? focusChildren = null)
+        ClipCollection? collection = null, Guid? select = null, Guid? focusChildren = null, ClipViewPosition? position = null)
     {
         string query = input.Trim();
-        if (previousQuery != query) collapsedForSearch.Clear();
+        if (previousQuery != query)
+        {
+            collapsedForSearch.Clear();
+            reset = true;
+        }
         previousQuery = query;
+        if (reset) EndMarking(restore: false);
         pending?.Cancel();
         using var request = new CancellationTokenSource();
         pending = request;
@@ -57,13 +78,13 @@ internal sealed class ClipResults
         var open = new HashSet<Guid>(expanded);
         var closed = new HashSet<Guid>(collapsedForSearch);
         var current = list.SelectedItem as ClipCard;
-        var previousSelected = reset || select is not null || list.SelectionMode == SelectionMode.Single ? null :
-            list.SelectedItems.OfType<ClipCard>().Select(row => (row.Clip.Id, row.Parent)).ToHashSet();
-        Guid? clipId = select ?? (reset ? null : current?.Clip.Id);
-        Guid? parentId = select is not null || reset ? null : current?.Parent;
+        Guid? clipId = select ?? position?.Clip ?? (reset ? null : current?.Clip.Id);
+        Guid? parentId = select is not null ? null : position?.Parent ?? (reset ? null : current?.Parent);
+        double? offset = position?.Offset ?? (reset || select is not null || focusChildren is not null ? null : scroll?.VerticalOffset);
+        var aiGroups = scope == Scope.Ungrouped ? collections.Where(group => group.IsAi).Select(group => group.Id).ToHashSet() : null;
 
         ClipListing Load() => ClipListing.Build(source, query, query.Length == 0 ? null : app.SearchClipIds(query, request.Token),
-            scope, kind, collection, open, closed, select, request.Token);
+            scope, kind, collection, open, closed, select, request.Token, aiGroups);
 
         ClipListing next;
         try
@@ -85,43 +106,59 @@ internal sealed class ClipResults
             if (ReferenceEquals(pending, request)) pending = null;
         }
 
-        Publish(next, reset, clipId, parentId, previousSelected, focusChildren);
+        Publish(next, reset, clipId, parentId, focusChildren, offset, position?.Loaded);
         return true;
     }
 
-    private void Publish(ClipListing next, bool reset, Guid? clipId, Guid? parentId,
-        HashSet<(Guid, Guid?)>? previousSelected, Guid? focusChildren)
+    private void Publish(ClipListing next, bool reset, Guid? clipId, Guid? parentId, Guid? focusChildren,
+        double? offset, int? loaded)
     {
         listing = next;
-        int index = Array.FindIndex(next.Rows, row => row.Clip.Id == clipId && row.Parent == parentId);
-        if (index < 0) index = Array.FindIndex(next.Rows, row => row.Clip.Id == clipId);
+        int index = clipId is { } id ? FindRow((id, parentId)) : -1;
         if (focusChildren is { } group)
         {
-            Guid? last = next.Rows.FirstOrDefault(row => row.Clip.Id == group)?.Clip.LastSelectedMember;
+            Guid? last = lastChildren.TryGetValue(group, out Guid childId) ? childId :
+                next.Rows.FirstOrDefault(row => row.Clip.Id == group)?.Clip.LastSelectedMember;
             int child = Array.FindIndex(next.Rows, row => row.Parent == group && row.Clip.Id == last);
             if (child < 0) child = Array.FindIndex(next.Rows, row => row.Parent == group);
             if (child >= 0) index = child;
         }
         if (index < 0) index = 0;
-        int count = Math.Max(reset ? PageSize : page.Count, ((index / PageSize) + 1) * PageSize);
+        if (IsMarking)
+        {
+            var visible = next.Rows.Select(row => row.Clip.Id).ToHashSet();
+            marks.IntersectWith(visible);
+        }
+        int count = Math.Max(loaded ?? (reset ? PageSize : page.Count), ((index / PageSize) + 1) * PageSize);
         page = new ObservableCollection<ClipCard>(next.Rows.Take(count).Select(CreateCard));
         IsPublishing = true;
         try
         {
             list.ItemsSource = page;
             list.SelectedItem = page.ElementAtOrDefault(index);
-            if (previousSelected is { Count: > 1 })
-                foreach (var row in page.Where(row => previousSelected.Contains((row.Clip.Id, row.Parent))))
-                    if (!list.SelectedItems.Contains(row)) list.SelectedItems.Add(row);
-            if (list.SelectedItem is ClipCard selected) list.ScrollIntoView(selected);
+            if (offset is { } restore && scroll is not null)
+            {
+                var observed = page;
+                _ = list.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+                {
+                    if (ReferenceEquals(observed, page)) scroll.ScrollToVerticalOffset(restore);
+                }));
+            }
+            else if (list.SelectedItem is ClipCard selected) list.ScrollIntoView(selected);
         }
         finally { IsPublishing = false; }
     }
 
-    private ClipCard CreateCard(ClipListRow row) => new(app, row, compact);
+    private ClipCard CreateCard(ClipListRow row)
+    {
+        var card = new ClipCard(app, row, compact);
+        card.SetMarking(IsMarking, marks.Contains(row.Clip.Id));
+        return card;
+    }
 
     private void OnScroll(object sender, ScrollChangedEventArgs e)
     {
+        if (e.OriginalSource is ScrollViewer viewer) scroll = viewer;
         if (pageQueued || page.Count >= listing.Rows.Length || page.Count == 0 ||
             e.ExtentHeight - e.ViewportHeight - e.VerticalOffset > e.ViewportHeight * .5) return;
         var observed = page;
@@ -153,6 +190,93 @@ internal sealed class ClipResults
         list.SelectedItem = row;
         list.ScrollIntoView(row);
     }
+
+    internal bool StartMarking()
+    {
+        if (IsMarking || Selected is not { CanMark: true } row) return false;
+        BeginMarking();
+        markAnchor = row.Key;
+        marks.Add(row.Clip.Id);
+        PublishMarks();
+        return true;
+    }
+
+    internal bool MarkClick(ClipCard row, bool control, bool shift)
+    {
+        if (IsLoading || !IsMarking && (!row.CanMark || !control && !shift)) return false;
+        if (!IsMarking) BeginMarking();
+        if (row.CanMark)
+        {
+            int first = shift && (markAnchor ?? selectionBeforeMarking) is { } anchor ? FindRow(anchor) : -1;
+            int last = first >= 0 ? FindRow(row.Key) : -1;
+            if (first >= 0 && last >= 0)
+            {
+                for (int index = Math.Min(first, last); index <= Math.Max(first, last); index++)
+                {
+                    var clip = listing.Rows[index].Clip;
+                    if (clip.Kind != ClipKind.Aggregate && clip.TrashedAt is null) marks.Add(clip.Id);
+                }
+            }
+            else ToggleMark(row.Clip.Id);
+            markAnchor = row.Key;
+        }
+        Select(row);
+        PublishMarks();
+        return true;
+    }
+
+    internal void ToggleCurrentMark()
+    {
+        if (!IsMarking || Selected is not { CanMark: true } row) return;
+        ToggleMark(row.Clip.Id);
+        markAnchor = row.Key;
+        PublishMarks();
+    }
+
+    internal bool EndMarking(bool restore)
+    {
+        if (!IsMarking) return false;
+        IsMarking = false;
+        marks.Clear();
+        var previous = selectionBeforeMarking;
+        selectionBeforeMarking = markAnchor = null;
+        if (restore && !IsLoading && previous is { } key)
+        {
+            int index = FindRow(key);
+            if (index >= 0)
+            {
+                while (index >= page.Count) AppendPage();
+                Select(page[index]);
+            }
+        }
+        PublishMarks();
+        return true;
+    }
+
+    private void BeginMarking()
+    {
+        selectionBeforeMarking = Selected?.Key;
+        IsMarking = true;
+    }
+
+    private int FindRow((Guid Id, Guid? Parent) key)
+    {
+        int index = Array.FindIndex(listing.Rows, row => row.Clip.Id == key.Id && row.Parent == key.Parent);
+        return index >= 0 ? index : Array.FindIndex(listing.Rows, row => row.Clip.Id == key.Id);
+    }
+
+    private void ToggleMark(Guid id)
+    {
+        if (!marks.Add(id)) marks.Remove(id);
+    }
+
+    private void PublishMarks()
+    {
+        foreach (var row in page) row.SetMarking(IsMarking, marks.Contains(row.Clip.Id));
+        MarkingChanged?.Invoke();
+    }
+
+    internal Guid? LastChild(Guid parent) => lastChildren.TryGetValue(parent, out Guid id) ? id : null;
 
     internal void Expand(Guid parent)
     {

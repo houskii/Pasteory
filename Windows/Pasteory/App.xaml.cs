@@ -148,7 +148,10 @@ public partial class App : Application
         openRegistration = ThreadPool.RegisterWaitForSingleObject(openRequest, (_, _) =>
             Dispatcher.BeginInvoke(new Action(OpenFromTray)), null, Timeout.Infinite, executeOnlyOnce: false);
 
+        bool previewOnboarding = AutomationWindow && e.Args.Contains("--show-onboarding");
         if (e.Args.Contains("--show-library")) OpenSettings(SettingsPage.Library);
+        else if (!e.Args.Contains("--tray") && !Settings.CompletedOnboarding && (!isolated || previewOnboarding))
+            new WelcomeWindow(this, () => window.Present(keepVisibleForAutomation: previewOnboarding)).Show();
         else if (!e.Args.Contains("--tray")) window.Present(keepVisibleForAutomation: isolated && e.Args.Contains("--show-panel"));
         CheckUpdateIfDue();
     }
@@ -424,6 +427,8 @@ public partial class App : Application
     internal bool SaveSettings(LocalSettings next)
     {
         bool shortcutChanged = Shortcuts.Text(Settings, Command.ShowPanel) != Shortcuts.Text(next, Command.ShowPanel);
+        bool groupViewChanged = Settings.GroupDisplay != next.GroupDisplay ||
+            !Settings.Shortcuts.SequenceEqual(next.Shortcuts);
         bool pausedChanged = Settings.Paused != next.Paused;
         bool themeChanged = Settings.Theme != next.Theme || Settings.Appearance != next.Appearance;
         bool linkRulesChanged = !Settings.LinkFallbacks.SequenceEqual(next.LinkFallbacks);
@@ -451,10 +456,14 @@ public partial class App : Application
         if (themeChanged) Theme.Apply(Resources, Settings);
         if (pausedChanged) observedSequence = NativeMethods.GetClipboardSequenceNumber();
         if (window.IsVisible) window.Refresh();
+        if (groupViewChanged && settingsWindow?.IsVisible == true) settingsWindow.RefreshLibrary();
         if (shortcutChanged) RegisterShortcut();
         else RefreshStatus();
         return true;
     }
+
+    internal bool SetGroupProfile(string profile) => Settings.GroupDisplay == profile ||
+        GroupNavigation.Profiles.Contains(profile) && SaveSettings(Settings with { GroupDisplay = profile });
 
     private void RegisterShortcut()
     {

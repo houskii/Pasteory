@@ -23,8 +23,6 @@ public partial class HistoryWindow : Window
     private readonly DispatcherTimer statusTimer;
     private bool refreshing;
     private bool composing;
-    private bool multiple;
-    private int multiRow = -1;
     private bool originallyPositioned;
     private bool transientMenu;
     private bool accessibilityFocus;
@@ -32,6 +30,7 @@ public partial class HistoryWindow : Window
     private Point groupDragOrigin;
     private Guid? draggingGroup;
     private EditorView? editor;
+    private IInputElement? editorReturnFocus;
     private Window? help;
     private string lastStatus = "";
     private Guid? undoAggregationId;
@@ -39,14 +38,19 @@ public partial class HistoryWindow : Window
     private DateTime statsDate;
     private string statsText = "";
     private Guid? currentGroupId;
+    private bool ungrouped;
+    private string currentProfile = "";
+    private readonly Dictionary<string, (Guid? Group, bool Ungrouped, string Query, ClipViewPosition Position)> profilePositions = [];
     private GroupTab[] tabs = [];
-    private Guid[] recommendedAi = [];
+    private Guid[] rankedAi = [];
 
     internal HistoryWindow(App app)
     {
         this.app = app;
         InitializeComponent();
+        SetResourceReference(StyleProperty, typeof(Window));
         results = new ClipResults(app, History, compact: true);
+        results.MarkingChanged += UpdateResultBar;
         helpTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         helpTimer.Tick += (_, _) =>
         {
@@ -81,10 +85,9 @@ public partial class HistoryWindow : Window
             refreshing = true;
             Query.Clear();
             composing = false;
-            multiple = false;
-            History.SelectionMode = SelectionMode.Single;
+            results.EndMarking(restore: false);
             results.ResetExpansion();
-            recommendedAi = app.Settings.Ai.Enabled ? app.RankedAiGroups().Take(3).Select(group => group.Id).ToArray() : [];
+            rankedAi = app.RankedAiGroups().Select(group => group.Id).ToArray();
             refreshing = false;
             CloseEditor();
             Width = Math.Clamp(app.Settings.PanelWidth, MinWidth, 670);
@@ -109,25 +112,54 @@ public partial class HistoryWindow : Window
     internal void Refresh(bool reset = false, Guid? select = null)
     {
         string display = app.Settings.GroupDisplay;
-        var groups = app.Collections.Where(group => display switch
+        ClipViewPosition? restored = null;
+        bool viewChanged = display != currentProfile;
+        if (viewChanged)
         {
-            "AI groups" => group.IsAi,
-            "All groups" => true,
-            _ => !group.IsAi || group.Id == currentGroupId || recommendedAi.Contains(group.Id)
-        });
-        var nextTabs = groups.Select(group => new GroupTab(group)).Prepend(new GroupTab(null)).ToArray();
-        if (!tabs.SequenceEqual(nextTabs) || tabs.Length == 0) UpdateGroups(nextTabs);
+            if (currentProfile.Length > 0)
+                profilePositions[currentProfile] = (currentGroupId, ungrouped, Query.Text, results.Position);
+            currentProfile = display;
+            refreshing = true;
+            if (profilePositions.TryGetValue(display, out var position))
+            {
+                (currentGroupId, ungrouped, Query.Text, restored) = position;
+            }
+            else
+            {
+                currentGroupId = null;
+                ungrouped = false;
+                Query.Clear();
+            }
+            refreshing = false;
+            reset = true;
+        }
+        var byId = app.Collections.Where(group => group.IsAi).ToDictionary(group => group.Id);
+        var ai = rankedAi.Where(byId.ContainsKey).Select(id => byId[id]).Concat(byId.Values).DistinctBy(group => group.Id).ToArray();
+        var groups = GroupNavigation.Visible(display, app.Collections, ai, library: false, currentGroupId);
+        var nextTabs = groups.Select((group, index) => new GroupTab(group, GroupNavigation.Hint(app.Settings, index + 1)))
+            .Prepend(new GroupTab(null, GroupNavigation.Hint(app.Settings, 0))).ToArray();
+        if (viewChanged || !tabs.SequenceEqual(nextTabs) || tabs.Length == 0) UpdateGroups(nextTabs);
         PanelPin.SetResourceReference(ForegroundProperty, app.Settings.KeepPanelOpen ? "AccentInk" : "Muted");
         var offer = app.Updates?.Available;
         UpdateButton.Visibility = offer is null ? Visibility.Collapsed : Visibility.Visible;
         UpdateButton.ToolTip = offer is null ? null : Labels.Format("Update {0} is available", offer.Version);
         UpdateButton.Background = app.Settings.Theme == "Orange" ? Brushes.PaleTurquoise : Brushes.NavajoWhite;
         UpdateButton.Foreground = app.Settings.Theme == "Orange" ? Brushes.DarkSlateGray : Brushes.SaddleBrown;
-        bool sidebar = app.Settings.GroupSidebar && display != "Minimal";
+        string placement = GroupNavigation.Placement(app.Settings);
+        bool sidebar = placement != "Top" && display != "Minimal";
+        bool right = sidebar && placement == "Right";
+        Grid.SetColumn(Sidebar, right ? 1 : 0);
+        Grid.SetColumn(History, right ? 0 : 1);
+        Grid.SetColumn(EmptyMessage, right ? 0 : 1);
+        var fill = new GridLength(1, GridUnitType.Star);
+        ResultColumns.ColumnDefinitions[0].Width = right ? fill : GridLength.Auto;
+        ResultColumns.ColumnDefinitions[1].Width = right ? GridLength.Auto : fill;
         Sidebar.Visibility = sidebar ? Visibility.Visible : Visibility.Collapsed;
-        GroupStrip.Visibility = ScopeBar.Visibility = display == "Minimal" ? Visibility.Collapsed : Visibility.Visible;
-        GroupStrip.Margin = new Thickness(9, sidebar ? 1 : 4, 7, 0);
-        RefreshResults(reset, select);
+        GroupStrip.Visibility = display == "Minimal" || sidebar ? Visibility.Collapsed : Visibility.Visible;
+        ScopeBar.Visibility = display != "Minimal" || ungrouped ? Visibility.Visible : Visibility.Collapsed;
+        ProfileOptions.Visibility = display == "Minimal" ? Visibility.Visible : Visibility.Collapsed;
+        if (sidebar && IsVisible && Width < 516) PositionNearPointer();
+        RefreshResults(reset, select, position: restored);
     }
 
     private void UpdateGroups(GroupTab[] next)
@@ -148,7 +180,9 @@ public partial class HistoryWindow : Window
         foreach (var tab in tabs)
         {
             var button = Ui.Button(tab.Name, () => ChangeGroup(tab), "NavButton");
-            button.Content = Ui.WithIcon(tab.Glyph, tab.Name);
+            button.Content = GroupNavigation.Row(tab.Glyph, tab.Name, tab.Hint, "Ink", tab.IsAi);
+            button.ToolTip = tab.HintText;
+            AutomationProperties.SetName(button, tab.Name);
             if (tab.Collection is { } group)
                 button.ContextMenu = ClipMenus.ForGroup(group, () => EditGroup(group, group.IsSmart), () => DeleteGroup(group));
             SidebarGroups.Children.Add(button);
@@ -160,28 +194,29 @@ public partial class HistoryWindow : Window
     private void UpdateScope()
     {
         int index = Math.Max(0, Groups.SelectedIndex);
-        CurrentGroup.Text = Labels.Format("Current: {0}", tabs.ElementAtOrDefault(index)?.Name ?? Labels.Get("All"));
+        CurrentGroup.Text = Labels.Format("Current: {0}", ungrouped ? Labels.Get("Ungrouped") : tabs.ElementAtOrDefault(index)?.Name ?? Labels.Get("All"));
         GroupPosition.Text = index == 0 ? Labels.Format("{0} groups", tabs.Length - 1) :
             Labels.Format("Group {0} / {1}", index, tabs.Length - 1);
         for (int i = 0; i < SidebarGroups.Children.Count; i++)
-            ((Button)SidebarGroups.Children[i]).SetResourceReference(BackgroundProperty, i == index ? "PanelTint" : "TransparentBrush");
+            ((Button)SidebarGroups.Children[i]).SetResourceReference(BackgroundProperty, i == index && !ungrouped ? "PanelTint" : "TransparentBrush");
     }
 
-    private async void RefreshResults(bool reset, Guid? select = null, Guid? focusChildren = null)
+    private async void RefreshResults(bool reset, Guid? select = null, Guid? focusChildren = null, ClipViewPosition? position = null)
     {
         RefreshSearchHint();
-        var refresh = results.Refresh(Query.Text, reset, collection: (Groups.SelectedItem as GroupTab)?.Collection,
-            select: select, focusChildren: focusChildren);
+        var refresh = results.Refresh(Query.Text, reset, scope: ungrouped ? Scope.Ungrouped : Scope.All,
+            collection: ungrouped ? null : (Groups.SelectedItem as GroupTab)?.Collection, select: select, focusChildren: focusChildren, position: position);
         if (!refresh.IsCompleted)
         {
             EmptyMessage.Text = "";
             QuickTools.IsEnabled = false;
+            UpdateResultBar();
         }
         if (!await refresh) return;
         EmptyMessage.Text = results.Count > 0 ? "" : Labels.Get(app.Clips.Count == 0 ?
             "Copy something to start your history." : "No clips match.");
         QuickTools.IsEnabled = results.Selected?.Clip.PlainText is { Length: > 0 };
-        UpdateFooter();
+        UpdateResultBar();
     }
 
     internal void SetStatus(string message)
@@ -227,10 +262,9 @@ public partial class HistoryWindow : Window
             statsDate = today;
             statsText = Labels.Format("Today {0} · 7 days {1}", totalToday, totalWeek);
         }
-        Status.Text = lastStatus.Length > 0 ? lastStatus : multiple
-            ? Labels.Format("{0} selected", History.SelectedItems.Count) : statsText;
+        Status.Text = lastStatus.Length > 0 ? lastStatus : statsText;
         Status.ToolTip = Status.Text;
-        NavigationHint.Visibility = lastStatus.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        NavigationHint.Visibility = lastStatus.Length == 0 && !results.IsMarking ? Visibility.Visible : Visibility.Collapsed;
         UndoAggregationButton.Visibility = undoAggregationId.HasValue ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -238,13 +272,26 @@ public partial class HistoryWindow : Window
     {
         if (QuickTools is null || results is null) return;
         QuickTools.IsEnabled = results.Selected?.Clip.PlainText is { Length: > 0 };
-        if (multiple) UpdateFooter();
+    }
+
+    private void UpdateResultBar()
+    {
+        bool marking = results.IsMarking;
+        bool searching = !string.IsNullOrWhiteSpace(Query.Text);
+        ResultBar.Visibility = marking || searching ? Visibility.Visible : Visibility.Collapsed;
+        CancelMulti.Visibility = marking ? Visibility.Visible : Visibility.Collapsed;
+        AggregateButton.Content = Labels.Get(marking ? "Aggregate selection" : "Aggregate results");
+        AggregateButton.IsEnabled = !results.IsLoading && (marking ? results.MarkedCount : results.SearchMembers.Count) >= 2;
+        AggregateButton.ToolTip = AggregateButton.IsEnabled ? null : Labels.Get("Choose at least two different clips.");
+        ResultStatus.Text = marking ? Labels.Format("{0} selected", results.MarkedCount) :
+            results.IsLoading ? Labels.Get("Searching…") : Labels.Format("{0} results", results.Count);
+        UpdateFooter();
     }
 
     private void QueryChanged(object sender, TextChangedEventArgs e)
     {
         if (refreshing || !IsLoaded) return;
-        StopMultiple();
+        results.EndMarking(restore: false);
         RefreshResults(reset: true);
     }
 
@@ -257,23 +304,46 @@ public partial class HistoryWindow : Window
     private void GroupChanged(object sender, SelectionChangedEventArgs e)
     {
         if (refreshing || !IsLoaded || Groups.SelectedItem is not GroupTab tab) return;
+        ungrouped = false;
         currentGroupId = tab.Id;
-        StopMultiple();
+        results.EndMarking(restore: false);
         CloseEditor(focus: false);
         UpdateScope();
         Groups.ScrollIntoView(tab);
         RefreshResults(reset: true);
     }
 
-    private void ChangeGroup(GroupTab tab)
+    private void ChangeGroup(GroupTab tab, bool focusPanel = true)
     {
-        if (!tabs.Contains(tab))
+        bool returnToAll = ungrouped && tab.Id is null;
+        ungrouped = false;
+        var shown = tabs.FirstOrDefault(item => item.Id == tab.Id);
+        if (shown is null)
         {
+            if (app.Settings.GroupDisplay is "Minimal" || app.Settings.GroupDisplay == "AI groups" && !tab.IsAi)
+                app.SetGroupProfile("Common groups");
             currentGroupId = tab.Id;
-            UpdateGroups([.. tabs, tab]);
+            Refresh(reset: true);
+        }
+        else if (returnToAll)
+        {
+            UpdateScope();
             RefreshResults(reset: true);
         }
-        else Groups.SelectedItem = tab;
+        else Groups.SelectedItem = shown;
+        if (focusPanel) Keyboard.Focus(FocusArea);
+    }
+
+    private void ShowUngrouped()
+    {
+        refreshing = true;
+        Groups.SelectedIndex = 0;
+        currentGroupId = null;
+        ungrouped = true;
+        refreshing = false;
+        CloseEditor(focus: false);
+        Refresh(reset: true);
+        UpdateScope();
         Keyboard.Focus(FocusArea);
     }
 
@@ -304,15 +374,14 @@ public partial class HistoryWindow : Window
             return;
         if (key == Key.Escape)
         {
-            if (multiple) { StopMultiple(); UpdateFooter(); }
-            else Dismiss(restoreTarget: true);
+            if (!results.EndMarking(restore: true)) Dismiss(restoreTarget: true);
         }
+        else if (results.IsMarking && !Query.IsKeyboardFocused && modifiers == ModifierKeys.None && key == Key.Space)
+            results.ToggleCurrentMark();
+        else if (results.IsMarking && modifiers == ModifierKeys.None && key == Key.Enter)
+            Aggregate();
         else if (modifiers == ModifierKeys.None && key is Key.Up or Key.Down)
-        {
-            int step = key == Key.Up ? -1 : 1;
-            if (!multiple) results.Move(step);
-            else MoveMultiCursor(step);
-        }
+            results.Move(key == Key.Up ? -1 : 1);
         else if (modifiers == ModifierKeys.None && key is Key.Left or Key.Right)
         {
             if (!Query.IsKeyboardFocused && tabs.Length > 0)
@@ -324,8 +393,13 @@ public partial class HistoryWindow : Window
         else if (modifiers == ModifierKeys.Control && key is >= Key.D1 and <= Key.D9)
         {
             int index = key - Key.D1;
-            if (results.Rows.Where(row => row.Clip.Kind != ClipKind.Aggregate).Skip(index).FirstOrDefault() is { } row)
+            if (!results.IsMarking && results.Rows.Where(row => row.Clip.Kind != ClipKind.Aggregate).Skip(index).FirstOrDefault() is { } row)
                 _ = app.UseClipAsync(row.Clip, true, false);
+        }
+        else if (!composing && GroupNavigation.Match(app.Settings, key, modifiers) is { } groupAction)
+        {
+            if (groupAction.Profile is { } profile) app.SetGroupProfile(profile);
+            else if (tabs.ElementAtOrDefault(groupAction.Position) is { } tab) ChangeGroup(tab, focusPanel: !Query.IsKeyboardFocused);
         }
         else if (Query.IsKeyboardFocused && (modifiers == ModifierKeys.None && key != Key.Enter ||
             modifiers == ModifierKeys.Control && key is Key.A or Key.X or Key.V or Key.Z ||
@@ -339,13 +413,6 @@ public partial class HistoryWindow : Window
         var match = Shortcuts.Entries.FirstOrDefault(entry => entry.Action != Command.ShowPanel &&
             Shortcuts.Match(app.Settings, entry.Action, key, modifiers));
         if (match.Title is null) return false;
-        if (multiple && key == Key.Space && modifiers == ModifierKeys.None &&
-            results.Rows.ElementAtOrDefault(multiRow) is { } marked)
-        {
-            if (History.SelectedItems.Contains(marked)) History.SelectedItems.Remove(marked);
-            else History.SelectedItems.Add(marked);
-            return true;
-        }
         switch (match.Action)
         {
             case Command.Search:
@@ -356,8 +423,8 @@ public partial class HistoryWindow : Window
             case Command.Close: Dismiss(restoreTarget: true); return true;
             case Command.NewGroup: EditGroup(null, false); return true;
             case Command.Aggregate: Aggregate(); return true;
-            case Command.Paste when multiple: Aggregate(); return true;
         }
+        if (results.IsMarking) return true;
 
         if (results.Selected is not { } row) return true;
         var clip = row.Clip;
@@ -406,79 +473,66 @@ public partial class HistoryWindow : Window
         Guid id = row.Parent ?? row.Clip.Id;
         if (row.Parent is null && row.Clip.Kind != ClipKind.Aggregate) return;
         results.Collapse(id);
-        if (row.Parent is not null) app.UpdateClip(id, clip => clip with { LastSelectedMember = row.Clip.Id });
+        if (results.LastChild(id) is { } child && app.Clips.FirstOrDefault(clip => clip.Id == id)?.LastSelectedMember != child)
+            app.UpdateClip(id, clip => clip with { LastSelectedMember = child });
         RefreshResults(reset: false, select: id);
     }
 
-    private void Aggregate()
+    private void AggregateResults(object sender, RoutedEventArgs e) => Aggregate(fromButton: true);
+    private void CancelMarking(object sender, RoutedEventArgs e)
+    {
+        results.EndMarking(restore: true);
+        Keyboard.Focus(FocusArea);
+    }
+
+    private void Aggregate(bool fromButton = false)
     {
         if (results.IsLoading) return;
         var clip = results.Selected?.Clip;
-        if (clip?.Kind == ClipKind.Aggregate && !multiple && !results.HasMultipleSelection)
-        {
-            ShowAggregation(clip, clip.Members, clip.Title, clip.AggregationOrigin, true);
-            return;
-        }
-        if (multiple || results.HasMultipleSelection)
+        if (results.IsMarking)
         {
             var selected = results.SelectedMembers.ToArray();
             if (selected.Length < 2) SetStatus(Labels.Get("Choose at least two different clips."));
-            else ShowAggregation(null, selected, Labels.Get("Aggregation"), "Manual", false);
+            else ShowAggregation(null, selected, Labels.Get("New aggregation"), null, false);
+            return;
         }
-        else if (!string.IsNullOrWhiteSpace(Query.Text))
-            ShowAggregation(null, results.SearchMembers, Query.Text.Trim(), Query.Text, false);
-        else if (clip is not null)
+        if (clip?.Kind == ClipKind.Aggregate && !fromButton)
         {
-            StartMultiple();
-            SetStatus(Labels.Get("Select at least two clips, then press Enter."));
+            ShowAggregation(clip, clip.Members, clip.Title, clip.AggregationOrigin, clip.AggregationFromSearch);
+            return;
         }
+        string query = Query.Text.Trim();
+        if (query.Length > 0)
+        {
+            if (results.SearchMembers.Count < 2) SetStatus(Labels.Get("Choose at least two different clips."));
+            else ShowAggregation(null, results.SearchMembers, LibraryEditors.SearchAggregationTitle(query), query, true);
+        }
+        else if (results.StartMarking()) SetStatus(Labels.Get("Select at least two clips, then press Enter."));
     }
 
     private void ShowAggregation(Clip? clip, System.Collections.Generic.IEnumerable<Guid> members, string title, string? origin,
-        bool chooseMembers) =>
-        OpenEditor(LibraryEditors.Aggregation(app, clip, members, title, origin, chooseMembers, CloseEditorFromForm, id =>
+        bool search) =>
+        OpenEditor(LibraryEditors.Aggregation(app, clip, members, title, origin, search, compact: true, CloseEditorFromForm, id =>
         {
-            StopMultiple();
+            editorReturnFocus = FocusArea;
+            results.EndMarking(restore: false);
             Query.Clear();
             ChangeGroup(tabs[0]);
             RefreshResults(reset: true, select: id);
         }));
 
-    private void StopMultiple()
-    {
-        if (!multiple) return;
-        multiple = false;
-        multiRow = -1;
-        History.SelectionMode = SelectionMode.Single;
-    }
-
-    private void StartMultiple()
-    {
-        multiple = true;
-        multiRow = Math.Max(0, History.SelectedIndex);
-        History.SelectionMode = SelectionMode.Extended;
-        MoveMultiCursor(0);
-    }
-
-    private void MoveMultiCursor(int step)
-    {
-        if (results.Rows.Count == 0) return;
-        multiRow = Math.Clamp(multiRow + step, 0, results.Rows.Count - 1);
-        var row = results.Rows[multiRow];
-        History.ScrollIntoView(row);
-        History.UpdateLayout();
-        if (History.ItemContainerGenerator.ContainerFromItem(row) is ListBoxItem container) Keyboard.Focus(container);
-    }
-
     private void SelectMultipleRows(object sender, MouseButtonEventArgs e)
     {
-        if (!multiple && (Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Shift)) != 0 && RowFrom(e.OriginalSource) is not null)
-            StartMultiple();
+        var modifiers = Keyboard.Modifiers;
+        if (RowFrom(e.OriginalSource) is not { } row ||
+            !results.MarkClick(row, modifiers.HasFlag(ModifierKeys.Control), modifiers.HasFlag(ModifierKeys.Shift))) return;
+        Keyboard.Focus(FocusArea);
+        e.Handled = true;
     }
 
     private void UseSelected(object sender, MouseButtonEventArgs e)
     {
-        if (RowFrom(e.OriginalSource) is { } row) ActivateRow(row, paste: true);
+        if (!results.IsMarking && RowFrom(e.OriginalSource) is { } row) ActivateRow(row, paste: true);
     }
 
     private void SelectContextRow(object sender, MouseButtonEventArgs e)
@@ -487,8 +541,8 @@ public partial class HistoryWindow : Window
         {
             results.Select(row);
             var menu = ClipMenus.ForClip(app, row, this, () => EditInfo(row.Clip, false), () => EditInfo(row.Clip, true),
-                () => ShowAggregation(row.Clip, row.Clip.Members, row.Clip.Title, row.Clip.AggregationOrigin, true),
-                () => ActivateRow(row, false));
+                () => ShowAggregation(row.Clip, row.Clip.Members, row.Clip.Title, row.Clip.AggregationOrigin, row.Clip.AggregationFromSearch),
+                () => ActivateRow(row, false), () => Collapse(row));
             History.ContextMenu = menu;
             KeepOpenFor(menu);
         }
@@ -522,19 +576,63 @@ public partial class HistoryWindow : Window
     private void ShowGroups(object sender, RoutedEventArgs e)
     {
         var body = new DockPanel();
+        var profiles = new UniformGrid { Rows = 1, Margin = new Thickness(0, 0, 0, 8) };
+        DockPanel.SetDock(profiles, Dock.Top);
+        foreach (string profile in GroupNavigation.Profiles)
+        {
+            var button = Ui.Button(GroupNavigation.ProfileTitle(profile), () =>
+            {
+                CloseEditor(focus: false);
+                app.SetGroupProfile(profile);
+                ShowGroups(this, new RoutedEventArgs());
+            }, app.Settings.GroupDisplay == profile ? "PrimaryButton" : null);
+            button.Margin = new Thickness(0, 0, 3, 0);
+            button.FontSize = 11;
+            button.Padding = new Thickness(3);
+            profiles.Children.Add(button);
+        }
+        body.Children.Add(profiles);
         var actions = new WrapPanel { Margin = new Thickness(0, 0, 0, 8) };
         DockPanel.SetDock(actions, Dock.Top);
         var add = Ui.Button("New group", () => EditGroup(null, false));
         add.Margin = new Thickness(0, 0, 6, 0);
         actions.Children.Add(add);
         actions.Children.Add(Ui.Button("New smart group", () => EditGroup(null, true)));
+        var filter = Ui.Button("Ungrouped", ShowUngrouped);
+        filter.Margin = new Thickness(6, 0, 0, 0);
+        actions.Children.Add(filter);
         body.Children.Add(actions);
-        var all = app.Collections.Select(collection => new GroupTab(collection)).Prepend(new GroupTab(null)).ToArray();
+        var search = Ui.Field("Search groups", "", 160);
+        search.Margin = new Thickness(0, 0, 0, 6);
+        DockPanel.SetDock(search, Dock.Top);
+        body.Children.Add(search);
+        var all = app.Collections.Select(collection => new GroupTab(collection, tabs.FirstOrDefault(tab => tab.Id == collection.Id)?.Hint ?? ""))
+            .Prepend(new GroupTab(null, GroupNavigation.Hint(app.Settings, 0))).ToArray();
         var list = new ListBox { ItemsSource = all, SelectedItem = all.FirstOrDefault(item => item.Id == currentGroupId),
             HorizontalContentAlignment = HorizontalAlignment.Stretch };
-        list.DisplayMemberPath = nameof(GroupTab.Name);
+        list.SetResourceReference(ItemsControl.ItemTemplateProperty, "GroupPickerRow");
         AutomationProperties.SetName(list, Labels.Get("All groups"));
+        var end = new Border { CornerRadius = new CornerRadius(6), Padding = new Thickness(6), Margin = new Thickness(0, 5, 0, 0),
+            AllowDrop = true, Child = Ui.Text(Labels.Get("Drop a group here to move it to the end"), 11, "Muted") }.WithBackground("SoftSurface");
+        DockPanel.SetDock(end, Dock.Bottom);
+        end.DragOver += GroupDragOver;
+        end.Drop += GroupDropped;
+        body.Children.Add(end);
         body.Children.Add(list);
+        search.TextChanged += (_, _) =>
+        {
+            string query = search.Text.Trim();
+            var previous = list.SelectedItem as GroupTab;
+            var options = all.Where(item => item.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase)).ToArray();
+            list.ItemsSource = options;
+            list.SelectedItem = options.Contains(previous) ? previous : options.FirstOrDefault();
+        };
+        search.PreviewKeyDown += (_, args) =>
+        {
+            if (args.Key is not (Key.Up or Key.Down)) return;
+            list.Focus();
+            args.Handled = true;
+        };
         void Go()
         {
             if (list.SelectedItem is GroupTab chosen) ChangeGroup(chosen);
@@ -556,8 +654,20 @@ public partial class HistoryWindow : Window
         list.AllowDrop = true;
         list.DragOver += GroupDragOver;
         list.Drop += GroupDropped;
-        var surface = LibraryEditors.Wrap("All groups", body, list, () => { Go(); return true; }, CloseEditorFromForm);
+        var surface = LibraryEditors.Wrap("All groups", body, list, () => { Go(); return true; }, CloseEditorFromForm, "Open group");
         OpenEditor(surface);
+    }
+
+    private void ShowProfileOptions(object sender, RoutedEventArgs e)
+    {
+        var menu = new ContextMenu { PlacementTarget = ProfileOptions, Placement = PlacementMode.Bottom };
+        foreach (string profile in GroupNavigation.Profiles)
+            ClipMenus.Add(menu, GroupNavigation.ProfileTitle(profile), () => app.SetGroupProfile(profile));
+        menu.Items.Add(new Separator());
+        ClipMenus.Add(menu, "All groups", () => ShowGroups(this, new RoutedEventArgs()));
+        ClipMenus.Add(menu, "Ungrouped", ShowUngrouped);
+        KeepOpenFor(menu);
+        menu.IsOpen = true;
     }
 
     private void GroupDragStart(object sender, MouseButtonEventArgs e)
@@ -605,8 +715,13 @@ public partial class HistoryWindow : Window
 
     private void EditInfo(Clip clip, bool groups) => OpenEditor(LibraryEditors.ClipInfo(app, clip, groups, CloseEditorFromForm));
     private void EditGroup(ClipCollection? group, bool smart) =>
-        OpenEditor(LibraryEditors.Group(app, group, smart, CloseEditorFromForm,
-            id => currentGroupId = id));
+        OpenEditor(LibraryEditors.Group(app, group, smart, CloseEditorFromForm, id =>
+        {
+            if (app.Settings.GroupDisplay is "Minimal" or "AI groups" && group?.IsAi != true)
+                app.SetGroupProfile("Common groups");
+            currentGroupId = id;
+            Refresh(reset: true);
+        }));
 
     private void DeleteGroup(ClipCollection group)
     {
@@ -621,7 +736,11 @@ public partial class HistoryWindow : Window
     private void OpenEditor(EditorView value)
     {
         HideHelp();
+        if (editor is null) editorReturnFocus = Query.IsKeyboardFocused ? Query : FocusArea;
         editor = value;
+        OverlayContent.MaxHeight = value.PanelMaxHeight;
+        OverlayContent.MaxWidth = value.PanelMaxWidth;
+        OverlayContent.VerticalAlignment = double.IsPositiveInfinity(value.PanelMaxHeight) ? VerticalAlignment.Stretch : VerticalAlignment.Center;
         OverlayContent.Content = value.Content;
         Overlay.Visibility = Visibility.Visible;
         Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() => Keyboard.Focus(value.InitialFocus)));
@@ -637,10 +756,12 @@ public partial class HistoryWindow : Window
     private void CloseEditor(bool focus = true)
     {
         if (editor is null) return;
+        var previous = editorReturnFocus ?? FocusArea;
+        editorReturnFocus = null;
         editor = null;
         Overlay.Visibility = Visibility.Collapsed;
         OverlayContent.Content = null;
-        if (focus && IsVisible) Keyboard.Focus(FocusArea);
+        if (focus && IsVisible) Keyboard.Focus(previous);
     }
 
     private void OpenHelp()
@@ -648,24 +769,38 @@ public partial class HistoryWindow : Window
         if (help is not null) return;
         var rows = new StackPanel { Margin = new Thickness(12, 10, 12, 12) };
         rows.Children.Add(Ui.Text(Labels.Get("Quick actions"), 14, strong: true));
-        foreach (var entry in Shortcuts.Entries)
+        foreach (var section in Shortcuts.Sections)
         {
-            string shortcut = Shortcuts.Text(app.Settings, entry.Action);
-            if (shortcut.Length == 0) continue;
+            rows.Children.Add(Ui.Text(Labels.Get(section.Title), 10, "Muted", strong: true));
+            foreach (var command in section.Actions)
+            {
+                var entry = Shortcuts.Entries.First(item => item.Action == command);
+                AddBinding(entry.Title, Shortcuts.Text(app.Settings, command));
+            }
+        }
+        rows.Children.Add(Ui.Text(Labels.Get("Switch groups by position"), 10, "Muted", strong: true));
+        foreach (var action in GroupNavigation.Positions.Take(tabs.Length))
+            AddBinding(action.Title, GroupNavigation.Hint(app.Settings, action.Position));
+        AddBinding("Quick paste the first nine clips", "Ctrl+1–9");
+        void AddBinding(string title, string shortcut)
+        {
+            if (shortcut.Length == 0) return;
             var line = new DockPanel { Margin = new Thickness(0, 5, 0, 0) };
             var key = Ui.Text(shortcut, 11, "AccentInk", strong: true);
             DockPanel.SetDock(key, Dock.Right);
             line.Children.Add(key);
-            line.Children.Add(Ui.Text(Labels.Get(entry.Title), 11));
+            line.Children.Add(Ui.Text(Labels.Get(title), 11));
             rows.Children.Add(line);
         }
-        double workRight = DeviceToDip(new Point(Forms.Screen.FromHandle(new WindowInteropHelper(this).Handle).WorkingArea.Right, 0)).X;
+        var work = Forms.Screen.FromHandle(new WindowInteropHelper(this).Handle).WorkingArea;
+        double workRight = DeviceToDip(new Point(work.Right, 0)).X;
+        double workLeft = DeviceToDip(new Point(work.Left, 0)).X;
         help = new Window
         {
             Owner = this, Title = Labels.Get("Quick actions"), Width = 260, MaxHeight = ActualHeight,
             SizeToContent = SizeToContent.Height, WindowStyle = WindowStyle.None, ResizeMode = ResizeMode.NoResize,
             ShowInTaskbar = false, ShowActivated = false, Focusable = false, Left = Left + ActualWidth + 7 + 260 <= workRight
-                ? Left + ActualWidth + 7 : Math.Max(0, Left - 267), Top = Top, Topmost = true,
+                ? Left + ActualWidth + 7 : Math.Max(workLeft, Left - 267), Top = Top, Topmost = true,
             Content = new ScrollViewer { Content = rows, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }
         };
         help.Show();
@@ -683,6 +818,10 @@ public partial class HistoryWindow : Window
         if (!IsVisible) return;
         CloseEditor(focus: false);
         HideHelp();
+        results.EndMarking(restore: false);
+        refreshing = true;
+        Query.Clear();
+        refreshing = false;
         Hide();
         if (restoreTarget) app.RestoreFocus();
     }
@@ -748,7 +887,7 @@ public partial class HistoryWindow : Window
         var monitor = NativeMethods.MonitorFromPoint(new NativeMethods.ScreenPoint(mouse.X, mouse.Y), 2);
         double scale = NativeMethods.GetDpiForMonitor(monitor, 0, out uint monitorDpi, out _) == 0 ? monitorDpi / 96d : 1;
         Height = Math.Min(Height, Math.Max(MinHeight, work.Height / scale));
-        if (app.Settings.GroupSidebar && app.Settings.GroupDisplay != "Minimal") Width = Math.Max(Width, 516);
+        if (GroupNavigation.Placement(app.Settings) != "Top" && app.Settings.GroupDisplay != "Minimal") Width = Math.Max(Width, 516);
         Width = Math.Min(Width, Math.Max(MinWidth, work.Width / scale));
         int width = (int)Math.Ceiling(Width * scale);
         int height = (int)Math.Ceiling(Height * scale);
@@ -767,11 +906,15 @@ public partial class HistoryWindow : Window
     private Point DeviceToDip(Point point) => PresentationSource.FromVisual(this)?.CompositionTarget is { } composition
         ? composition.TransformFromDevice.Transform(point) : point;
 
-    private sealed record GroupTab(ClipCollection? Collection)
+    private sealed record GroupTab(ClipCollection? Collection, string Hint = "")
     {
         public Guid? Id => Collection?.Id;
         public string Name => Collection?.Name ?? Labels.Get("All");
+        public string HintText => Hint.Length == 0 ? Name : $"{Name} · {Hint}";
+        public bool IsAi => Collection?.IsAi == true;
+        public bool CanReorder => Collection is not null;
         public string Glyph => Collection is null ? Windows.Glyph.Recent :
             Collection.IsSmart || Collection.IsAi ? Windows.Glyph.Smart : Windows.Glyph.Group;
+        public override string ToString() => Name;
     }
 }

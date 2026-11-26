@@ -117,13 +117,17 @@ public partial class App
     internal void MoveCollection(Guid id, Guid? before) => ChangeHistory(() => history.MoveCollection(id, before));
     internal void MoveCollectionWithinType(Guid id, Guid before) => ChangeHistory(() => history.MoveCollectionWithinType(id, before));
 
-    internal Clip? SaveAggregation(Guid? id, string title, string note, IEnumerable<Guid> members, string? origin)
+    internal Clip? SaveAggregation(Guid? id, string title, string note, IEnumerable<Guid> members, string? origin, bool fromSearch = false)
     {
         Clip? clip = null;
-        if (ChangeHistory(() => clip = history.SaveAggregation(id, title, note, members, origin)))
+        if (ChangeHistory(() => clip = history.SaveAggregation(id, title, note, members, origin, fromSearch)))
         {
-            Notify(Labels.Format("Aggregated {0} clips", clip!.Members.Length));
-            if (id is null) window.OfferAggregationUndo(clip.Id);
+            Notify(id is null ? Labels.Format("Aggregated {0} clips", clip!.Members.Length) : "Aggregation saved.");
+            if (id is null)
+            {
+                window.OfferAggregationUndo(clip!.Id);
+                settingsWindow?.OfferAggregationUndo(clip.Id);
+            }
         }
         return clip;
     }

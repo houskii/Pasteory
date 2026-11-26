@@ -328,6 +328,44 @@
         </Setter>
     </Style>
 
+    <DataTemplate x:Key="GroupPickerRow">
+        <DockPanel Margin="5,3" ToolTip="{Binding HintText}">
+            <TextBlock DockPanel.Dock="Right" Text="⋮⋮" Foreground="{DynamicResource Quiet}" VerticalAlignment="Center"
+                       Visibility="{Binding CanReorder, Converter={StaticResource ShowWhen}}" Margin="7,0,0,0"/>
+            <TextBlock DockPanel.Dock="Right" Text="{Binding Hint}" FontSize="10" VerticalAlignment="Center"
+                       Foreground="{DynamicResource Muted}" Margin="7,0,0,0"/>
+            <TextBlock DockPanel.Dock="Left" Width="24" FontSize="12" VerticalAlignment="Center" Foreground="{DynamicResource AccentInk}">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                        <Setter Property="Text" Value="{Binding Glyph}"/>
+                        <Setter Property="FontFamily" Value="{StaticResource IconFont}"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsAi}" Value="True">
+                                <Setter Property="Text" Value="AI"/>
+                                <Setter Property="FontFamily" Value="Segoe UI"/>
+                                <Setter Property="FontWeight" Value="SemiBold"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+        </DockPanel>
+    </DataTemplate>
+
+    <DataTemplate x:Key="AggregationMemberRow">
+        <Border Background="{DynamicResource SoftSurface}" CornerRadius="7" Padding="6,3" Margin="0,0,2,4">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Content="−" Style="{StaticResource IconButton}" Padding="3,0" MinHeight="20" MinWidth="22"
+                        ToolTip="{local:Label 'Remove from aggregation'}" AutomationProperties.Name="{local:Label 'Remove from aggregation'}"
+                        IsEnabled="{Binding Tag, RelativeSource={RelativeSource AncestorType=ListBox}}"/>
+                <TextBlock DockPanel.Dock="Left" Text="{Binding Icon}" FontFamily="{StaticResource IconFont}"
+                           Foreground="{DynamicResource AccentInk}" VerticalAlignment="Center" Margin="0,0,7,0" />
+                <TextBlock Text="{Binding Caption}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+            </DockPanel>
+        </Border>
+    </DataTemplate>
+
     <DataTemplate x:Key="ClipCard">
         <Grid>
             <Grid.ColumnDefinitions>
@@ -428,7 +466,26 @@
                                FontFamily="{StaticResource IconFont}" FontSize="9.5" Foreground="{DynamicResource Muted}" Margin="5,1,0,0"/>
                 </StackPanel>
             </StackPanel>
-            <TextBlock Grid.Column="2" Text="{Binding Chevron}" Foreground="{DynamicResource AccentInk}" VerticalAlignment="Center" Margin="6,0,0,0"/>
+            <DockPanel Grid.Column="2" VerticalAlignment="Center">
+                <TextBlock Text="{Binding Chevron}" Foreground="{DynamicResource AccentInk}" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                <Border Width="16" Height="16" Margin="5,0,0,0" CornerRadius="8" BorderThickness="1"
+                        Visibility="{Binding ShowsMark, Converter={StaticResource ShowWhen}}" IsHitTestVisible="False">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="BorderBrush" Value="{DynamicResource Quiet}"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsMarked}" Value="True">
+                                    <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                                    <Setter Property="Background" Value="{DynamicResource Accent}"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}" FontSize="9" Foreground="White"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               Visibility="{Binding IsMarked, Converter={StaticResource ShowWhen}}"/>
+                </Border>
+            </DockPanel>
         </Grid>
     </DataTemplate>
 </ResourceDictionary>

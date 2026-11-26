@@ -1,51 +1,110 @@
 using System;
-using System.Linq;
+using System.ComponentModel;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
-using System.Windows.Documents;
 using System.Windows.Input;
+using Markdig.Syntax;
 using Pasteory.Core;
 
 namespace Pasteory.Windows;
 
 internal static class ContentPreview
 {
+    private const int MaximumCharacters = 64_000;
+
     internal static void Show(App app, Clip clip, Window owner)
     {
         var window = new Window
         {
-            Title = clip.DisplayTitle.Length > 0 ? clip.DisplayTitle : Labels.Get("Preview"),
-            Owner = owner, Width = 670, Height = 480, MinWidth = 320, MinHeight = 260,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false
+            Title = clip.DisplayTitle.Length > 0 ? clip.DisplayTitle : Labels.Get("Text preview"),
+            Owner = owner, Width = Math.Min(820, SystemParameters.WorkArea.Width),
+            Height = Math.Min(650, SystemParameters.WorkArea.Height), MinWidth = 320, MinHeight = 260,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = app.AutomationWindow
         };
         var body = new DockPanel { Margin = new Thickness(16) };
-        var top = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right,
-            Margin = new Thickness(0, 0, 0, 8) };
+        var top = new DockPanel { Margin = new Thickness(0, 0, 0, 12) };
+        var actions = new StackPanel { Orientation = Orientation.Horizontal };
+        var copy = Ui.Button("Copy original", () => _ = app.UseClipAsync(clip, paste: false, plainText: true), "PrimaryButton");
+        copy.Margin = new Thickness(0, 0, 7, 0);
+        actions.Children.Add(copy);
+        actions.Children.Add(Ui.Button("Close", window.Close));
+        DockPanel.SetDock(actions, Dock.Right);
+        top.Children.Add(actions);
+        var title = Ui.Text(Labels.Get("Text preview"), 16, strong: true);
+        title.VerticalAlignment = VerticalAlignment.Center;
+        top.Children.Add(title);
         DockPanel.SetDock(top, Dock.Top);
         body.Children.Add(top);
-        string text = clip.PlainText ?? "";
-        var raw = TextBoxFor(text, clip.Kind == ClipKind.Code);
-        var host = new ContentControl { Content = raw, HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            VerticalContentAlignment = VerticalAlignment.Stretch };
-        var markdown = GetMarkdown(text);
-        if (clip.Kind == ClipKind.Text && markdown is not null)
-        {
-            var viewer = new FlowDocumentScrollViewer { Document = markdown, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-            host.Content = viewer;
-            var toggle = new Button { Content = Labels.Get("Show original"), Margin = new Thickness(0, 0, 8, 0) };
-            toggle.Click += (_, _) =>
-            {
-                bool showOriginal = host.Content == viewer;
-                host.Content = showOriginal ? raw : viewer;
-                toggle.Content = Labels.Get(showOriginal ? "Show formatting" : "Show original");
-            };
-            top.Children.Add(toggle);
-        }
-        top.Children.Add(Ui.Button("Copy", () => _ = app.UseClipAsync(clip, paste: false, plainText: true), "PrimaryButton"));
-        body.Children.Add(host);
+        body.Children.Add(Create(app, clip));
         window.Content = body;
         window.PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) window.Close(); };
         window.ShowDialog();
+    }
+
+    internal static FrameworkElement Create(App app, Clip clip, Action? expand = null)
+    {
+        string text = clip.PlainText ?? "";
+        int length = Math.Min(MaximumCharacters, text.Length);
+        if (length < text.Length && char.IsHighSurrogate(text[length - 1])) length--;
+        string source = text[..length];
+        var raw = TextBoxFor(source, clip.Kind == ClipKind.Code);
+        raw.BorderThickness = new Thickness(0);
+        raw.Padding = new Thickness(6);
+        var layout = new DockPanel();
+        if (length < text.Length)
+        {
+            var notice = Ui.Text(Labels.Format("Showing the first {0:N0} characters. Copy original keeps the full text.", MaximumCharacters), 11, "Muted");
+            notice.Margin = new Thickness(0, 5, 0, 0);
+            DockPanel.SetDock(notice, Dock.Bottom);
+            layout.Children.Add(notice);
+        }
+        var formatted = new TabItem { Header = "Markdown", IsEnabled = false };
+        var original = new TabItem { Header = Labels.Get("Original"), Content = raw };
+        var tabs = new TabControl();
+        tabs.SetResourceReference(FrameworkElement.StyleProperty, "SettingsSegmentedTabs");
+        AutomationProperties.SetName(tabs, Labels.Get("Text format"));
+        tabs.Items.Add(formatted);
+        tabs.Items.Add(original);
+        tabs.SelectedItem = original;
+        if (expand is not null)
+        {
+            var header = new Grid();
+            header.Children.Add(tabs);
+            var button = Ui.IconButton("\uE740", "Expand text preview", expand);
+            button.HorizontalAlignment = HorizontalAlignment.Right;
+            button.VerticalAlignment = VerticalAlignment.Top;
+            header.Children.Add(button);
+            layout.Children.Add(header);
+        }
+        else layout.Children.Add(tabs);
+
+        MarkdownDocument? markdown = null;
+        tabs.Loaded += async (_, _) =>
+        {
+            if (markdown is not null) return;
+            var parsed = await MarkdownPreview.ParseAsync(clip.Id, source);
+            if (!tabs.IsLoaded || markdown is not null) return;
+            markdown = parsed;
+            formatted.IsEnabled = true;
+            if (MarkdownPreview.LooksFormatted(parsed)) tabs.SelectedItem = formatted;
+        };
+        tabs.SelectionChanged += (_, _) =>
+        {
+            if (tabs.SelectedItem != formatted || markdown is null || formatted.Content is not null) return;
+            formatted.Content = new FlowDocumentScrollViewer
+            {
+                Document = MarkdownPreview.Render(markdown, OpenLink), VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                IsToolBarVisible = false, IsSelectionEnabled = true
+            };
+        };
+        return layout;
+
+        void OpenLink(Uri uri)
+        {
+            try { App.OpenInShell(uri.AbsoluteUri); }
+            catch (Exception error) when (error is Win32Exception or InvalidOperationException) { app.Notify(error.Message); }
+        }
     }
 
     internal static TextBox TextBoxFor(string text, bool code = false)
@@ -60,30 +119,4 @@ internal static class ContentPreview
         return raw;
     }
 
-    private static FlowDocument? GetMarkdown(string text)
-    {
-        const string fence = "\u0060\u0060\u0060";
-        var lines = text.Replace("\r\n", "\n").Split('\n');
-        if (!lines.Any(line => line.StartsWith("# ", StringComparison.Ordinal) ||
-            line.StartsWith("## ", StringComparison.Ordinal) || line.StartsWith(fence, StringComparison.Ordinal))) return null;
-        var document = new FlowDocument { PagePadding = new Thickness(9), FontSize = 14 };
-        document.SetResourceReference(FlowDocument.ForegroundProperty, "Ink");
-        bool code = false;
-        foreach (var line in lines)
-        {
-            if (line.StartsWith(fence, StringComparison.Ordinal)) { code = !code; continue; }
-            int heading = line.TakeWhile(character => character == '#').Count();
-            bool isHeading = !code && heading is >= 1 and <= 6 && line.Length > heading && line[heading] == ' ';
-            var paragraph = new Paragraph(new Run(isHeading ? line[(heading + 1)..] :
-                !code && line.StartsWith("- ", StringComparison.Ordinal) ? "• " + line[2..] : line))
-            {
-                Margin = new Thickness(0, isHeading ? 8 : 0, 0, isHeading ? 5 : 2),
-                FontSize = isHeading ? Math.Max(15, 25 - heading * 2) : code ? 13 : 14
-            };
-            if (isHeading) paragraph.FontWeight = FontWeights.SemiBold;
-            if (code) paragraph.FontFamily = new System.Windows.Media.FontFamily("Consolas");
-            document.Blocks.Add(paragraph);
-        }
-        return document;
-    }
 }

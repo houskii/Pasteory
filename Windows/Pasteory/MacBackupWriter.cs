@@ -203,10 +203,12 @@ internal sealed partial class MacBackupWriter(HistoryStore store, AiTasks ai, IR
 
     private static object Aggregation(Clip clip) => new
     {
-        clip.Id, clip.Title, clip.Note, createdAt = Date(clip.CreatedAt ?? clip.CapturedAt), updatedAt = Date(clip.CapturedAt),
+        clip.Id, clip.Title, clip.Note, createdAt = Date(clip.CreatedAt ?? clip.CapturedAt),
+        updatedAt = Date(clip.AggregationUpdatedAt ?? clip.CapturedAt),
         isFavorite = clip.Favorite, isPinned = clip.Pinned, collectionIDs = clip.CollectionIds, memberClipIDs = clip.Members,
-        membershipMode = "fixed", origin = clip.AggregationOrigin is { Length: > 0 } origin && origin != "Manual" ?
-            (object)new { condition = new { summary = origin } } : new { manual = new { } }, excludedClipIDs = Array.Empty<Guid>()
+        membershipMode = "fixed", origin = clip.AggregationOrigin is { Length: > 0 } origin && (clip.AggregationFromSearch || origin != "Manual") ?
+            clip.AggregationFromSearch ? (object)new { search = new { query = origin } } : new { condition = new { summary = origin } } :
+            new { manual = new { } }, excludedClipIDs = Array.Empty<Guid>()
     };
 
     private static object Collection(ClipCollection collection, int index)

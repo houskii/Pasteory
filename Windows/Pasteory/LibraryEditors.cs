@@ -1,14 +1,17 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using Pasteory.Core;
 
 namespace Pasteory.Windows;
 
-internal sealed record EditorView(FrameworkElement Content, IInputElement InitialFocus, Action? Submit = null);
+internal sealed record EditorView(FrameworkElement Content, IInputElement InitialFocus, Action? Submit = null,
+    Button? SubmitButton = null, double PanelMaxHeight = double.PositiveInfinity, double PanelMaxWidth = double.PositiveInfinity);
 
 internal static class LibraryEditors
 {
@@ -27,13 +30,22 @@ internal static class LibraryEditors
         Ui.AddField(form, "Note", note);
         var checks = GroupChecks(app, clip, form);
         WireGroupKeys(checks.Select(entry => entry.Check).ToArray());
+        if (clip.Kind != ClipKind.Aggregate)
+        {
+            var source = new StackPanel();
+            ClipDetails.AddSources(source, clip);
+            Ui.AddField(form, "Capture source", source);
+        }
         bool Save() => app.EditClip(clip.Id, next => next with
         {
             Title = title.Text.Trim(), Note = note.Text.Trim(), Group = "",
             CollectionIds = [.. checks.Where(entry => entry.Check.IsChecked == true).Select(entry => entry.Id),
                 .. next.CollectionIds.Where(id => app.Collections.Any(group => group.Id == id && group.IsAi))]
         });
-        return Wrap("Edit information", form, focusGroups && checks.Count > 0 ? checks[0].Check : title, Save, close);
+        var firstGroup = checks.Select(entry => entry.Check).FirstOrDefault(check => check.IsChecked == true) ??
+            checks.FirstOrDefault().Check;
+        return Wrap("Edit information", form, focusGroups && firstGroup is not null ? firstGroup : title, Save, close)
+            with { PanelMaxHeight = 620, PanelMaxWidth = 430 };
     }
 
     private static void WireGroupKeys(CheckBox[] checks)
@@ -79,43 +91,116 @@ internal static class LibraryEditors
             selected?.Invoke(saved.Id);
             return true;
         }
-        return Wrap(existing is null ? smart ? "New smart group" : "New group" : smart ? "Edit smart group" : "Rename group",
+        var view = Wrap(existing is null ? smart ? "New smart group" : "New group" : smart ? "Edit smart group" : "Rename group",
             form, name, Save, close);
+        return smart ? view : view with { PanelMaxHeight = 170, PanelMaxWidth = 360 };
     }
 
+    internal static string SearchAggregationTitle(string query) =>
+        Labels.Format("{0} related content", ClipCard.Short(query, 60, 1));
+
+    internal static string AggregationSource(string? origin, bool search) => search && origin is { Length: > 0 } ?
+        Labels.Format("From search · {0}", origin) : origin is null or "Manual" ? Labels.Get("Created manually") : origin;
+
     internal static EditorView Aggregation(App app, Clip? existing, IEnumerable<Guid> members, string name,
-        string? origin, bool chooseMembers, Action close, Action<Guid> selected)
+        string? origin, bool search, bool compact, Action close, Action<Guid> selected)
     {
         var form = new StackPanel();
-        Guid[] initial = members.Distinct().ToArray();
-        form.Children.Add(Ui.Text(Labels.Format("{0} items", initial.Length), 12, "Muted"));
-        var title = Ui.Field("Title", name, 160);
-        var note = Ui.Field("Note", existing?.Note ?? "", 16000);
-        Ui.AddField(form, "Title", title);
-        Ui.AddField(form, "Note", note);
-        var candidates = chooseMembers ? app.Clips.Where(clip => clip.Kind != ClipKind.Aggregate && clip.TrashedAt is null).ToArray() : [];
-        var choices = new List<(Guid Id, CheckBox Check)>();
-        if (chooseMembers)
+        var byId = app.Clips.Where(clip => clip.Kind != ClipKind.Aggregate && clip.TrashedAt is null).ToDictionary(clip => clip.Id);
+        var choices = new ObservableCollection<AggregationMember>(members.Distinct().Where(byId.ContainsKey)
+            .Select(id => AggregationMember.From(byId[id])));
+        var summary = Ui.Text("", 12, "Muted");
+        form.Children.Add(summary);
+        var title = Ui.Field("Aggregation title", name, 160);
+        var note = Ui.Field("Optional note", existing?.Note ?? "", 16000);
+        note.AcceptsReturn = true;
+        note.MinHeight = 58;
+        note.MaxHeight = 102;
+        note.TextWrapping = TextWrapping.Wrap;
+        note.VerticalContentAlignment = VerticalAlignment.Top;
+        note.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+        Ui.AddField(form, "Aggregation title", title);
+        Ui.AddField(form, "Optional note", note);
+        ListBox? memberList = null;
+        if (existing is not null || !compact)
         {
-            var list = new StackPanel();
-            foreach (var candidate in candidates)
+            memberList = new ListBox { ItemsSource = choices, Height = compact ? 142 : 180,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch };
+            memberList.SetResourceReference(FrameworkElement.StyleProperty, "ClipList");
+            memberList.SetResourceReference(ItemsControl.ItemTemplateProperty, "AggregationMemberRow");
+            memberList.AddHandler(ButtonBase.ClickEvent, new RoutedEventHandler((_, args) =>
             {
-                string text = candidate.DisplayTitle.Length > 0 ? candidate.DisplayTitle : candidate.PlainText ?? Labels.Get(candidate.Kind.ToString());
-                var check = new CheckBox { Content = ClipCard.Short(text, 90, 1), IsChecked = initial.Contains(candidate.Id) };
-                list.Children.Add(check);
-                choices.Add((candidate.Id, check));
-            }
-            Ui.AddField(form, "Members", list);
+                if (choices.Count > 2 && args.OriginalSource is FrameworkElement { DataContext: AggregationMember item })
+                    choices.Remove(item);
+            }));
+            Ui.AddField(form, "Members", memberList);
         }
+        if (existing is not null)
+        {
+            var add = new Expander { Header = Labels.Get("Add members"), Margin = new Thickness(0, 8, 0, 4) };
+            add.Expanded += (_, _) =>
+            {
+                if (add.Content is not null) return;
+                var searchField = Ui.Field("Search clips", "", 220);
+                var candidates = new ListBox { DisplayMemberPath = nameof(AggregationMember.Caption), Height = 120 };
+                candidates.SetResourceReference(FrameworkElement.StyleProperty, "ClipList");
+                var addButton = Ui.Button("Add selected clip", () =>
+                {
+                    if (candidates.SelectedItem is not AggregationMember item || choices.Any(choice => choice.Id == item.Id)) return;
+                    choices.Add(item);
+                });
+                var layout = new StackPanel { Margin = new Thickness(0, 6, 0, 0) };
+                layout.Children.Add(searchField);
+                layout.Children.Add(candidates);
+                layout.Children.Add(addButton);
+                add.Content = layout;
+                void RefreshCandidates()
+                {
+                    var occupied = choices.Select(item => item.Id).ToHashSet();
+                    string query = searchField.Text.Trim();
+                    candidates.ItemsSource = byId.Values.Where(clip => !occupied.Contains(clip.Id) && clip.Matches(query))
+                        .Select(AggregationMember.From).ToArray();
+                    candidates.SelectedIndex = candidates.Items.Count > 0 ? 0 : -1;
+                    addButton.IsEnabled = candidates.SelectedIndex >= 0;
+                }
+                searchField.TextChanged += (_, _) => RefreshCandidates();
+                choices.CollectionChanged += (_, _) => RefreshCandidates();
+                RefreshCandidates();
+            };
+            form.Children.Add(add);
+        }
+        bool Valid() => !string.IsNullOrWhiteSpace(title.Text) && choices.Count >= 2;
         bool Save()
         {
-            var saved = app.SaveAggregation(existing?.Id, title.Text, note.Text,
-                chooseMembers ? choices.Where(item => item.Check.IsChecked == true).Select(item => item.Id) : initial, origin);
+            if (!Valid()) return false;
+            var saved = app.SaveAggregation(existing?.Id, title.Text, note.Text, choices.Select(item => item.Id), origin, search);
             if (saved is null) return false;
             selected(saved.Id);
             return true;
         }
-        return Wrap(existing is null ? "Aggregate clips" : "Edit aggregation", form, title, Save, close);
+        var view = Wrap(existing is null ? "Aggregate clips" : "Edit aggregation", form, title, Save, close,
+            existing is null ? "Create aggregation" : "Save");
+        void Refresh()
+        {
+            summary.Text = Labels.Format("{0} different clips", choices.Count) + " · " + AggregationSource(origin, search);
+            view.SubmitButton!.IsEnabled = Valid();
+            if (memberList is not null) memberList.Tag = choices.Count > 2;
+        }
+        title.TextChanged += (_, _) => Refresh();
+        choices.CollectionChanged += (_, _) => Refresh();
+        Refresh();
+        return compact ? view with { PanelMaxHeight = existing is null ? 300 : 540, PanelMaxWidth = 360 } : view;
+    }
+
+    private sealed record AggregationMember(Guid Id, string Caption, string Icon)
+    {
+        public override string ToString() => Caption;
+
+        internal static AggregationMember From(Clip clip)
+        {
+            string caption = clip.DisplayTitle.Length > 0 ? clip.DisplayTitle : clip.PlainText ?? Labels.Get(clip.Kind.ToString());
+            return new(clip.Id, ClipCard.Short(caption, 90, 1), Glyph.ForKind(clip.Kind));
+        }
     }
 
     internal static EditorView Wrap(string heading, FrameworkElement body, IInputElement focus, Func<bool> save, Action close,
@@ -132,15 +217,17 @@ internal static class LibraryEditors
         var cancel = Ui.Button("Cancel", close);
         cancel.Margin = new Thickness(0, 0, 7, 0);
         buttons.Children.Add(cancel);
-        void Submit() { if (save()) close(); }
-        buttons.Children.Add(Ui.Button(submitLabel, Submit, "PrimaryButton"));
+        void Commit() { if (save()) close(); }
+        Button button = Ui.Button(submitLabel, Commit, "PrimaryButton");
+        void Submit() { if (button.IsEnabled) Commit(); }
+        buttons.Children.Add(button);
         DockPanel.SetDock(buttons, Dock.Bottom);
         layout.Children.Add(buttons);
         layout.Children.Add(new ScrollViewer { Content = body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
         return new EditorView(new Border
         {
             CornerRadius = new CornerRadius(14), Child = layout, VerticalAlignment = VerticalAlignment.Stretch
-        }.WithBackground("Surface"), focus, Submit);
+        }.WithBackground("Surface"), focus, Submit, button);
     }
 
     internal static Border WithBackground(this Border border, string key)
@@ -154,7 +241,8 @@ internal static class LibraryEditors
         var window = new Window
         {
             Owner = owner, Title = Labels.Get(heading), Width = width, Height = height,
-            MinWidth = 320, MinHeight = 320, ShowInTaskbar = false, WindowStartupLocation = WindowStartupLocation.CenterOwner
+            MinWidth = 320, MinHeight = 320, ShowInTaskbar = Application.Current is App { AutomationWindow: true },
+            WindowStartupLocation = WindowStartupLocation.CenterOwner
         };
         var editor = create(window.Close);
         window.Content = editor.Content;

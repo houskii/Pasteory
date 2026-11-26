@@ -23,6 +23,7 @@
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4370.26" GeneratePathProperty="true" />
     <PackageReference Include="LzfseSharp" Version="2.0.0" GeneratePathProperty="true" />
     <PackageReference Include="BouncyCastle.Cryptography" Version="2.7.0" GeneratePathProperty="true" />
+    <PackageReference Include="Markdig" Version="1.6.0" />
     <EmbeddedResource Include="../../Config/UpdatePublicKey.txt" LogicalName="Pasteory.UpdatePublicKey.txt" />
     <None Update="ThirdPartyNotices/*.txt" CopyToPublishDirectory="PreserveNewest" />
     <None Include="$(PkgMicrosoft_Web_WebView2)/LICENSE.txt" Condition="Exists('$(PkgMicrosoft_Web_WebView2)/LICENSE.txt')"

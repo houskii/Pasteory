@@ -61,6 +61,10 @@ public sealed record Clip
     public Guid[] Members { get; init; } = [];
     public Guid? LastSelectedMember { get; init; }
     public string? AggregationOrigin { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool AggregationFromSearch { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? AggregationUpdatedAt { get; init; }
     public bool ExcludeFromAi { get; init; }
     public bool IsManual { get; init; }
     public ClipUse[] Uses { get; init; } = [];

@@ -5,10 +5,13 @@ string root = Path.Combine(Path.GetTempPath(), "Pasteory-tests-" + Guid.NewGuid(
 Directory.CreateDirectory(root);
 try
 {
+    var fresh = LocalSettings.Load(root);
+    Check(!fresh.CompletedOnboarding, "Show onboarding for a fresh installation");
     var store = new HistoryStore(root, maxClips: 3);
     var first = new Clip { Kind = ClipKind.Text, Text = "Clipboard 测试", Source = "Editor" };
     var link = new Clip { Kind = ClipKind.Link, Text = "https://example.com" };
     Check(store.Capture(first) && store.Capture(link), "Save text and link");
+    Check(LocalSettings.Load(root).CompletedOnboarding, "Skip onboarding for an existing catalog without settings");
     Check(store.Edit(first, "Project", "Meeting memo", "Work", pinned: true, favorite: true), "Save metadata");
 
     var reopened = new HistoryStore(root, maxClips: 3);
@@ -59,9 +62,11 @@ try
     catch (JsonException) { }
     Check(File.ReadAllText(corruptPath) == "{", "Preserve unreadable history");
 
-    new LocalSettings { Paused = true, UseAlternateShortcut = true, IgnoredApps = ["Example"] }.Save(root);
+    File.WriteAllText(Path.Combine(root, "settings.json"), "{\"Paused\":true}");
+    Check(LocalSettings.Load(root).CompletedOnboarding, "Skip onboarding for existing settings");
+    (fresh with { CompletedOnboarding = true, Paused = true, UseAlternateShortcut = true, IgnoredApps = ["Example"] }).Save(root);
     var settings = LocalSettings.Load(root);
-    Check(settings.Paused && settings.UseAlternateShortcut && settings.ShouldIgnore("example") &&
+    Check(settings.CompletedOnboarding && settings.Paused && settings.UseAlternateShortcut && settings.ShouldIgnore("example") &&
         settings.ShouldIgnore("KEEPASSXC") && settings.ShouldIgnore("") && !settings.ShouldIgnore("Notepad"),
         "Persist settings and honor exclusions");
     CheckLibrary(root);
@@ -159,7 +164,13 @@ static void CheckLibrary(string root)
     var smart = store.SaveCollection(null, "Work links", rule);
     store.MoveCollection(smart.Id, group.Id);
     Check(rule.Matches(saved, DateTimeOffset.Now) && !rule.Matches(text, DateTimeOffset.Now), "Nested smart rules");
-    var aggregation = store.SaveAggregation(null, "Release", "", [text.Id, docs.Id, text.Id], "Manual");
+    var aggregation = store.SaveAggregation(null, "Release", "", [text.Id, docs.Id, text.Id], "release", fromSearch: true);
+    try
+    {
+        store.SaveAggregation(aggregation.Id, "  ", "", [text.Id, docs.Id], "release", fromSearch: true);
+        throw new InvalidOperationException("An empty title must not replace the original aggregation.");
+    }
+    catch (ArgumentException) { }
     Check(aggregation.Members.Length == 2, "Aggregate unique members");
 
     var image = new Clip { Kind = ClipKind.Mixed, Text = "caption", ImageSize = 3, ImageHash = "fixture" };
@@ -174,6 +185,9 @@ static void CheckLibrary(string root)
     var copy = new HistoryStore(folder);
     Check(copy.Collections[0].Id == smart.Id && copy.Clips.Single(clip => clip.Id == aggregation.Id).Members.Contains(text.Id),
         "Persist collections, ordering and aggregations");
+    Check(copy.Clips.Single(clip => clip.Id == aggregation.Id) is
+        { Title: "Release", AggregationFromSearch: true, AggregationOrigin: "release", AggregationUpdatedAt: not null },
+        "Preserve search origin and modification time and reject an empty title without changing an existing aggregation");
     Check(copy.Clips.Single(clip => clip.Id == text.Id).Text == text.Text &&
         Directory.EnumerateFiles(Path.Combine(folder, "archives"), "*.br").Any(), "Read archived original text losslessly");
     string backup = Path.Combine(root, "library.zip");

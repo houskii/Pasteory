@@ -84,6 +84,8 @@ internal static partial class Program
             FileTypes.ForName("Archive.TAR.GZ").Icon == "archive" && FileTypes.ForName(".gitignore").Icon == "git" &&
             FileTypes.ForName("build.ps1").Icon == "shell", "Match full names and composite suffixes");
         CheckAggregationSearch();
+        CheckGroupNavigation();
+        CheckMarkdownPreview();
         CheckLinkTitles();
         string temporary = Path.GetTempFileName();
         var tempReference = FileReference.FromPath(new Uri(temporary).AbsoluteUri);
@@ -222,6 +224,39 @@ internal static partial class Program
         var title = ClipListing.Build(clips, "浏览记录", [parent.Id], Scope.All, null, null, [], [], null);
         Check(title.Rows is [{ Expanded: false, MatchCount: null }] && title.SearchMembers.Length == 2,
             "A title-only match stays collapsed and aggregates its member clips");
+
+        var large = Enumerable.Range(0, 237).Select(index => new Clip { Text = $"同一查询 · {index}" }).ToArray();
+        var duplicate = new Clip { Kind = ClipKind.Aggregate, Title = "同一查询", Members = large.Take(150).Select(clip => clip.Id).ToArray() };
+        var wholeQuery = ClipListing.Build([.. large, duplicate], "同一查询", large.Select(clip => clip.Id).Append(duplicate.Id),
+            Scope.All, null, null, [], [], null);
+        Check(wholeQuery.SearchMembers.Length == large.Length &&
+            wholeQuery.SearchMembers.ToHashSet().SetEquals(large.Select(clip => clip.Id)),
+            "Search aggregation includes all pages and counts clips only once across matching parents and children");
+    }
+
+    private static void CheckGroupNavigation()
+    {
+        var existing = new LocalSettings { Shortcuts = new Dictionary<string, string> { [nameof(Command.Favorite)] = "Alt+1" } };
+        Check(Shortcuts.Match(existing, Command.Favorite, System.Windows.Input.Key.D1, System.Windows.Input.ModifierKeys.Alt) &&
+            GroupNavigation.Match(existing, System.Windows.Input.Key.D1, System.Windows.Input.ModifierKeys.Alt) is null,
+            "A new positional default never steals an existing customized action");
+        Check(GroupNavigation.Match(new LocalSettings(), System.Windows.Input.Key.D2, System.Windows.Input.ModifierKeys.Alt)?.Position == 2 &&
+            GroupNavigation.Match(new LocalSettings(), System.Windows.Input.Key.D3,
+                System.Windows.Input.ModifierKeys.Control | System.Windows.Input.ModifierKeys.Alt)?.Profile == "Minimal",
+            "Resolve group positions and layout views independently");
+        var manual = new ClipCollection(Guid.NewGuid(), "Manual");
+        var theme = new ClipCollection(Guid.NewGuid(), "Theme", IsAi: true);
+        var ungrouped = new Clip { Text = "In a manual group only", CollectionIds = [manual.Id] };
+        var assigned = new Clip { Text = "In an AI group", CollectionIds = [manual.Id, theme.Id] };
+        var listing = ClipListing.Build([ungrouped, assigned], "", null, Scope.Ungrouped, null, null, [], [], null,
+            aiGroups: new HashSet<Guid> { theme.Id });
+        Check(listing.Rows.Select(row => row.Clip.Id).SequenceEqual([ungrouped.Id]),
+            "Keep manually grouped clips in the ungrouped view until they acquire an AI theme");
+        Check(GroupNavigation.Visible("Common groups", [manual, theme], [theme], library: true).Select(group => group.Id)
+                .SequenceEqual([theme.Id, manual.Id]) &&
+            GroupNavigation.Visible("AI groups", [manual, theme], [theme], library: false).SequenceEqual([theme]) &&
+            GroupNavigation.Visible("Minimal", [manual, theme], [theme], library: false).Length == 0,
+            "Profiles determine which groups occupy the displayed shortcut positions");
     }
 
     private static void CheckLinkTitles()
@@ -405,6 +440,8 @@ internal static partial class Program
             Files = [archive], CapturedAt = now.AddMinutes(-6) });
         store.Capture(new Clip { Kind = ClipKind.Files, Source = "Explorer", SourcePath = sourceIcons["Explorer"],
             Files = [filename, Path.Combine(directory, "package-lock.json"), archive], CapturedAt = now.AddMinutes(-7) });
+        store.Capture(new Clip { Kind = ClipKind.Text, Source = "Notepad", SourcePath = sourceIcons["Notepad"],
+            Title = "Markdown 排版", Text = MarkdownSample, CapturedAt = now.AddMinutes(-8) });
         var aggregate = store.SaveAggregation(null, "测试素材", "用于验证匹配成员", store.Clips
             .Where(clip => clip.Kind is ClipKind.Code or ClipKind.Link).Select(clip => clip.Id), "Manual");
         Check(aggregate is not null, "Save fixture aggregation");
@@ -420,7 +457,7 @@ internal static partial class Program
             Language = "简体中文", Appearance = "Light", BrowserPath = File.Exists(chrome) ? chrome : null,
             Shortcuts = new Dictionary<string, string> { ["ShowPanel"] = "Ctrl+Alt+Shift+V" }
         }.Save(directory);
-        Console.WriteLine("Prepared eight active clips, an archived TIFF, an aggregation, and four groups.");
+        Console.WriteLine("Prepared nine active clips, an archived TIFF, an aggregation, and four groups.");
     }
 
     private static void Check(bool condition, string description)

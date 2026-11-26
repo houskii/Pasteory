@@ -266,12 +266,15 @@ internal sealed class MacBackupReader(string root)
     private static Clip ConvertAggregation(JsonElement item)
     {
         var origin = Child(item, "origin");
+        var created = Date(item, "createdAt") ?? DateTimeOffset.Now;
+        string? query = Optional(Child(origin, "search"), "query");
         return new Clip
         {
-            Id = Id(item, "id"), Kind = ClipKind.Aggregate, CapturedAt = Date(item, "createdAt") ?? DateTimeOffset.Now,
+            Id = Id(item, "id"), Kind = ClipKind.Aggregate, CapturedAt = created, CreatedAt = created,
             Title = String(item, "title"), Note = String(item, "note"), Pinned = Bool(item, "isPinned"), Favorite = Bool(item, "isFavorite"),
             CopyCount = 0, CollectionIds = Guids(item, "collectionIDs"), Members = Guids(item, "memberClipIDs"),
-            AggregationOrigin = Optional(Child(origin, "search"), "query") ?? Optional(Child(origin, "condition"), "summary") ?? "Manual"
+            AggregationFromSearch = query is not null, AggregationUpdatedAt = Date(item, "updatedAt"),
+            AggregationOrigin = query ?? Optional(Child(origin, "condition"), "summary") ?? "Manual"
         };
     }
 

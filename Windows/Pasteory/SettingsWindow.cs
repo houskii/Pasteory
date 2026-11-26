@@ -25,15 +25,19 @@ internal sealed partial class SettingsWindow : Window
     private readonly StackPanel nav = new();
     private readonly Dictionary<SettingsPage, (Button Button, string Glyph)> buttons = [];
     private readonly TextBlock status = Ui.Text("", 11, "Muted");
-    private readonly DispatcherTimer clearStatus = new() { Interval = TimeSpan.FromSeconds(4) };
+    private readonly DockPanel feedback = new() { Visibility = Visibility.Collapsed };
+    private readonly Button undoAggregation;
+    private readonly DispatcherTimer clearStatus = new();
     private readonly DispatcherTimer saveSize = new() { Interval = TimeSpan.FromMilliseconds(350) };
     private readonly LibraryPage library;
     private SettingsPage current;
+    private Guid? undoAggregationId;
     private static readonly object ShortcutRecorder = new();
 
     internal SettingsWindow(App app)
     {
         this.app = app;
+        SetResourceReference(StyleProperty, typeof(Window));
         Title = Labels.Get("Pasteory Settings");
         Width = Math.Clamp(app.Settings.SettingsWidth, 700, SystemParameters.WorkArea.Width);
         Height = Math.Clamp(app.Settings.SettingsHeight, 520, SystemParameters.WorkArea.Height);
@@ -45,22 +49,33 @@ internal sealed partial class SettingsWindow : Window
         status.TextTrimming = TextTrimming.CharacterEllipsis;
         status.TextWrapping = TextWrapping.NoWrap;
         status.Margin = new Thickness(12, 6, 12, 7);
-        status.Visibility = Visibility.Collapsed;
         AutomationProperties.SetLiveSetting(status, AutomationLiveSetting.Polite);
+        undoAggregation = Ui.Button("Undo", () =>
+        {
+            if (undoAggregationId is { } id) app.UndoAggregation(id);
+            ClearAggregationUndo();
+        });
+        undoAggregation.Margin = new Thickness(0, 2, 12, 3);
+        undoAggregation.Padding = new Thickness(8, 1, 8, 1);
+        undoAggregation.MinHeight = 22;
+        undoAggregation.Visibility = Visibility.Collapsed;
+        DockPanel.SetDock(undoAggregation, Dock.Right);
+        feedback.Children.Add(undoAggregation);
+        feedback.Children.Add(status);
         var root = new Grid();
         var navColumn = new ColumnDefinition { Width = new GridLength(224) };
         root.ColumnDefinitions.Add(navColumn);
         root.ColumnDefinitions.Add(new ColumnDefinition());
         var sidebar = BuildNav();
         var surface = new DockPanel();
-        DockPanel.SetDock(status, Dock.Bottom);
-        surface.Children.Add(status);
+        DockPanel.SetDock(feedback, Dock.Bottom);
+        surface.Children.Add(feedback);
         surface.Children.Add(host);
         Grid.SetColumn(surface, 1);
         root.Children.Add(sidebar);
         root.Children.Add(surface);
         Content = root;
-        clearStatus.Tick += (_, _) => { clearStatus.Stop(); status.Visibility = Visibility.Collapsed; };
+        clearStatus.Tick += (_, _) => { clearStatus.Stop(); feedback.Visibility = Visibility.Collapsed; ClearAggregationUndo(); };
         saveSize.Tick += (_, _) =>
         {
             saveSize.Stop();
@@ -106,11 +121,29 @@ internal sealed partial class SettingsWindow : Window
 
     internal void SetStatus(string message)
     {
+        ClearAggregationUndo();
         status.Text = message;
         status.ToolTip = message;
-        status.Visibility = Visibility.Visible;
+        feedback.Visibility = Visibility.Visible;
         clearStatus.Stop();
+        clearStatus.Interval = TimeSpan.FromSeconds(4);
         clearStatus.Start();
+    }
+
+    internal void OfferAggregationUndo(Guid id)
+    {
+        if (!IsVisible || current != SettingsPage.Library) return;
+        undoAggregationId = id;
+        undoAggregation.Visibility = Visibility.Visible;
+        clearStatus.Stop();
+        clearStatus.Interval = TimeSpan.FromSeconds(12);
+        clearStatus.Start();
+    }
+
+    private void ClearAggregationUndo()
+    {
+        undoAggregationId = null;
+        undoAggregation.Visibility = Visibility.Collapsed;
     }
 
     internal void RefreshLibrary()
@@ -134,15 +167,14 @@ internal sealed partial class SettingsWindow : Window
         stack.Children.Add(new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = nav });
         nav.Margin = new Thickness(10, 0, 10, 12);
 
-        AddSection("Content");
         AddNav(SettingsPage.Story, Glyph.Story);
         AddNav(SettingsPage.Library, Glyph.Library);
-        AddSection("Basic settings");
+        AddSection("App settings");
         AddNav(SettingsPage.General, Glyph.Settings);
-        AddNav(SettingsPage.Privacy, Glyph.Privacy);
-        AddSection("Interaction & content");
         AddNav(SettingsPage.Shortcuts, Glyph.Shortcut);
         AddNav(SettingsPage.OpenWith, Glyph.Open);
+        AddSection("Capture & processing");
+        AddNav(SettingsPage.Privacy, Glyph.Privacy);
         AddNav(SettingsPage.Links, Glyph.Link);
         AddNav(SettingsPage.Ai, Glyph.Smart);
         AddSection("Data & support");
@@ -179,7 +211,11 @@ internal sealed partial class SettingsWindow : Window
         UpdateStoryNav();
         if (host.Content is not null && current == page && !rebuild)
         {
-            if (page == SettingsPage.Library) library.Refresh();
+            if (page == SettingsPage.Library)
+            {
+                library.Refresh();
+                library.FocusResults();
+            }
             return;
         }
         current = page;
@@ -195,6 +231,7 @@ internal sealed partial class SettingsWindow : Window
         {
             host.Content = library;
             library.Refresh();
+            library.FocusResults();
             return;
         }
         var layout = new StackPanel { Margin = new Thickness(27, 25, 27, 22), MaxWidth = 920, HorizontalAlignment = HorizontalAlignment.Stretch };
@@ -223,10 +260,19 @@ internal sealed partial class SettingsWindow : Window
         if (Keyboard.FocusedElement is FrameworkElement { Tag: { } tag } && ReferenceEquals(tag, ShortcutRecorder)) return;
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
         bool Match(Command command) => Shortcuts.Match(app.Settings, command, key, Keyboard.Modifiers);
-        if (key == Key.Escape || Match(Command.Close)) Hide();
+        if (key == Key.Escape)
+        {
+            if (current == SettingsPage.Library && library.IsComposingSearch) return;
+            if (current != SettingsPage.Library || !library.TryCancelMarking()) Hide();
+        }
+        else if (Match(Command.Close)) Hide();
         else if (Match(Command.Library)) Select(SettingsPage.Library);
         else if (Match(Command.Settings)) Select(SettingsPage.General);
-        else return;
+        else
+        {
+            if (current == SettingsPage.Library) library.HandleKey(e);
+            return;
+        }
         e.Handled = true;
     }
 
@@ -349,11 +395,17 @@ internal sealed partial class SettingsWindow : Window
 
         var quick = SettingsCard(layout, "Quick panel");
         Switch(quick, "Keep panel open", app.Settings.KeepPanelOpen, (settings, value) => settings with { KeepPanelOpen = value });
-        Switch(quick, "Show groups in sidebar", app.Settings.GroupSidebar, (settings, value) => settings with { GroupSidebar = value });
-        var groups = Picker("Group display", ["Common groups", "All groups", "AI groups", "Minimal"], app.Settings.GroupDisplay);
+        var placement = Picker("Group placement", ["Top", "Left", "Right"], GroupNavigation.Placement(app.Settings));
+        placement.SelectionChanged += (_, _) =>
+        {
+            if (placement.SelectedValue is string side)
+                app.SaveSettings(app.Settings with { QuickGroupPlacement = side, GroupSidebar = side != "Top" });
+        };
+        quick.Children.Add(Row("Group placement", placement));
+        var groups = Picker("Group display", GroupNavigation.Profiles, app.Settings.GroupDisplay);
         groups.SelectionChanged += (_, _) =>
         {
-            if (groups.SelectedValue is string selected) app.SaveSettings(app.Settings with { GroupDisplay = selected });
+            if (groups.SelectedValue is string selected) app.SetGroupProfile(selected);
         };
         quick.Children.Add(Row("Group display", groups));
 
@@ -408,11 +460,33 @@ internal sealed partial class SettingsWindow : Window
 
     private void BuildShortcuts(Panel layout)
     {
-        var bindings = SettingsCard(layout, "Keyboard shortcuts");
-        var boxes = new Dictionary<Command, TextBox>();
-        foreach (var (command, title, _) in Shortcuts.Entries)
+        var boxes = new Dictionary<string, (TextBox Box, string Default)>();
+        foreach (var section in Shortcuts.Sections)
         {
-            var recorder = Ui.Field(title, Shortcuts.Text(app.Settings, command));
+            var card = SettingsCard(layout, section.Title);
+            foreach (var command in section.Actions)
+            {
+                var entry = Shortcuts.Entries.First(item => item.Action == command);
+                AddRecorder(card, command.ToString(), entry.Title, Shortcuts.Text(app.Settings, command), entry.Default,
+                    requireModifier: command == Command.ShowPanel);
+            }
+        }
+        var positions = SettingsCard(layout, "Switch groups by position");
+        foreach (var action in GroupNavigation.Positions)
+            AddRecorder(positions, action.Setting, action.Title, GroupNavigation.Text(app.Settings, action), action.Default, requireModifier: true);
+        var views = SettingsCard(layout, "Switch group views");
+        foreach (var action in GroupNavigation.Views)
+            AddRecorder(views, action.Setting, action.Title, GroupNavigation.Text(app.Settings, action), action.Default, requireModifier: true);
+        var fixedKeys = SettingsCard(layout, "Fixed navigation keys");
+        fixedKeys.Children.Add(Row("Choose content / switch groups", Ui.Text("↑↓ / ←→", 12, "Muted")));
+        fixedKeys.Children.Add(Row("Quick paste the first nine clips", Ui.Text(Labels.Get("Ctrl+1–9"), 12, "Muted")));
+        fixedKeys.Children.Add(Row("Close the current layer", Ui.Text("Esc", 12, "Muted")));
+
+        void AddRecorder(Panel card, string keyName, string title, string value, string resetTo, bool requireModifier)
+        {
+            if (Shortcut.TryParse(value, out var existing)) value = existing.ToString();
+            if (Shortcut.TryParse(resetTo, out var baseline)) resetTo = baseline.ToString();
+            var recorder = Ui.Field(title, value);
             recorder.IsReadOnly = true;
             recorder.Width = 155;
             recorder.Tag = ShortcutRecorder;
@@ -422,39 +496,47 @@ internal sealed partial class SettingsWindow : Window
                 var key = e.Key == Key.System ? e.SystemKey : e.Key;
                 if (key is Key.Tab or Key.Escape) return;
                 var candidate = new Shortcut(key, Keyboard.Modifiers);
+                if (candidate.Modifiers == ModifierKeys.Control && candidate.Key is >= Key.D1 and <= Key.D9)
+                {
+                    SetStatus(Labels.Get("Ctrl+1–9 are reserved for quick paste."));
+                    e.Handled = true;
+                    return;
+                }
                 if (Shortcut.TryParse(candidate.ToString(), out var parsed) &&
-                    (command != Command.ShowPanel || parsed.Modifiers != ModifierKeys.None)) recorder.Text = parsed.ToString();
+                    (!requireModifier || parsed.Modifiers != ModifierKeys.None)) recorder.Text = parsed.ToString();
                 e.Handled = true;
             };
-            boxes[command] = recorder;
+            boxes[keyName] = (recorder, resetTo);
             var row = new StackPanel { Orientation = Orientation.Horizontal };
             recorder.Margin = new Thickness(0, 0, 6, 0);
             row.Children.Add(recorder);
             row.Children.Add(Ui.IconButton(Glyph.Close, "Disable shortcut", () => recorder.Clear()));
-            bindings.Children.Add(Row(title, row));
+            card.Children.Add(Row(title, row));
         }
+
         var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right,
             Margin = new Thickness(0, 8, 0, 0) };
         var reset = Ui.Button("Restore defaults", () =>
         {
-            foreach (var entry in Shortcuts.Entries) boxes[entry.Action].Text = entry.Default;
+            foreach (var entry in boxes.Values) entry.Box.Text = entry.Default;
         });
         reset.Margin = new Thickness(0, 0, 6, 0);
         actions.Children.Add(reset);
         actions.Children.Add(Ui.Button("Save", () =>
         {
-            if (boxes.Values.Select(box => box.Text).Where(value => value.Length > 0)
+            if (boxes.Values.Select(entry => entry.Box.Text).Where(value => value.Length > 0)
                 .GroupBy(value => value, StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1))
             {
                 SetStatus(Labels.Get("Each shortcut must use a different key combination."));
                 return;
             }
-            if (app.SaveSettings(app.Settings with { UseAlternateShortcut = false,
-                Shortcuts = boxes.ToDictionary(pair => pair.Key.ToString(), pair => pair.Value.Text) }))
-                SetStatus(boxes[Command.ShowPanel].Text.Length > 0 && !app.ShortcutAvailable ?
+            var saved = new Dictionary<string, string>(app.Settings.Shortcuts);
+            foreach (var (key, entry) in boxes) saved[key] = entry.Box.Text;
+            if (app.SaveSettings(app.Settings with { UseAlternateShortcut = false, Shortcuts = saved }))
+                SetStatus(boxes[nameof(Command.ShowPanel)].Box.Text.Length > 0 && !app.ShortcutAvailable ?
                     Labels.Get("Windows could not register the global shortcut.") : Labels.Get("Settings saved."));
         }, "PrimaryButton"));
-        bindings.Children.Add(actions);
+        layout.Children.Add(actions);
     }
 
     private void BuildOpenWith(Panel layout)

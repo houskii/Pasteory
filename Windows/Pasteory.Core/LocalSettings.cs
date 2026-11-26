@@ -39,6 +39,7 @@ public sealed record AiPreferences
 
 public sealed record LocalSettings
 {
+    public bool CompletedOnboarding { get; init; } = true;
     public bool Paused { get; init; }
     public bool UseAlternateShortcut { get; init; }
     public string[] IgnoredApps { get; init; } = [];
@@ -48,6 +49,7 @@ public sealed record LocalSettings
     public bool StartAtLogin { get; init; }
     public bool KeepPanelOpen { get; init; }
     public bool GroupSidebar { get; init; }
+    public string? QuickGroupPlacement { get; init; }
     public string GroupDisplay { get; init; } = "Common groups";
     public bool RecognizeImages { get; init; }
     public bool IncludeBrowserContext { get; init; }
@@ -86,7 +88,11 @@ public sealed record LocalSettings
         IgnoredApps.Contains(source, StringComparer.OrdinalIgnoreCase);
 
     public static LocalSettings Load(string dataDirectory) =>
-        LocalJson.Read<LocalSettings>(Path.Combine(dataDirectory, "settings.json")) ?? new();
+        LocalJson.Read<LocalSettings>(Path.Combine(dataDirectory, "settings.json")) ?? new()
+        {
+            CompletedOnboarding = File.Exists(Path.Combine(dataDirectory, HistoryStore.CatalogFileName)) ||
+                File.Exists(Path.Combine(dataDirectory, "history.json"))
+        };
 
     public void Save(string dataDirectory) =>
         LocalJson.Write(Path.Combine(dataDirectory, "settings.json"), this);

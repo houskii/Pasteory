@@ -187,6 +187,27 @@ internal sealed class ClipCard : INotifyPropertyChanged
 
     public Clip Clip => row.Clip;
     public event PropertyChangedEventHandler? PropertyChanged;
+    internal (Guid Id, Guid? Parent) Key => (Clip.Id, row.Parent);
+    internal bool CanMark => Clip.Kind != ClipKind.Aggregate && Clip.TrashedAt is null;
+    internal bool Expanded => row.Expanded;
+    public bool ShowsMark { get; private set; }
+    public bool IsMarked { get; private set; }
+
+    internal void SetMarking(bool marking, bool marked)
+    {
+        bool visible = marking && CanMark;
+        if (ShowsMark != visible)
+        {
+            ShowsMark = visible;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowsMark)));
+        }
+        if (IsMarked != marked)
+        {
+            IsMarked = marked;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsMarked)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AccessibleName)));
+        }
+    }
     public bool IsMissingFile { get; private set; }
     internal void SetFileMissing(bool missing)
     {
@@ -251,7 +272,7 @@ internal sealed class ClipCard : INotifyPropertyChanged
         {
             string content = HasImage ? Labels.Get("Image") :
                 IsFile ? string.Join(", ", Clip.Files.Take(3).Select(path => FileReference.FromPath(path).Name)) : Body;
-            return string.Join(" · ", new[] { Source, Clip.DisplayTitle, content, Metadata }
+            return string.Join(" · ", new[] { IsMarked ? Labels.Get("Marked for aggregation") : "", Source, Clip.DisplayTitle, content, Metadata }
                 .Where(value => value.Length > 0).Distinct());
         }
     }

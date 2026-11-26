@@ -33,7 +33,7 @@ internal static class ClipMenus
     };
 
     internal static ContextMenu ForClip(App app, ClipCard row, Window owner,
-        Action edit, Action groups, Action aggregate, Action activate)
+        Action edit, Action groups, Action aggregate, Action activate, Action collapse)
     {
         var menu = new ContextMenu();
         var clip = row.Clip;
@@ -49,8 +49,9 @@ internal static class ClipMenus
 
         if (clip.Kind == ClipKind.Aggregate)
         {
-            Add(menu, "Expand aggregation", activate, Shortcuts.Text(app.Settings, Command.Expand));
-            Add(menu, "Edit aggregation", aggregate);
+            Add(menu, row.Expanded ? "Collapse aggregation" : "Expand aggregation", row.Expanded ? collapse : activate,
+                Shortcuts.Text(app.Settings, row.Expanded ? Command.Collapse : Command.Expand));
+            Add(menu, "Edit aggregation", aggregate, Shortcuts.Text(app.Settings, Command.Aggregate));
             Add(menu, "Favorite all members", () => app.FavoriteMembers(clip));
         }
         else
@@ -76,9 +77,11 @@ internal static class ClipMenus
         if (clip.Kind != ClipKind.Aggregate && app.Settings.Ai.Enabled)
             Add(menu, clip.ExcludeFromAi ? "Include in AI analysis" : "Exclude from AI analysis",
                 () => app.UpdateClip(clip.Id, current => current with { ExcludeFromAi = !current.ExcludeFromAi }));
-        if (row.Parent is { } parent) Add(menu, "Remove from aggregation", () => app.RemoveMember(parent, clip.Id));
+        if (row.Parent is { } parent) Add(menu, "Remove from aggregation", () => app.RemoveMember(parent, clip.Id),
+            Shortcuts.Text(app.Settings, Command.Trash));
         menu.Items.Add(new Separator());
-        Add(menu, "Move to Trash", () => app.TrashClip(clip), Shortcuts.Text(app.Settings, Command.Trash));
+        Add(menu, clip.Kind == ClipKind.Aggregate ? "Move aggregation to Trash" : "Move to Trash",
+            () => app.TrashClip(clip), row.Parent is null ? Shortcuts.Text(app.Settings, Command.Trash) : null);
         return menu;
     }
 

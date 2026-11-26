@@ -57,6 +57,18 @@
                                     Content="&#xE711;" Click="ClearQuery" AutomationProperties.Name="{local:Label 'Clear search'}"/>
                         </Grid>
                     </Border>
+                    <Border x:Name="SelectionBar" Visibility="Collapsed" Background="{DynamicResource AccentTint}"
+                            CornerRadius="8" Padding="7,4,5,4" Margin="0,7,0,0">
+                        <DockPanel>
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                <Button Content="{local:Label 'Cancel'}" Click="CancelMarking" MinHeight="23" Padding="5,2" Margin="4,0"/>
+                                <Button x:Name="AggregateSelectionButton" Content="{local:Label 'Aggregate selection'}"
+                                        Click="AggregateResults" Style="{StaticResource PrimaryButton}" MinHeight="23" Padding="7,2"/>
+                            </StackPanel>
+                            <TextBlock x:Name="MarkStatus" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                       AutomationProperties.LiveSetting="Polite"/>
+                        </DockPanel>
+                    </Border>
                     <WrapPanel x:Name="ResultActions" HorizontalAlignment="Right" Margin="0,7,0,0" Visibility="Collapsed">
                         <Button x:Name="AggregateButton" Content="{local:Label 'Aggregate results'}" Click="AggregateResults" Visibility="Collapsed" Margin="0,0,6,0"/>
                         <Button x:Name="DetailsButton" Content="{local:Label 'View details'}" Click="ShowDetails" Visibility="Collapsed" Margin="0,0,6,0"/>
@@ -67,7 +79,7 @@
             <Grid>
                 <ListBox x:Name="ClipList" Style="{StaticResource ClipList}" ItemTemplate="{StaticResource ClipCard}"
                          ItemContainerStyle="{StaticResource LibraryClipRow}" Padding="13,15,13,12"
-                         SelectionChanged="SelectedChanged" MouseDoubleClick="UseSelected" SelectionMode="Extended"
+                         SelectionChanged="SelectedChanged" MouseDoubleClick="UseSelected" PreviewMouseLeftButtonDown="SelectMultipleRows"
                          PreviewMouseRightButtonDown="SelectContextRow" AutomationProperties.Name="{local:Label 'Library results'}"/>
                 <TextBlock x:Name="EmptyMessage" VerticalAlignment="Center" HorizontalAlignment="Center"
                            MaxWidth="280" TextWrapping="Wrap" TextAlignment="Center" Foreground="{DynamicResource Muted}"/>
