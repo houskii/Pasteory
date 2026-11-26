@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using Pasteory.Core;
 
 string root = Path.Combine(Path.GetTempPath(), "Pasteory-tests-" + Guid.NewGuid().ToString("N"));
@@ -69,7 +70,9 @@ try
     Check(settings.CompletedOnboarding && settings.Paused && settings.UseAlternateShortcut && settings.ShouldIgnore("example") &&
         settings.ShouldIgnore("KEEPASSXC") && settings.ShouldIgnore("") && !settings.ShouldIgnore("Notepad"),
         "Persist settings and honor exclusions");
+    CheckSourcePreferences(root);
     CheckLibrary(root);
+    CheckSearchRepair(root);
     CheckOcrNotes(root);
     CheckLinkSessionSchedule(root);
     await CheckCleanup(root);
@@ -191,6 +194,60 @@ static async Task CheckCleanup(string root)
         !File.Exists(image) && File.Exists(original) && reopened.Clips.Single(clip => clip.Id == retained.Id).Text == shared &&
         reopened.SearchIds("referenced external file").Count == 0 && reopened.Clips.All(clip => !selectedIds.Contains(clip.Id)),
         "Delete only previewed records, keeping shared archives and original external files");
+}
+
+static void CheckSourcePreferences(string root)
+{
+    var defaults = new LocalSettings();
+    Check(!defaults.AllowsSourceContext("chrome") && !defaults.AllowsSourceContext("Weixin") && !defaults.AllowsSourceContext("Feishu"),
+        "Source details remain opt-in");
+    var legacy = JsonSerializer.Deserialize<LocalSettings>("""{"IncludeBrowserContext":true,"IncludeChatContext":true}""")!;
+    Check(legacy.AllowsSourceContext("Chrome") && legacy.AllowsSourceContext("Weixin") && legacy.AllowsSourceContext("LARK"),
+        "The legacy chat switch continues to enable both conversation sources");
+    Check(legacy.CaptureInterval() == 0 && (legacy with { CaptureIntervalMilliseconds = -12 }).CaptureInterval() == 0,
+        "Old settings and unsupported intervals keep event-driven immediate capture");
+    string folder = Path.Combine(root, "individual sources");
+    var identity = new IgnoredAppIdentity("Feishu test app", @"C:\Test\Feishu.exe");
+    (legacy with
+    {
+        IncludeWeChatContext = false, IgnoredApps = ["feishu"], CaptureIntervalMilliseconds = 500,
+        IgnoredAppIdentities = new() { ["FEISHU"] = identity }
+    }).Save(folder);
+    var current = LocalSettings.Load(folder);
+    Check(current.CaptureInterval() == 500 && current.IgnoredAppIdentities["FEISHU"] == identity,
+        "Persist the detection interval and selected app name and path");
+    Check(!current.AllowsSourceContext("WeChat") && !current.AllowsSourceContext("Weixin") && current.AllowsSourceContext("Lark") &&
+        !current.AllowsSourceContext("Feishu") && current.AllowsSourceContext("CHROME"),
+        "Persist independent source choices and apply process exclusions even while a source is enabled");
+    Check(!(current with { Paused = true }).AllowsSourceContext("chrome") &&
+        !(current with { IncludeFeishuContext = false }).AllowsSourceContext("Lark") && !current.AllowsSourceContext("Notepad"),
+        "Honor pause and explicit overrides without enabling unrelated apps");
+}
+
+static void CheckSearchRepair(string root)
+{
+    string folder = Path.Combine(root, "search repair");
+    var store = new HistoryStore(folder);
+    store.RebuildSearchIndex();
+    var clip = new Clip { Text = "搜索诊断 sample", Note = "Keep this note", Pinned = true };
+    Check(store.Capture(clip) && store.SearchIds("诊断 sample").SequenceEqual([clip.Id]), "Index content before testing repair");
+    using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+    {
+        DataSource = Path.Combine(folder, HistoryStore.CatalogFileName), Pooling = false
+    }.ToString()))
+    {
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO clip_fts(clip_fts) VALUES('delete-all');";
+        command.ExecuteNonQuery();
+    }
+    Check(store.SearchIds("sample").Count == 0 && store.SearchIds("诊断").SequenceEqual([clip.Id]),
+        "A missing full-text index does not erase the stored content");
+    store.RebuildSearchIndex();
+    store.RebuildSearchIndex();
+    var reopened = new HistoryStore(folder);
+    Check(reopened.SearchIds("诊断 sample").SequenceEqual([clip.Id]) &&
+        reopened.Clips.Single() is { Pinned: true, Note: "Keep this note" }, "Rebuild full-text search from the durable catalog without changing clip metadata");
 }
 
 static void CheckLibrary(string root)

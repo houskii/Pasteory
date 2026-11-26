@@ -11,7 +11,6 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
-using Microsoft.Win32;
 using Pasteory.Core;
 
 namespace Pasteory.Windows;
@@ -32,6 +31,7 @@ internal sealed partial class SettingsWindow : Window
     private readonly LibraryPage library;
     private SettingsPage current;
     private Guid? undoAggregationId;
+    private bool rebuildingSearchIndex;
     private static readonly object ShortcutRecorder = new();
 
     internal SettingsWindow(App app)
@@ -335,9 +335,10 @@ internal sealed partial class SettingsWindow : Window
         return row;
     }
 
-    private void Switch(Panel panel, string title, bool enabled, Func<LocalSettings, bool, LocalSettings> update, string? description = null)
+    private void Switch(Panel panel, string title, bool enabled, Func<LocalSettings, bool, LocalSettings> update,
+        string? description = null, bool available = true)
     {
-        var toggle = new CheckBox { IsChecked = enabled };
+        var toggle = new CheckBox { IsChecked = enabled, IsEnabled = available };
         toggle.SetResourceReference(StyleProperty, "SettingsSwitch");
         AutomationProperties.SetName(toggle, Labels.Get(title));
         toggle.Click += (_, _) =>
@@ -423,45 +424,6 @@ internal sealed partial class SettingsWindow : Window
         actions.Children.Add(restart);
         actions.Children.Add(Ui.Button("Quit", () => app.Shutdown()));
         runtime.Children.Add(Row("Application status", actions, "Pasteory is running in the system tray."));
-    }
-
-    private void BuildPrivacy(Panel layout)
-    {
-        var capture = SettingsCard(layout, "Clipboard capture");
-        Switch(capture, "Pause clipboard capture", app.Settings.Paused, (settings, value) => settings with { Paused = value });
-        capture.Children.Add(Ui.Text(Labels.Get("Windows clipboard changes are recorded as they happen."), 11, "Muted"));
-        Switch(capture, "Recognize image text", app.Settings.RecognizeImages, (settings, value) => settings with { RecognizeImages = value },
-            "Recognition runs on this device and appends [OCR:…] to the note. You can edit the result, search it or copy it as plain text.");
-        var sources = SettingsCard(layout, "Source details");
-        Switch(sources, "Chrome page context", app.Settings.IncludeBrowserContext, (settings, value) => settings with { IncludeBrowserContext = value },
-            "Uses the Pasteory Chrome extension.");
-        Switch(sources, "WeChat and Feishu conversation titles", app.Settings.IncludeChatContext, (settings, value) => settings with { IncludeChatContext = value },
-            "Saves the active conversation title when the app exposes it.");
-        var exclusions = SettingsCard(layout, "Excluded apps");
-        var ignored = Ui.Field("Excluded apps", string.Join(Environment.NewLine, app.Settings.IgnoredApps), 4000);
-        ignored.AcceptsReturn = true;
-        ignored.MinHeight = 105;
-        ignored.VerticalContentAlignment = VerticalAlignment.Top;
-        ignored.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
-        Ui.AddField(exclusions, "Excluded process names, one per line (for example KeePassXC)", ignored);
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right,
-            Margin = new Thickness(0, 8, 0, 0) };
-        var browse = Ui.Button("Choose app…", () =>
-        {
-            var picker = AppPicker();
-            if (picker.ShowDialog(this) == true) ignored.AppendText(
-                (ignored.Text.Length > 0 ? Environment.NewLine : "") + Path.GetFileNameWithoutExtension(picker.FileName));
-        });
-        browse.Margin = new Thickness(0, 0, 6, 0);
-        actions.Children.Add(browse);
-        actions.Children.Add(Ui.Button("Save", () =>
-        {
-            string[] entries = ignored.Text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Select(line => line.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? Path.GetFileNameWithoutExtension(line) : line)
-                .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-            if (app.SaveSettings(app.Settings with { IgnoredApps = entries })) SetStatus(Labels.Get("Settings saved."));
-        }, "PrimaryButton"));
-        exclusions.Children.Add(actions);
     }
 
     private void BuildShortcuts(Panel layout)
@@ -591,8 +553,8 @@ internal sealed partial class SettingsWindow : Window
         var select = new StackPanel { Orientation = Orientation.Horizontal };
         var choose = Ui.Button("Choose app…", () =>
         {
-            var picker = AppPicker();
-            if (picker.ShowDialog(this) == true && app.SaveSettings(update(app.Settings, picker.FileName)))
+            if (ApplicationPicker.Choose(app, this, "Choose app…", choice => choice.Path.Equals(path, StringComparison.OrdinalIgnoreCase)) is { } selected &&
+                app.SaveSettings(update(app.Settings, selected.Path)))
                 Select(SettingsPage.OpenWith, rebuild: true);
         });
         choose.Margin = new Thickness(0, 0, 5, 0);
@@ -602,13 +564,9 @@ internal sealed partial class SettingsWindow : Window
             {
                 if (app.SaveSettings(update(app.Settings, null))) Select(SettingsPage.OpenWith, rebuild: true);
             }));
-        panel.Children.Add(Row(title, select, path is null ? title == "Image viewer" ? "Windows default" : "Choose an application" : path));
+        panel.Children.Add(Row(title, select, path is null ? title == "Image viewer" ? "Windows default" : "Choose an application" : path,
+            app.SourceIcon(path)));
     }
-
-    private static OpenFileDialog AppPicker() => new()
-    {
-        Title = Labels.Get("Choose app…"), Filter = $"{Labels.Get("Windows applications")} (*.exe)|*.exe", CheckFileExists = true
-    };
 
     private void EditFileRule(FileOpenRule? existing) => LibraryEditors.ShowModal(this, "File open rules", close =>
     {
@@ -619,8 +577,9 @@ internal sealed partial class SettingsWindow : Window
         var pathRow = new DockPanel();
         var choose = Ui.Button("Choose app…", () =>
         {
-            var picker = AppPicker();
-            if (picker.ShowDialog(this) == true) path.Text = picker.FileName;
+            var owner = GetWindow(path) ?? this;
+            if (ApplicationPicker.Choose(app, owner, "Choose app…", choice => choice.Path.Equals(path.Text, StringComparison.OrdinalIgnoreCase)) is { } selected)
+                path.Text = selected.Path;
         });
         DockPanel.SetDock(choose, Dock.Right);
         choose.Margin = new Thickness(5, 0, 0, 0);
@@ -794,8 +753,30 @@ internal sealed partial class SettingsWindow : Window
             App.OpenInShell(folder);
         })));
         var chrome = SettingsCard(layout, "Chrome extension");
-        chrome.Children.Add(Row("Pasteory Web Context", Ui.Button("Prepare Chrome extension", () => app.PrepareChromeExtension()),
-            "Load the prepared folder as an unpacked extension in Chrome."));
+        AddChromeConnectionStatus(chrome);
+        chrome.Children.Add(Row("Manage browser connection", Ui.Button("Open link resolution settings", OpenLinkConnections)));
+        var search = SettingsCard(layout, "Search index");
+        var rebuild = Ui.Button("Rebuild search index", async () =>
+        {
+            if (rebuildingSearchIndex) return;
+            rebuildingSearchIndex = true;
+            Select(SettingsPage.Advanced, rebuild: true);
+            SetStatus(Labels.Get("Rebuilding search index…"));
+            try
+            {
+                await app.RebuildSearchIndexAsync();
+                if (!app.Exiting) SetStatus(Labels.Get("Search index rebuilt."));
+            }
+            catch (OperationCanceledException) when (app.Exiting) { }
+            catch (IOException error) { SetStatus(Labels.Get(error.Message)); }
+            finally
+            {
+                rebuildingSearchIndex = false;
+                if (!app.Exiting && current == SettingsPage.Advanced) Select(SettingsPage.Advanced, rebuild: true);
+            }
+        });
+        rebuild.IsEnabled = !rebuildingSearchIndex;
+        search.Children.Add(Row("Find saved clipboard content", rebuild, "Rebuild the index using the saved clipboard records."));
     }
 
     private void BuildAbout(Panel layout)

@@ -220,13 +220,16 @@ public partial class App
     private void OnPowerModeChanged(object sender, Microsoft.Win32.PowerModeChangedEventArgs args) =>
         _ = Dispatcher.BeginInvoke(new Action(() =>
         {
+            if (Exiting) return;
             if (args.Mode == Microsoft.Win32.PowerModes.Resume)
             {
                 systemSuspended = false;
+                ResetClipboardObservation();
                 _ = CheckDueLinkSessionsAsync();
             }
             if (args.Mode != Microsoft.Win32.PowerModes.Suspend) return;
             systemSuspended = true;
+            ResetClipboardObservation();
             if (Ai.ActiveJob?.Trigger is "weekly" or "first story" or "idle" or "review" or "incremental") Ai.SuspendBackground();
         }));
 }

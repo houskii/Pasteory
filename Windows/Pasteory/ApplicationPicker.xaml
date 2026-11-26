@@ -1,0 +1,70 @@
+<Window x:Class="Pasteory.Windows.ApplicationPicker" x:ClassModifier="internal"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:Pasteory.Windows"
+        Width="620" Height="520" MinWidth="400" MinHeight="360"
+        WindowStartupLocation="CenterOwner">
+    <DockPanel Margin="19">
+        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+            <TextBlock x:Name="Heading" FontSize="19" FontWeight="SemiBold" Margin="0,0,0,12"/>
+            <Grid>
+                <TextBox x:Name="Search" Padding="17,4,5,4" MinHeight="34" TabIndex="0" TextChanged="Filter"
+                         AutomationProperties.Name="{local:Label 'Search apps'}"/>
+                <TextBlock Text="&#xE721;" FontFamily="{StaticResource IconFont}" Margin="11,0,0,0"
+                           Foreground="{DynamicResource Muted}" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                <TextBlock x:Name="SearchHint" Text="{local:Label 'Search by app name, executable, or path'}"
+                           Margin="35,0,9,0" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource Muted}"
+                           VerticalAlignment="Center" IsHitTestVisible="False"/>
+            </Grid>
+        </StackPanel>
+        <DockPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
+            <Button DockPanel.Dock="Left" Content="{local:Label 'Choose other app…'}" Click="Browse" TabIndex="2"/>
+            <Button Content="{local:Label Cancel}" HorizontalAlignment="Right" IsCancel="True" TabIndex="3"/>
+        </DockPanel>
+        <Grid>
+            <ListBox x:Name="Applications" Style="{StaticResource ClipList}" TabIndex="1"
+                     AutomationProperties.Name="{local:Label 'Available apps'}" PreviewKeyDown="ChooseWithKeyboard">
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                        <Setter Property="Padding" Value="0"/>
+                        <Setter Property="AutomationProperties.Name" Value="{Binding Name}"/>
+                    </Style>
+                </ListBox.ItemContainerStyle>
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <Border BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1">
+                            <Button Style="{StaticResource NavButton}" Click="ChooseFromList"
+                                    AutomationProperties.Name="{Binding Name}" Padding="8,6" Margin="0"
+                                    HorizontalContentAlignment="Stretch">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" Text="✓" Width="22" Margin="6,0,0,0"
+                                               VerticalAlignment="Center" HorizontalAlignment="Right"
+                                               Foreground="{DynamicResource AccentInk}"
+                                               Visibility="{Binding Selected, Converter={StaticResource ShowWhen}}"/>
+                                    <Grid DockPanel.Dock="Left" Width="32" Height="32" Margin="0,0,12,0">
+                                        <TextBlock Text="&#xE8A7;" FontFamily="{StaticResource IconFont}"
+                                                   Foreground="{DynamicResource Muted}"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                   Visibility="{Binding ShowDefaultIcon, Converter={StaticResource ShowWhen}}"/>
+                                        <Image Source="{Binding Icon}" Stretch="Uniform"/>
+                                    </Grid>
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" FontWeight="SemiBold"/>
+                                        <TextBlock Text="{Binding Executable}" TextTrimming="CharacterEllipsis"
+                                                   Foreground="{DynamicResource Muted}" FontSize="11"/>
+                                        <TextBlock Text="{Binding Path}" ToolTip="{Binding Path}" TextTrimming="CharacterEllipsis"
+                                                   Foreground="{DynamicResource Quiet}" FontSize="11"/>
+                                    </StackPanel>
+                                </DockPanel>
+                            </Button>
+                        </Border>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+            <TextBlock x:Name="Status" Text="{local:Label 'Reading installed apps…'}"
+                       Foreground="{DynamicResource Muted}" TextWrapping="Wrap" Margin="12"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/>
+        </Grid>
+    </DockPanel>
+</Window>

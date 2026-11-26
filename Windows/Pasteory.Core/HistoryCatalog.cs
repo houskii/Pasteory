@@ -206,6 +206,19 @@ public sealed partial class HistoryStore
         }
     }
 
+    public void RebuildSearchIndex()
+    {
+        if (!File.Exists(catalogPath)) return;
+        try
+        {
+            using var connection = OpenCatalog(catalogPath, SqliteOpenMode.ReadWrite);
+            using var command = connection.CreateCommand();
+            command.CommandText = "INSERT INTO clip_fts(clip_fts) VALUES('rebuild');";
+            command.ExecuteNonQuery();
+        }
+        catch (SqliteException error) { throw new IOException("The clipboard search index could not be rebuilt.", error); }
+    }
+
     public List<Guid> SearchIds(string query, int limit = int.MaxValue, CancellationToken cancellation = default)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);

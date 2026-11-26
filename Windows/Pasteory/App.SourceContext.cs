@@ -17,7 +17,8 @@ public partial class App
     {
         chatWindow = 0;
         var capture = new CaptureEvent(clip.CapturedAt, clip.Source);
-        if (Settings.IncludeBrowserContext && clip.Source.Equals("chrome", StringComparison.OrdinalIgnoreCase))
+        if (!Settings.AllowsSourceContext(clip.Source)) return capture;
+        if (LocalSettings.SourceApplication(clip.Source) == SourceCaptureApplication.Chrome)
         {
             chromeSelections.RemoveAll(entry => (DateTimeOffset.UtcNow - entry.Time).Duration().TotalSeconds > 6);
             int match = chromeSelections.FindLastIndex(entry => entry.Matches(clip, clip.CapturedAt));
@@ -26,23 +27,21 @@ public partial class App
                 capture = chromeSelections[match].Apply(capture);
                 chromeSelections.RemoveAt(match);
             }
+            return capture;
         }
-        if (Settings.IncludeChatContext && ChatContext.IsChatApp(clip.Source))
+        nint handle = NativeMethods.GetForegroundWindow();
+        uint processId = NativeMethods.ProcessId(handle);
+        try
         {
-            nint handle = NativeMethods.GetForegroundWindow();
-            uint processId = NativeMethods.ProcessId(handle);
-            try
-            {
-                using var foreground = Process.GetProcessById((int)processId);
-                if (!foreground.ProcessName.Equals(clip.Source, StringComparison.OrdinalIgnoreCase)) return capture;
-                chatWindow = handle;
-                string title = NativeMethods.WindowTitle(handle).Trim();
-                if (title.Length > 0 && !new[] { "WeChat", "Weixin", "Lark", "Feishu", "微信", "飞书" }
-                    .Contains(title, StringComparer.OrdinalIgnoreCase))
-                    capture = capture with { Context = title };
-            }
-            catch (Exception error) when (error is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) { }
+            using var foreground = Process.GetProcessById((int)processId);
+            if (!foreground.ProcessName.Equals(clip.Source, StringComparison.OrdinalIgnoreCase)) return capture;
+            chatWindow = handle;
+            string title = NativeMethods.WindowTitle(handle).Trim();
+            if (title.Length > 0 && !new[] { "WeChat", "Weixin", "Lark", "Feishu", "微信", "飞书" }
+                .Contains(title, StringComparer.OrdinalIgnoreCase))
+                capture = capture with { Context = title };
         }
+        catch (Exception error) when (error is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) { }
         return capture;
     }
 
@@ -50,9 +49,11 @@ public partial class App
     {
         try
         {
-            if (NativeMethods.GetForegroundWindow() != chatWindow) return;
+            int generation = captureGeneration;
+            if (!CanCaptureClipboard || !Settings.AllowsSourceContext(capture.Source) ||
+                NativeMethods.GetForegroundWindow() != chatWindow) return;
             var context = await ChatContext.InspectAsync(chatWindow, capture, lifetime.Token);
-            if (context is null || Exiting || Settings.Paused || !Settings.IncludeChatContext ||
+            if (context is null || !CanCaptureClipboard || generation != captureGeneration || !Settings.AllowsSourceContext(capture.Source) ||
                 NativeMethods.GetForegroundWindow() != chatWindow) return;
             UpdateClip(id, clip => clip.Captures.Contains(capture) ? clip with
             {
@@ -64,7 +65,7 @@ public partial class App
 
     private Task ChromeEventAsync(ChromeSelection selection) => Dispatcher.InvokeAsync(() =>
     {
-        if (Exiting || Settings.Paused || !Settings.IncludeBrowserContext || Settings.ShouldIgnore("chrome")) return;
+        if (!CanCaptureClipboard || !Settings.AllowsSourceContext("chrome")) return;
         foreach (var clip in Clips.Take(12))
         {
             var capture = clip.Captures.FirstOrDefault();

@@ -90,7 +90,7 @@ internal static class ChromeBridge
                 string requestId = ReadString(message, "requestId", 100);
                 string type = ReadString(message, "type", 30);
                 LocalSettings settings = LocalSettings.Load(root);
-                bool enabled = settings.IncludeBrowserContext && !settings.Paused && !settings.ShouldIgnore("chrome");
+                bool enabled = settings.AllowsSourceContext("chrome");
                 if (type == "getConfig")
                 {
                     bool chinese = settings.Language == "简体中文" || settings.Language == "System" &&

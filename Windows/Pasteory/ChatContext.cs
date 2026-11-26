@@ -14,7 +14,8 @@ internal static partial class ChatContext
 {
     private static int probing;
 
-    internal static bool IsChatApp(string source) => source.ToLowerInvariant() is "wechat" or "weixin" or "feishu" or "lark";
+    internal static bool IsChatApp(string source) =>
+        LocalSettings.SourceApplication(source) is SourceCaptureApplication.WeChat or SourceCaptureApplication.Feishu;
 
     internal static async Task<CaptureEvent?> InspectAsync(nint window, CaptureEvent capture, CancellationToken cancellation)
     {
@@ -32,8 +33,7 @@ internal static partial class ChatContext
 
     private static CaptureEvent? Inspect(nint window, CaptureEvent capture)
     {
-        bool weChat = capture.Source.Equals("WeChat", StringComparison.OrdinalIgnoreCase) ||
-            capture.Source.Equals("Weixin", StringComparison.OrdinalIgnoreCase);
+        bool weChat = LocalSettings.SourceApplication(capture.Source) == SourceCaptureApplication.WeChat;
         var root = AutomationElement.FromHandle(window);
         string[] titleIds = weChat ? ["current_chat_name_label", "ChatHeaderTitle"] : ["chatWindow_chatName"];
         var headerTitle = FindNamed(root, titleIds);

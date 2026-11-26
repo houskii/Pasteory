@@ -154,17 +154,20 @@ internal static partial class Program
         if (pathIndex >= 0)
         {
             CheckPackagedApp(args[pathIndex + 1]);
+            if (args.Contains("--capture-interval")) CheckPackagedApp(args[pathIndex + 1], captureInterval: 1000);
             if (args.Contains("--ocr")) CheckPackagedOcr(args[pathIndex + 1]);
             System.Threading.Tasks.Task.Run(() => CheckChromeBridgeAsync(args[pathIndex + 1])).GetAwaiter().GetResult();
         }
         Console.WriteLine("Windows clipboard format and WPF checks passed.");
     }
 
-    private static void CheckPackagedApp(string executable)
+    private static void CheckPackagedApp(string executable, int captureInterval = 0)
     {
         string directory = Path.Combine(Path.GetTempPath(), "Pasteory-package-" + Guid.NewGuid().ToString("N"));
         string indexPath = Path.Combine(directory, HistoryStore.CatalogFileName);
         string token = "Pasteory preview CI " + Guid.NewGuid().ToString("N");
+        string? superseded = captureInterval == 0 ? null : "Pasteory interval fixture " + Guid.NewGuid().ToString("N");
+        if (captureInterval != 0) new LocalSettings { CaptureIntervalMilliseconds = captureInterval }.Save(directory);
         IDataObject? previous = Clipboard.GetDataObject();
         var start = new ProcessStartInfo(Path.GetFullPath(executable))
         {
@@ -178,15 +181,29 @@ internal static partial class Program
         try
         {
             Check(process.WaitForInputIdle(10000), "Start the portable app message loop");
+            if (superseded is not null)
+            {
+                Clipboard.SetText(superseded);
+                Thread.Sleep(175);
+                Check(!File.Exists(indexPath) || new HistoryStore(directory).SearchIds(superseded, limit: 1).Count == 0,
+                    "Wait for the configured clipboard detection interval");
+                Clipboard.SetText(token);
+            }
             for (int retry = 0; retry < 20; retry++)
             {
                 Check(!process.HasExited, "The portable app exited during launch");
-                Clipboard.SetText(token);
+                if (superseded is null) Clipboard.SetText(token);
                 Thread.Sleep(200);
                 if (!File.Exists(indexPath)) continue;
-                if (new HistoryStore(directory).SearchIds(token, limit: 1).Count == 1)
+                var history = new HistoryStore(directory);
+                if (history.SearchIds(token, limit: 1).Count == 1)
                 {
-                    Console.WriteLine("The portable app captured a real Windows clipboard event and persisted the text.");
+                    if (superseded is null) Console.WriteLine("The portable app captured a real Windows clipboard event and persisted the text.");
+                    else
+                    {
+                        Check(history.SearchIds(superseded, limit: 1).Count == 0, "Keep the latest clipboard value when updates arrive inside the interval");
+                        Console.WriteLine("The portable app honored the one-second interval and saved the latest copy.");
+                    }
                     return;
                 }
             }

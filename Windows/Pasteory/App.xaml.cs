@@ -41,6 +41,8 @@ public partial class App : Application
     private bool isolated;
     internal bool AutomationWindow { get; private set; }
     private bool pasting;
+    private bool sessionLocked;
+    private int captureGeneration;
     private uint observedSequence;
     private nint pasteTarget;
     private uint pasteTargetProcess;
@@ -55,6 +57,7 @@ public partial class App : Application
     internal bool CaptureAvailable => listening;
     private readonly DispatcherTimer maintenance = new() { Interval = TimeSpan.FromHours(1) };
     private readonly DispatcherTimer aiTimer = new() { Interval = TimeSpan.FromSeconds(30) };
+    private readonly DispatcherTimer clipboardDelay = new(DispatcherPriority.Background);
     private readonly CancellationTokenSource lifetime = new();
 
     protected override void OnStartup(StartupEventArgs e)
@@ -134,10 +137,16 @@ public partial class App : Application
         MainWindow = window;
         SystemEvents.UserPreferenceChanged += OnSystemPreferenceChanged;
         SystemEvents.PowerModeChanged += OnPowerModeChanged;
+        SystemEvents.SessionSwitch += OnSessionSwitch;
         CreateTray();
         messages = new HwndSource(new HwndSourceParameters("Pasteory clipboard messages") { ParentWindow = new nint(-3) });
         messages.AddHook(ReceiveMessage);
         observedSequence = NativeMethods.GetClipboardSequenceNumber();
+        clipboardDelay.Tick += (_, _) =>
+        {
+            clipboardDelay.Stop();
+            _ = CaptureAsync();
+        };
         listening = !disableCapture && NativeMethods.AddClipboardFormatListener(messages.Handle) != 0;
         RegisterShortcut();
         maintenance.Tick += (_, _) =>
@@ -203,7 +212,7 @@ public partial class App : Application
     {
         if (message == NativeMethods.ClipboardUpdated)
         {
-            _ = CaptureAsync();
+            ScheduleClipboardCapture();
             handled = true;
         }
         else if (message == NativeMethods.HotKeyPressed && wParam == NativeMethods.HotKeyId)
@@ -224,8 +233,43 @@ public partial class App : Application
 
     private async Task ShowAfterCaptureAsync()
     {
+        clipboardDelay.Stop();
         await CaptureAsync();
         if (!Exiting) window.Present();
+    }
+
+    private bool CanCaptureClipboard => !Exiting && !disableCapture && !Settings.Paused && !systemSuspended && !sessionLocked;
+
+    private void ScheduleClipboardCapture()
+    {
+        int interval = Settings.CaptureInterval();
+        if (interval == 0 || !CanCaptureClipboard)
+        {
+            _ = CaptureAsync();
+            return;
+        }
+        if (clipboardDelay.IsEnabled) return;
+        clipboardDelay.Interval = TimeSpan.FromMilliseconds(interval);
+        clipboardDelay.Start();
+    }
+
+    private void ResetClipboardObservation()
+    {
+        clipboardDelay.Stop();
+        observedSequence = NativeMethods.GetClipboardSequenceNumber();
+        captureGeneration++;
+        chromeSelections.Clear();
+    }
+
+    private void OnSessionSwitch(object sender, SessionSwitchEventArgs args)
+    {
+        if (args.Reason is not (SessionSwitchReason.SessionLock or SessionSwitchReason.SessionUnlock)) return;
+        _ = Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (Exiting) return;
+            sessionLocked = args.Reason == SessionSwitchReason.SessionLock;
+            ResetClipboardObservation();
+        }));
     }
 
     private async Task CaptureAsync()
@@ -233,15 +277,16 @@ public partial class App : Application
         uint sequence = NativeMethods.GetClipboardSequenceNumber();
         if (sequence == 0 || sequence == observedSequence) return;
         observedSequence = sequence;
-        if (Settings.Paused || disableCapture) return;
+        if (!CanCaptureClipboard) return;
 
         var (source, path) = NativeMethods.ClipboardOwner();
         if (Settings.ShouldIgnore(source)) return;
+        int generation = captureGeneration;
+        bool StillAllowed() => CanCaptureClipboard && generation == captureGeneration && !Settings.ShouldIgnore(source);
 
         for (int attempt = 0; attempt < 5; attempt++)
         {
-            if (Exiting || Settings.Paused || Settings.ShouldIgnore(source) ||
-                sequence != NativeMethods.GetClipboardSequenceNumber()) return;
+            if (!StillAllowed() || sequence != NativeMethods.GetClipboardSequenceNumber()) return;
             (Clip Clip, byte[]? Image)? capture;
             try
             {
@@ -261,10 +306,15 @@ public partial class App : Application
             if (capture is { } item && sequence == NativeMethods.GetClipboardSequenceNumber())
             {
                 Clip clip = item.Clip with { SourcePath = path };
+                var sourceContext = ReadSourceContext(clip, out nint chatWindow);
                 if (clip.Kind == ClipKind.Files)
                     clip = clip with { FileIdentity = await Task.Run(() => FileFingerprint(clip.Files)) };
-                if (Exiting || Settings.Paused || Settings.ShouldIgnore(source)) return;
-                var sourceContext = ReadSourceContext(clip, out nint chatWindow);
+                if (!StillAllowed()) return;
+                if (!Settings.AllowsSourceContext(source))
+                {
+                    sourceContext = new(clip.CapturedAt, clip.Source);
+                    chatWindow = 0;
+                }
                 clip = clip with { Captures = [sourceContext], OcrPending = item.Image is not null && Settings.RecognizeImages };
                 if (clip.Kind == ClipKind.Link) clip = clip with { LinkDetails = LinkFallback(clip) };
                 Clip? saved = null;
@@ -432,6 +482,14 @@ public partial class App : Application
         }
     }
 
+    internal async Task RebuildSearchIndexAsync()
+    {
+        await Task.Run(history.RebuildSearchIndex, lifetime.Token);
+        if (Exiting) return;
+        if (window.IsVisible) window.Refresh();
+        if (settingsWindow?.IsVisible == true) settingsWindow.RefreshLibrary();
+    }
+
     internal void OpenSettings(SettingsPage? page = null)
     {
         if (Exiting) return;
@@ -455,6 +513,7 @@ public partial class App : Application
         bool groupViewChanged = Settings.GroupDisplay != next.GroupDisplay ||
             !Settings.Shortcuts.SequenceEqual(next.Shortcuts);
         bool pausedChanged = Settings.Paused != next.Paused;
+        bool captureIntervalChanged = Settings.CaptureInterval() != next.CaptureInterval();
         bool themeChanged = Settings.Theme != next.Theme || Settings.Appearance != next.Appearance;
         bool linkRulesChanged = !Settings.LinkFallbacks.SequenceEqual(next.LinkFallbacks);
         bool enableWebCacheCleanup = !Settings.AutomaticWebCacheCleanup && next.AutomaticWebCacheCleanup;
@@ -477,6 +536,7 @@ public partial class App : Application
             return false;
         }
         Settings = next;
+        if (!next.AllowsSourceContext("chrome")) chromeSelections.Clear();
         if (enableWebCacheCleanup) ScheduleWebCacheCheck();
         if (enableImageOcr) _ = RecognizePendingImagesAsync();
         if (linkRefreshChanged)
@@ -487,7 +547,12 @@ public partial class App : Application
         if (linkRulesChanged) ChangeHistory(() => history.UpdateLinkDetails(LinkFallback));
         if (aiScopeChanged) Ai?.Pause();
         if (themeChanged) Theme.Apply(Resources, Settings);
-        if (pausedChanged) observedSequence = NativeMethods.GetClipboardSequenceNumber();
+        if (pausedChanged) ResetClipboardObservation();
+        else if (captureIntervalChanged && clipboardDelay.IsEnabled)
+        {
+            clipboardDelay.Stop();
+            ScheduleClipboardCapture();
+        }
         if (window.IsVisible) window.Refresh();
         if (groupViewChanged && settingsWindow?.IsVisible == true) settingsWindow.RefreshLibrary();
         if (shortcutChanged) RegisterShortcut();
@@ -543,11 +608,13 @@ public partial class App : Application
     {
         Exiting = true;
         maintenance.Stop();
+        clipboardDelay.Stop();
         StopWebCache();
         aiTimer.Stop();
         lifetime.Cancel();
         SystemEvents.UserPreferenceChanged -= OnSystemPreferenceChanged;
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+        SystemEvents.SessionSwitch -= OnSessionSwitch;
         openRegistration?.Unregister(null);
         openRequest?.Dispose();
         if (messages is not null)

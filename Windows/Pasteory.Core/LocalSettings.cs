@@ -13,6 +13,9 @@ public sealed record LinkFallbackRule(string Pattern, string Title, LinkFallback
 public sealed record LinkFallbackRoute(Guid Id, string Name, string Host, string Path, string[] RequiredQueryKeys,
     bool Enabled = true, int Priority = 100);
 
+public enum SourceCaptureApplication { Chrome, WeChat, Feishu }
+public sealed record IgnoredAppIdentity(string Name, string Path);
+
 public sealed record AiPreferences
 {
     public bool Enabled { get; init; }
@@ -44,8 +47,10 @@ public sealed record LocalSettings
 {
     public bool CompletedOnboarding { get; init; } = true;
     public bool Paused { get; init; }
+    public int CaptureIntervalMilliseconds { get; init; }
     public bool UseAlternateShortcut { get; init; }
     public string[] IgnoredApps { get; init; } = [];
+    public Dictionary<string, IgnoredAppIdentity> IgnoredAppIdentities { get; init; } = [];
     public string Theme { get; init; } = "BlueViolet";
     public string Appearance { get; init; } = "System";
     public string Language { get; init; } = "System";
@@ -57,6 +62,8 @@ public sealed record LocalSettings
     public bool RecognizeImages { get; init; }
     public bool IncludeBrowserContext { get; init; }
     public bool IncludeChatContext { get; init; }
+    public bool? IncludeWeChatContext { get; init; }
+    public bool? IncludeFeishuContext { get; init; }
     public bool ResolveLinks { get; init; }
     public LinkSignInRule[] LinkSignIns { get; init; } = [];
     public LinkFallbackRule[] LinkFallbacks { get; init; } = [];
@@ -89,6 +96,27 @@ public sealed record LocalSettings
     public bool ShouldIgnore(string source) =>
         string.IsNullOrWhiteSpace(source) || PasswordApps.Contains(source) ||
         IgnoredApps.Contains(source, StringComparer.OrdinalIgnoreCase);
+
+    public static SourceCaptureApplication? SourceApplication(string processName) => processName.ToUpperInvariant() switch
+    {
+        "CHROME" => SourceCaptureApplication.Chrome,
+        "WECHAT" or "WEIXIN" => SourceCaptureApplication.WeChat,
+        "FEISHU" or "LARK" => SourceCaptureApplication.Feishu,
+        _ => null
+    };
+
+    public bool SourceContextEnabled(SourceCaptureApplication application) => application switch
+    {
+        SourceCaptureApplication.Chrome => IncludeBrowserContext,
+        SourceCaptureApplication.WeChat => IncludeWeChatContext ?? IncludeChatContext,
+        SourceCaptureApplication.Feishu => IncludeFeishuContext ?? IncludeChatContext,
+        _ => false
+    };
+
+    public bool AllowsSourceContext(string processName) => !Paused && !ShouldIgnore(processName) &&
+        SourceApplication(processName) is { } application && SourceContextEnabled(application);
+
+    public int CaptureInterval() => CaptureIntervalMilliseconds is 100 or 500 or 1000 ? CaptureIntervalMilliseconds : 0;
 
     public static LocalSettings Load(string dataDirectory) =>
         LocalJson.Read<LocalSettings>(Path.Combine(dataDirectory, "settings.json")) ?? new()

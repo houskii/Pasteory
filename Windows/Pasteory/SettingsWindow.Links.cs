@@ -30,10 +30,7 @@ internal sealed partial class SettingsWindow
         sessions.Children.Add(Row("Browser compatibility", Ui.Text("Microsoft Edge WebView2", 12, "Muted")));
 
         var chrome = SettingsCard(layout, "Google Chrome");
-        var integration = ChromeBridge.Status(app.DataDirectory);
-        chrome.Children.Add(Row("Extension files", Ui.Text(Labels.Get(integration.Prepared ? "Prepared" : "Missing"), 12, "Muted")));
-        chrome.Children.Add(Row("Native messaging host", Ui.Text(Labels.Get(integration.Registered ? "Registered" : "Unregistered"), 12, "Muted")));
-        chrome.Children.Add(Row("Last connected", Ui.Text(integration.LastContact?.ToLocalTime().ToString("g") ?? Labels.Get("Not connected yet"), 12, "Muted")));
+        AddChromeConnectionStatus(chrome);
         chrome.Children.Add(Row("Pasteory Web Context", Ui.Button("Prepare Chrome extension", () =>
         {
             app.PrepareChromeExtension();
@@ -44,6 +41,20 @@ internal sealed partial class SettingsWindow
         access.Children.Add(Ui.Text(Labels.Get("Public page titles are requested without browser cookies."), 12));
         access.Children.Add(Ui.Text(Labels.Get("Matching sites use their saved Pasteory sessions. Link resolution saves titles and diagnostics."), 12));
         access.Children.Add(Ui.Text(Labels.Get("Local network addresses and high-risk action paths are blocked."), 12));
+    }
+
+    private void AddChromeConnectionStatus(Panel chrome)
+    {
+        var integration = ChromeBridge.Status(app.DataDirectory);
+        chrome.Children.Add(Row("Extension files", Ui.Text(Labels.Get(integration.Prepared ? "Prepared" : "Missing"), 12, "Muted")));
+        chrome.Children.Add(Row("Native messaging host", Ui.Text(Labels.Get(integration.Registered ? "Registered" : "Unregistered"), 12, "Muted")));
+        chrome.Children.Add(Row("Last connected", Ui.Text(integration.LastContact?.ToLocalTime().ToString("g") ?? Labels.Get("Not connected yet"), 12, "Muted")));
+    }
+
+    private void OpenLinkConnections()
+    {
+        linkSection = LinkHistorySection.Connections;
+        Select(SettingsPage.Links, rebuild: true);
     }
 
     private void BuildLinkRules(Panel layout)
