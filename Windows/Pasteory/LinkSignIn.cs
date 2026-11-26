@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -14,10 +15,10 @@ using Pasteory.Core;
 
 namespace Pasteory.Windows;
 
-internal sealed class LinkSignIn
+internal sealed class LinkSignIn(LinkAccessPolicy access)
 {
     private sealed record PageMetadata(string? Title, string? DocumentTitle, bool HasLoginForm);
-    private sealed record LoadedPage(Uri Url, int Status, bool Succeeded, string? Title, bool NeedsSignIn, bool Blocked = false);
+    private sealed record LoadedPage(Uri Url, int Status, bool Succeeded, string? Title, bool NeedsSignIn, bool Blocked = false, bool TimedOut = false);
     private readonly SemaphoreSlim queue = new(1);
     private int interactiveWindows;
     private TaskCompletionSource? cacheClearance;
@@ -38,7 +39,7 @@ internal sealed class LinkSignIn
 
     private async Task<bool> ShowWindowAsync(string root, LinkSignInRule rule, Window owner)
     {
-        if (!Uri.TryCreate(rule.SignInUrl, UriKind.Absolute, out var uri) || !LinkResolver.Allowed(uri)) return false;
+        if (!Uri.TryCreate(rule.SignInUrl, UriKind.Absolute, out var uri) || !access.Allows(uri)) return false;
         var web = new WebView2();
         var window = new Window
         {
@@ -69,10 +70,11 @@ internal sealed class LinkSignIn
             await web.EnsureCoreWebView2Async(environment);
             if (result.Task.IsCompleted) return false;
             var core = web.CoreWebView2;
-            Configure(core, interactive: true);
+            await ConfigureAsync(core, interactive: true);
+            if (result.Task.IsCompleted) return false;
             core.SourceChanged += (_, _) =>
             {
-                if (Uri.TryCreate(core.Source, UriKind.Absolute, out var current) && LinkResolver.Allowed(current))
+                if (Uri.TryCreate(core.Source, UriKind.Absolute, out var current) && access.Allows(current))
                     status.Text = current.GetLeftPart(UriPartial.Authority);
             };
             core.NavigationCompleted += (_, e) => done.IsEnabled = e.IsSuccess;
@@ -89,12 +91,19 @@ internal sealed class LinkSignIn
 
     internal async Task<LinkDetails> ResolveAsync(string root, LinkSignInRule rule, Uri uri, nint parent, CancellationToken cancel)
     {
+        var elapsed = Stopwatch.StartNew();
         var page = await LoadPageAsync(root, rule, uri, parent, refresh: false, cancel);
-        if (page is { NeedsSignIn: true } || page?.Status is 401 or 403)
-            return new("Sign-in required", null, DateTimeOffset.UtcNow, "Pasteory session", "Login or error page");
-        if (page is not { Succeeded: true, Status: < 400 })
-            return new("Could not resolve the link", null, DateTimeOffset.UtcNow, "Pasteory session");
-        return LinkResolver.AssessTitle(page.Title, page.Url, "Pasteory session");
+        const string source = "Pasteory session";
+        string? issue = page switch
+        {
+            { Blocked: true } => "Link blocked by policy", { TimedOut: true } => "Request timed out",
+            { NeedsSignIn: true, Status: < 400 } => "Sign-in required",
+            null => "Link network error", _ => LinkResolver.HttpFailure(page.Status)
+        };
+        var result = issue is not null || page is not { Succeeded: true }
+            ? new LinkDetails(issue ?? "Link network error", null, DateTimeOffset.UtcNow, source)
+            : LinkResolver.AssessTitle(page.Title, page.Url, source);
+        return result with { HttpStatus = page is { Status: > 0 } ? page.Status : null, DurationMilliseconds = (int)elapsed.ElapsedMilliseconds };
     }
 
     internal async Task<LinkSessionOutcome> RefreshAsync(string root, LinkSignInRule rule, Uri uri, nint parent, CancellationToken cancel)
@@ -109,21 +118,23 @@ internal sealed class LinkSignIn
     private async Task<LoadedPage?> LoadPageAsync(string root, LinkSignInRule rule, Uri uri, nint parent, bool refresh,
         CancellationToken cancel)
     {
-        if (!LinkResolver.Allowed(uri)) return new(uri, 0, false, null, false, Blocked: true);
+        if (!access.Allows(uri)) return new(uri, 0, false, null, false, Blocked: true);
         await queue.WaitAsync(cancel);
         CoreWebView2Controller? controller = null;
+        int status = 0;
+        bool blocked = false;
+        int? redirectStatus = null;
         try
         {
             var environment = await CreateEnvironment(root, rule);
             controller = await environment.CreateCoreWebView2ControllerAsync(parent);
             controller.IsVisible = false;
             var core = controller.CoreWebView2;
-            var result = new TaskCompletionSource<CoreWebView2NavigationCompletedEventArgs?>(TaskCreationOptions.RunContinuationsAsynchronously);
-            bool blocked = false;
-            Configure(core, interactive: false, onBlocked: () =>
+            var result = new TaskCompletionSource<CoreWebView2NavigationCompletedEventArgs>(TaskCreationOptions.RunContinuationsAsynchronously);
+            await ConfigureAsync(core, interactive: false, onBlocked: responseStatus =>
             {
                 blocked = true;
-                result.TrySetResult(null);
+                redirectStatus ??= responseStatus;
             });
             core.NavigationCompleted += (_, args) => result.TrySetResult(args);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel);
@@ -133,9 +144,10 @@ internal sealed class LinkSignIn
                     "Cache-Control: no-cache\r\nPragma: no-cache"));
             else core.Navigate(uri.AbsoluteUri);
             var response = await result.Task.WaitAsync(timeout.Token);
+            status = response.HttpStatusCode;
             if (response is { IsSuccess: true, HttpStatusCode: < 400 }) await Task.Delay(refresh ? 900 : 350, timeout.Token);
             Uri final = Uri.TryCreate(core.Source, UriKind.Absolute, out var loaded) ? loaded : uri;
-            if (blocked || response is null) return new(final, 0, false, null, false, Blocked: true);
+            if (blocked) return new(final, redirectStatus ?? 0, false, null, false, Blocked: true);
             if (!response.IsSuccess || response.HttpStatusCode >= 400)
                 return new(final, response.HttpStatusCode, false, null, LinkResolver.IsSignInPage(null, final));
             const string inspect = """
@@ -150,8 +162,11 @@ internal sealed class LinkSignIn
             bool needsSignIn = metadata?.HasLoginForm == true || LinkResolver.IsSignInPage(metadata?.DocumentTitle, final);
             return new(final, response.HttpStatusCode, true, metadata?.Title, needsSignIn);
         }
-        catch (Exception error) when (WebError(error) || error is JsonException ||
-            error is OperationCanceledException && !cancel.IsCancellationRequested)
+        catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
+        {
+            return new(uri, redirectStatus ?? status, false, null, false, Blocked: blocked, TimedOut: !blocked);
+        }
+        catch (Exception error) when (WebError(error) || error is JsonException)
         {
             return null;
         }
@@ -247,7 +262,7 @@ internal sealed class LinkSignIn
     internal static bool WebError(Exception error) => error is COMException or WebView2RuntimeNotFoundException or
         InvalidOperationException or ArgumentException or IOException or UnauthorizedAccessException;
 
-    private static void Configure(CoreWebView2 core, bool interactive, Action? onBlocked = null)
+    private async Task ConfigureAsync(CoreWebView2 core, bool interactive, Action<int?>? onBlocked = null)
     {
         core.Settings.IsWebMessageEnabled = false;
         core.Settings.AreHostObjectsAllowed = false;
@@ -257,17 +272,56 @@ internal sealed class LinkSignIn
         core.Settings.AreDefaultContextMenusEnabled = interactive;
         core.NavigationStarting += (_, args) =>
         {
-            if (Uri.TryCreate(args.Uri, UriKind.Absolute, out var uri) && LinkResolver.Allowed(uri)) return;
+            if (Uri.TryCreate(args.Uri, UriKind.Absolute, out var uri) && access.Allows(uri)) return;
             args.Cancel = true;
-            onBlocked?.Invoke();
+            onBlocked?.Invoke(null);
         };
         core.PermissionRequested += (_, args) => args.State = CoreWebView2PermissionState.Deny;
         core.DownloadStarting += (_, args) => { args.Cancel = true; args.Handled = true; };
         core.NewWindowRequested += (_, args) =>
         {
             args.Handled = true;
-            if (interactive && Uri.TryCreate(args.Uri, UriKind.Absolute, out var target) && LinkResolver.Allowed(target))
+            if (interactive && Uri.TryCreate(args.Uri, UriKind.Absolute, out var target) && access.Allows(target))
                 core.Navigate(target.AbsoluteUri);
         };
+
+        // Check redirect headers before Chromium can send the next document request.
+        var requests = core.GetDevToolsProtocolEventReceiver("Fetch.requestPaused");
+        requests.DevToolsProtocolEventReceived += async (_, args) =>
+        {
+            try
+            {
+                using var message = JsonDocument.Parse(args.ParameterObjectAsJson);
+                var request = message.RootElement;
+                string? requestId = request.GetProperty("requestId").GetString();
+                string? address = request.GetProperty("request").GetProperty("url").GetString();
+                bool response = request.TryGetProperty("responseStatusCode", out var responseStatus);
+                int? status = response ? responseStatus.GetInt32() : null;
+                if (Uri.TryCreate(address, UriKind.Absolute, out var uri) && access.Allows(uri) && !IsBlockedRedirect(request, uri, status))
+                    await core.CallDevToolsProtocolMethodAsync(response ? "Fetch.continueResponse" : "Fetch.continueRequest",
+                        JsonSerializer.Serialize(new { requestId }));
+                else
+                {
+                    onBlocked?.Invoke(status);
+                    await core.CallDevToolsProtocolMethodAsync("Fetch.failRequest",
+                        JsonSerializer.Serialize(new { requestId, errorReason = "BlockedByClient" }));
+                }
+            }
+            catch (Exception error) when (WebError(error) || error is JsonException or KeyNotFoundException) { }
+        };
+        await core.CallDevToolsProtocolMethodAsync("Fetch.enable", """
+            {"patterns":[{"resourceType":"Document","requestStage":"Request"},{"resourceType":"Document","requestStage":"Response"}]}
+            """);
+    }
+
+    private bool IsBlockedRedirect(JsonElement paused, Uri source, int? status)
+    {
+        if (status is not (301 or 302 or 303 or 307 or 308) || !paused.TryGetProperty("responseHeaders", out var headers)) return false;
+        foreach (var header in headers.EnumerateArray())
+        {
+            if (!string.Equals(header.GetProperty("name").GetString(), "Location", StringComparison.OrdinalIgnoreCase)) continue;
+            return !Uri.TryCreate(source, header.GetProperty("value").GetString(), out var destination) || !access.Allows(destination);
+        }
+        return false;
     }
 }

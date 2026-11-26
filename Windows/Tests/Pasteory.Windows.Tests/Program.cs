@@ -25,7 +25,7 @@ internal static partial class Program
         int fixture = Array.IndexOf(args, "--prepare-ui");
         if (fixture >= 0)
         {
-            PrepareUi(args[fixture + 1]);
+            PrepareUi(args[fixture + 1], args.Contains("--link-records"));
             return;
         }
         if (args.Contains("--link-engine"))
@@ -88,6 +88,7 @@ internal static partial class Program
         CheckGroupNavigation();
         CheckMarkdownPreview();
         CheckLinkTitles();
+        CheckLinkHistory();
         string temporary = Path.GetTempFileName();
         var tempReference = FileReference.FromPath(new Uri(temporary).AbsoluteUri);
         try
@@ -284,6 +285,59 @@ internal static partial class Program
         Check(failed.Title == good.Title && failed.LastResolvedAt == good.AttemptedAt &&
             failed.Attempts is [{ Status: "Sign-in required" }, { Status: "Resolved" }],
             "Keep the last useful title and record the new failed attempt");
+        var suggestion = LinkTitles.Route(new Uri("https://bits.bytedance.net/space/legacy/build/logs?jobId=75142&from=sample&view=summary"));
+        Check(suggestion.QueryKeys.SequenceEqual(new[] { "jobId", "view" }) && suggestion.TitleTemplate == "报告流水线 · {{query.jobId}}" &&
+            LinkTitles.ReferencedQueryKeys(suggestion.TitleTemplate, suggestion.QueryKeys).SequenceEqual(new[] { "jobId" }),
+            "Seed fallback rules with reusable variables and exclude tracking keys");
+    }
+
+    private static void CheckLinkHistory()
+    {
+        var day = new DateTimeOffset(new DateTime(2026, 2, 18, 0, 0, 0, DateTimeKind.Local));
+        var old = JsonSerializer.Deserialize<LinkDetails>("""
+            {"Status":"Resolved","Title":"Saved guide","AttemptedAt":"2025-01-01T10:00:00+00:00","Attempts":[
+              {"Status":"Resolved","At":"2025-01-01T10:00:00+00:00","Source":"Anonymous","Quality":"Distinctive"}]}
+            """)!;
+        Check(old.Attempts is [{ HttpStatus: null, DurationMilliseconds: null }] && old.HttpStatus is null && old.DurationMilliseconds is null,
+            "Read link records and attempts created before diagnostics were added");
+        var earlier = new Clip { Kind = ClipKind.Link, Text = "https://example.invalid/guide/?utm_source=old", Source = "Chrome",
+            CapturedAt = day.AddDays(-10), LinkDetails = old with { AttemptedAt = day.AddDays(-10) } };
+        var next = earlier with { Id = Guid.NewGuid(), Text = "http://EXAMPLE.invalid/guide?access%5Ftoken=secret-one&access_token=secret-two&view=short#anchor",
+            Source = "Feishu", Captures = [new(day, "Edge")], CapturedAt = day.AddMinutes(1), LinkDetails = null };
+        var forbidden = new LinkDetails("Access forbidden", null, day.AddMinutes(3), "Anonymous", HttpStatus: 403, DurationMilliseconds: 715);
+        var remembered = LinkHistory.LastSuccess([earlier, next]);
+        var retried = next with { LinkDetails = LinkTitles.RecordAttempt(next, forbidden, [], remembered) };
+        var yesterday = new Clip { Kind = ClipKind.Link, Text = "https://example.invalid/login", CapturedAt = day.AddMinutes(-1),
+            LinkDetails = new("Sign-in required", null, day.AddMinutes(-1), HttpStatus: 401), Source = "Edge" };
+        var startOfWeek = new Clip { Kind = ClipKind.Link, Text = "https://example.invalid/week-boundary", CapturedAt = day.AddDays(-6) };
+        var oneDayOlder = startOfWeek with { Id = Guid.NewGuid(), Text = "https://example.invalid/older", CapturedAt = day.AddDays(-7) };
+        var resolved = startOfWeek with { Id = Guid.NewGuid(), Text = "https://example.invalid/resolved", CapturedAt = day,
+            LinkDetails = old with { AttemptedAt = day, LastResolvedAt = day } };
+        var removed = yesterday with { Id = Guid.NewGuid(), Text = "https://example.invalid/trashed", TrashedAt = day };
+        var entries = LinkHistory.Build([earlier, retried, yesterday, startOfWeek, oneDayOlder, resolved, removed]);
+        var guide = entries.First();
+        Check(entries.Length == 5 && guide.Title == "Saved guide" && guide.RetainsPreviousTitle &&
+            guide.AddedAt == earlier.CapturedAt && guide.LastResolvedAt == earlier.LinkDetails?.AttemptedAt &&
+            guide.Details is { HttpStatus: 403, DurationMilliseconds: 715, Attempts: [{ HttpStatus: 403, DurationMilliseconds: 715 }] } &&
+            guide.Applications.SequenceEqual(new[] { "Feishu", "Edge", "Chrome" }),
+            "Aggregate copies by resource, include their source apps and keep the previous title and both timestamps after a failure");
+        Check(!guide.Address.Contains("secret", StringComparison.Ordinal) && !guide.Address.Contains('#') &&
+            guide.Address.Contains("access_token=••••&view=short", StringComparison.Ordinal) &&
+            guide.Address.Count(character => character == '•') == 8, "Hide sensitive values from duplicate and encoded query keys and remove fragments");
+        var date = LinkHistory.Day(day);
+        var now = day.AddHours(12);
+        LinkHistoryEntry[] Filter(LinkHistorySection section, LinkHistoryPeriod period, LinkHistoryIssue issue = LinkHistoryIssue.All,
+            string query = "", DateOnly? selected = null) => LinkHistory.Filter(entries, section, period, selected ?? date, issue, query, now).ToArray();
+        Check(Filter(LinkHistorySection.All, LinkHistoryPeriod.Today).Length == 2 &&
+            Filter(LinkHistorySection.All, LinkHistoryPeriod.LastSevenDays).Length == 4 &&
+            Filter(LinkHistorySection.Pending, LinkHistoryPeriod.SelectedDay, LinkHistoryIssue.NeedsLogin, selected: date.AddDays(-1)).Single().Url.AbsolutePath == "/login" &&
+            Filter(LinkHistorySection.Resolved, LinkHistoryPeriod.All).Single().Url.AbsolutePath == "/resolved",
+            "Use local dates across midnight and include exactly seven days in the recent range");
+        Check(Filter(LinkHistorySection.Pending, LinkHistoryPeriod.All, LinkHistoryIssue.CannotAccess, " feishu ").Single() == guide &&
+            Filter(LinkHistorySection.Pending, LinkHistoryPeriod.All, query: "view=short").Single() == guide &&
+            Filter(LinkHistorySection.Pending, LinkHistoryPeriod.All, query: "Saved guide").Single() == guide &&
+            Filter(LinkHistorySection.All, LinkHistoryPeriod.All, query: "secret-one").Length == 0,
+            "Filter source apps, safe displayed addresses and titles without searching sensitive values");
     }
 
     private static void CheckChatContext()
@@ -374,7 +428,7 @@ internal static partial class Program
         }
     }
 
-    private static void PrepareUi(string directory)
+    private static void PrepareUi(string directory, bool linkRecords)
     {
         Check(Path.IsPathFullyQualified(directory) && !Directory.Exists(directory), "A new absolute fixture directory");
         Directory.CreateDirectory(directory);
@@ -455,6 +509,17 @@ internal static partial class Program
             ArchivedAt = now.AddDays(-1), Title = "旧图片清理验收", ImageFormat = ClipImageFormat.Tiff, ImageSize = archivedImage.Length,
             ImageWidth = 900, ImageHeight = 500, ImageHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(archivedImage))
         }, archivedImage);
+        if (linkRecords)
+        {
+            var guide = new Clip { Kind = ClipKind.Link, Source = "Feishu", CapturedAt = now.AddDays(-1),
+                Text = "https://docs.example.invalid/clipboard/guide?token=sample-only&view=summary" };
+            var success = new LinkDetails("Resolved", "剪贴板使用指南", now.AddHours(-2), "Anonymous", "Distinctive", HttpStatus: 200, DurationMilliseconds: 283);
+            var failure = new LinkDetails("Access forbidden", null, now.AddMinutes(-2), "Anonymous", HttpStatus: 403, DurationMilliseconds: 147);
+            store.Capture(guide with { LinkDetails = LinkTitles.RecordAttempt(guide with { LinkDetails = LinkTitles.RecordAttempt(guide, success, []) }, failure, []) });
+            store.Capture(new Clip { Kind = ClipKind.Link, Source = "Weixin", CapturedAt = now.AddMinutes(-3),
+                Text = "https://mp.weixin.qq.com/s/demo", LinkDetails = new("Web verification required", null, now.AddMinutes(-3), "Anonymous", HttpStatus: 200, DurationMilliseconds: 438) });
+            store.Capture(new Clip { Kind = ClipKind.Link, Source = "Notepad", CapturedAt = now.AddDays(-2), Text = "http://192.168.1.1/guide" });
+        }
         new LocalSettings
         {
             Language = "简体中文", Appearance = "Light", BrowserPath = File.Exists(chrome) ? chrome : null,

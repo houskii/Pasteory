@@ -23,9 +23,19 @@ public partial class App
 {
     private readonly Dictionary<(Guid Id, string? Hash), ImagePreview> thumbnails = [];
     private readonly Dictionary<string, ImageSource?> appIcons = new(StringComparer.OrdinalIgnoreCase);
-    private readonly LinkResolver links = new();
-    internal LinkSignIn LinkSessions { get; } = new();
+    private readonly LinkAccessPolicy linkAccess = new();
+    private readonly LinkResolver links;
+    internal LinkSignIn LinkSessions { get; }
     private readonly FileCommandRunner fileCommands = new();
+
+    public App()
+    {
+        links = new(linkAccess);
+        LinkSessions = new(linkAccess);
+    }
+
+    internal bool AllowsLinkRequest(Uri uri) => linkAccess.Allows(uri);
+    internal bool IsResolvingLink(string key) => links.IsRunning(key);
 
     internal bool UpdateClip(Guid id, Func<Clip, Clip> update)
     {
@@ -257,8 +267,7 @@ public partial class App
                     Notify("Choose a browser in Open With.");
                     break;
                 case ClipKind.Link when Uri.TryCreate(clip.Text?.Trim(), UriKind.Absolute, out var url) && url.Scheme is "http" or "https":
-                    StartApp(Settings.BrowserPath!, url.AbsoluteUri);
-                    MarkOpened(clip);
+                    OpenLinkPage(clip, url);
                     break;
                 case ClipKind.Image:
                     string image = WritePreviewFile(clip.ImageExtension, ReadImage(clip));
@@ -284,6 +293,20 @@ public partial class App
                     Notify("This content type cannot be opened.");
                     break;
             }
+        }
+        catch (Exception error) when (IsLocalError(error) || error is Win32Exception or InvalidOperationException or ArgumentException)
+        {
+            Notify(error.Message);
+        }
+    }
+
+    internal void OpenLinkPage(Clip clip, Uri url)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(Settings.BrowserPath)) OpenInShell(url.AbsoluteUri);
+            else StartApp(Settings.BrowserPath, url.AbsoluteUri);
+            MarkOpened(clip);
         }
         catch (Exception error) when (IsLocalError(error) || error is Win32Exception or InvalidOperationException or ArgumentException)
         {
@@ -444,38 +467,54 @@ public partial class App
             await ResolveLinkAsync(clip);
     }
 
-    internal async Task ResolveLinkAsync(Clip clip)
+    internal async Task ResolveLinkAsync(Clip clip, LinkSignInRule? selectedSession = null)
     {
-        if (clip.Kind != ClipKind.Link || clip.Text is not { } raw || !links.TryStart(clip.Id)) return;
+        if (clip.Kind != ClipKind.Link || clip.Text is not { } raw || Exiting) return;
+        string? resource = clip.LinkResourceKey;
+        string key = resource ?? clip.Id.ToString("N");
+        if (!links.TryStart(key)) return;
+        settingsWindow?.RefreshLinkHistory();
         try
         {
             LinkDetails result;
-            if (Uri.TryCreate(raw.Trim(), UriKind.Absolute, out var uri) && LinkResolver.Allowed(uri))
+            if (Uri.TryCreate(raw.Trim(), UriKind.Absolute, out var uri) && LinkAccessPolicy.IsWebAddress(uri))
             {
-                var signIn = Settings.LinkSignIns.Where(rule => rule.Enabled).OrderBy(LinkTitles.IsBuiltInSignIn)
-                    .FirstOrDefault(rule => LinkResolver.MatchRule(rule.Pattern, uri) is not null);
+                var signIn = selectedSession is not null && FindLinkSignInRule(selectedSession.Id) is { Enabled: true } current &&
+                    current.SignInUrl == selectedSession.SignInUrl && LinkResolver.MatchRule(current.Pattern, uri) is not null
+                    ? current : MatchLinkSignInRule(uri, enabledOnly: true);
                 result = signIn is null ? await links.ResolveAsync(raw, lifetime.Token) :
                     await LinkSessions.ResolveAsync(dataDirectory, signIn, uri, new WindowInteropHelper(window).EnsureHandle(), lifetime.Token);
             }
             else result = new("Invalid link", null, DateTimeOffset.UtcNow);
-            if (!Exiting) UpdateClip(clip.Id, current => current.Text == raw ?
-                current with { LinkDetails = LinkTitles.RecordAttempt(current, result, Settings.LinkFallbacks) } : current);
+            if (Exiting) return;
+            if (resource is null)
+            {
+                UpdateClip(clip.Id, current => current.Text == raw ?
+                    current with { LinkDetails = LinkTitles.RecordAttempt(current, result, Settings.LinkFallbacks) } : current);
+                return;
+            }
+            var remembered = LinkHistory.LastSuccess(Clips.Where(item => item.TrashedAt is null && item.LinkResourceKey == resource));
+            ChangeHistory(() => history.UpdateLinkDetails(current => current.LinkResourceKey == resource
+                ? LinkTitles.RecordAttempt(current, result, Settings.LinkFallbacks, remembered) : current.LinkDetails));
         }
         catch (OperationCanceledException) when (Exiting) { }
-        finally { links.Finish(clip.Id); }
+        finally
+        {
+            links.Finish(key);
+            if (!Exiting) settingsWindow?.RefreshLinkHistory();
+        }
     }
 
     private LinkDetails? LinkFallback(Clip clip) => LinkTitles.UpdateFallback(clip, Settings.LinkFallbacks);
 
-    internal async Task<int> ResolveMatchingLinksAsync(string? pattern = null)
+    internal async Task<int> ResolveMatchingLinksAsync(string? pattern = null, LinkSignInRule? selectedSession = null)
     {
-        var candidates = Clips.Where(clip => clip.Kind == ClipKind.Link && clip.TrashedAt is null && clip.LinkDetails?.Status != "Resolved")
-            .Where(clip => pattern is null || Uri.TryCreate(clip.Text?.Trim(), UriKind.Absolute, out var uri) &&
-                LinkResolver.MatchRule(pattern, uri) is not null).ToArray();
-        foreach (var clip in candidates)
+        var candidates = LinkHistory.Build(Clips).Where(entry => entry.Status != "Resolved" &&
+            (pattern is null || LinkResolver.MatchRule(pattern, entry.Url) is not null)).ToArray();
+        foreach (var entry in candidates)
         {
             if (Exiting) break;
-            await ResolveLinkAsync(clip);
+            await ResolveLinkAsync(entry.Clip, selectedSession);
         }
         return candidates.Length;
     }

@@ -311,14 +311,26 @@ internal sealed class ClipDetails : DockPanel
             body.Children.Add(Ui.Text(Labels.Get(details.Status), 11, "Muted"));
             if (details.Quality is { } quality) body.Children.Add(Ui.Text(Labels.Get(quality), 11, "Muted"));
             if (details.Status != "Not attempted")
-                body.Children.Add(Ui.Text($"{Labels.Get(details.Source ?? "Anonymous")} · {details.AttemptedAt.ToLocalTime():g}", 11, "Muted"));
+            {
+                string diagnostics = LinkHistory.Diagnostics(details.HttpStatus, details.DurationMilliseconds);
+                string summary = $"{Labels.Get(details.Source ?? "Anonymous")} · {details.AttemptedAt.ToLocalTime():g}";
+                body.Children.Add(Ui.Text(diagnostics.Length == 0 ? summary : summary + " · " + diagnostics, 11, "Muted"));
+            }
             if (details.Status != "Resolved" && details.LastResolvedAt is { } earlier)
+            {
                 body.Children.Add(Ui.Text(Labels.Format("Last successful resolution {0}", earlier.ToLocalTime().ToString("g")), 11, "Muted"));
+                if (details.Title is { Length: > 0 })
+                    body.Children.Add(Ui.Text(Labels.Get("Latest request failed. Showing the previous title."), 11, "WarningInk"));
+            }
             if (details.Attempts is { Length: > 1 } attempts)
             {
                 var entries = new StackPanel { Margin = new Thickness(9, 4, 0, 0) };
                 foreach (var attempt in attempts)
-                    entries.Children.Add(Ui.Text($"{attempt.At.ToLocalTime():g} · {Labels.Get(attempt.Status)}", 11, "Muted"));
+                {
+                    string diagnostics = LinkHistory.Diagnostics(attempt.HttpStatus, attempt.DurationMilliseconds);
+                    string summary = $"{attempt.At.ToLocalTime():g} · {Labels.Get(attempt.Status)}";
+                    entries.Children.Add(Ui.Text(diagnostics.Length == 0 ? summary : summary + " · " + diagnostics, 11, "Muted"));
+                }
                 var history = new Expander { Header = Labels.Get("Resolution history"), Content = entries };
                 history.SetResourceReference(Control.ForegroundProperty, "Muted");
                 body.Children.Add(history);

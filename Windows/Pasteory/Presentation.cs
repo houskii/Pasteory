@@ -63,7 +63,7 @@ internal static class Theme
             ("Ink", "#242426", "#F0F0F4"), ("Muted", "#656568", "#B5B5C2"), ("Quiet", "#76767B", "#AAAAAF"),
             ("Line", "#E6E6ED", "#3C3C46"), ("CodeBackground", "#F0EAFB", "#332747"),
             ("CodeInk", "#7438DC", "#CAA0FF"), ("LinkInk", "#0769DB", "#83BFFF"),
-            ("Danger", "#BE3441", "#FF9AA6")
+            ("Danger", "#BE3441", "#FF9AA6"), ("WarningInk", "#9A5409", "#FFBB76"), ("SuccessInk", "#217057", "#81DBB3")
         };
         foreach (var (key, light, darkColor) in colors) Set(key, Parse(dark ? darkColor : light));
         Set("Surface", surface);

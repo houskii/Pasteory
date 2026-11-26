@@ -7,6 +7,8 @@ using Pasteory.Core;
 
 namespace Pasteory.Windows;
 
+internal sealed record LinkRoute(string Key, string Path, string[] QueryKeys, string TitleTemplate);
+
 internal static partial class LinkTitles
 {
     private sealed record Rule(string Host, string Path, string Title, string? QueryKey = null);
@@ -21,6 +23,7 @@ internal static partial class LinkTitles
         new("mp.weixin.qq.com", "/s/{articleToken}", "微信公众号文章")
     ];
     private static readonly string[] Sensitive = ["token", "code", "ticket", "sign", "auth", "session", "key", "credential"];
+    private static readonly string[] Tracking = ["utm_", "from", "source", "spm", "share_"];
     internal static IReadOnlyList<LinkSignInRule> BuiltInSignIns { get; } =
     [
         new(new("601866b8-819a-4e5d-ad13-ff5f6f760ac2"), "BITS", @"^bits\.bytedance\.net(?:/|$)", "https://bits.bytedance.net/"),
@@ -31,7 +34,7 @@ internal static partial class LinkTitles
 
     internal static LinkDetails? UpdateFallback(Clip clip, IReadOnlyList<LinkFallbackRule> userRules)
     {
-        if (!Uri.TryCreate(clip.Text?.Trim(), UriKind.Absolute, out var url) || !LinkResolver.Allowed(url))
+        if (!Uri.TryCreate(clip.Text?.Trim(), UriKind.Absolute, out var url) || !LinkAccessPolicy.IsWebAddress(url))
             return clip.LinkDetails;
         var current = clip.LinkDetails ?? new("Not attempted", null, clip.CapturedAt);
         var (title, source, route) = Fallback(url, userRules);
@@ -46,15 +49,16 @@ internal static partial class LinkTitles
         };
     }
 
-    internal static LinkDetails RecordAttempt(Clip clip, LinkDetails result, IReadOnlyList<LinkFallbackRule> rules)
+    internal static LinkDetails RecordAttempt(Clip clip, LinkDetails result, IReadOnlyList<LinkFallbackRule> rules,
+        (string Title, DateTimeOffset At)? remembered = null)
     {
         var current = UpdateFallback(clip, rules) ?? new LinkDetails("Not attempted", null, clip.CapturedAt);
         bool resolved = result.Status == "Resolved" && !string.IsNullOrEmpty(result.Title);
-        var attempt = new LinkAttempt(result.Status, result.AttemptedAt, result.Source, result.Quality);
+        var attempt = new LinkAttempt(result.Status, result.AttemptedAt, result.Source, result.Quality, result.HttpStatus, result.DurationMilliseconds);
         return result with
         {
-            Title = resolved ? result.Title : current.Title,
-            LastResolvedAt = resolved ? result.AttemptedAt : current.LastResolvedAt,
+            Title = resolved ? result.Title : remembered?.Title ?? current.Title,
+            LastResolvedAt = resolved ? result.AttemptedAt : remembered?.At ?? current.LastResolvedAt,
             FallbackTitle = current.FallbackTitle,
             FallbackSource = current.FallbackSource,
             Route = current.Route,
@@ -81,7 +85,7 @@ internal static partial class LinkTitles
 
         // Match captures against the redacted query so a title template cannot display a query credential.
         var safeUrl = new Uri(DisplayUrl(url));
-        foreach (var rule in rules.OrderByDescending(rule => rule.Route?.Priority ?? 100))
+        foreach (var rule in rules.OrderBy(rule => rule.Route?.Priority ?? 100))
         {
             if (rule.Route is { } routeRule)
             {
@@ -166,11 +170,36 @@ internal static partial class LinkTitles
     internal static string DisplayUrl(Uri url)
     {
         var builder = new UriBuilder(url) { Fragment = "" };
-        var query = QueryItems(url);
-        if (query.Count == 0) return builder.Uri.AbsoluteUri;
-        builder.Query = string.Join("&", query.Select(entry => Uri.EscapeDataString(entry.Key) + "=" +
-            Uri.EscapeDataString(SensitiveName(entry.Key) ? "••••" : entry.Value)));
+        builder.Query = string.Join("&", url.Query.TrimStart('?').Split('&').Select(item =>
+        {
+            string key = item.Split('=', 2)[0];
+            return SensitiveName(WebUtility.UrlDecode(key)) ? key + "=%E2%80%A2%E2%80%A2%E2%80%A2%E2%80%A2" : item;
+        }));
         return builder.Uri.AbsoluteUri;
+    }
+
+    internal static LinkRoute Route(Uri url)
+    {
+        var (title, _, key) = Fallback(url, []);
+        string path = key[url.IdnHost.Length..];
+        var query = QueryItems(url);
+        string[] segments = url.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries).Select(Uri.UnescapeDataString).ToArray();
+        var builtIn = BuiltIn.FirstOrDefault(rule => Match(rule, url, segments, query) is not null);
+        if (builtIn is not null)
+            title = Template().Replace(builtIn.Title, match =>
+            {
+                string variable = match.Groups[1].Value;
+                return "{{" + (variable == builtIn.QueryKey ? "query." : "path.") + variable + "}}";
+            });
+        var keys = query.Keys.Where(name => !Tracking.Any(prefix => name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
+            .Order(StringComparer.Ordinal).ToArray();
+        return new(key, path, keys, title);
+    }
+
+    internal static IEnumerable<string> ReferencedQueryKeys(string title, string[] sampleKeys)
+    {
+        var variables = RouteVariable().Matches(title).Select(match => match.Groups[1].Value).ToHashSet(StringComparer.Ordinal);
+        return sampleKeys.Where(key => variables.Contains("query." + key));
     }
 
     internal static string RulePattern(string route)

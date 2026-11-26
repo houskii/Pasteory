@@ -216,8 +216,10 @@ internal sealed partial class SettingsWindow : Window
                 library.Refresh();
                 library.FocusResults();
             }
+            if (page == SettingsPage.Links) RefreshLinkHistory();
             return;
         }
+        if (current == SettingsPage.Links) ClearLinkPage();
         current = page;
         foreach (var (key, item) in buttons)
         {
@@ -239,13 +241,17 @@ internal sealed partial class SettingsWindow : Window
         var caption = Ui.Text(PageSubtitle(page), 12, "Muted");
         caption.Margin = new Thickness(0, 4, 0, 18);
         layout.Children.Add(caption);
+        if (page == SettingsPage.Links)
+        {
+            host.Content = BuildLinks(layout);
+            return;
+        }
         switch (page)
         {
             case SettingsPage.General: BuildGeneral(layout); break;
             case SettingsPage.Privacy: BuildPrivacy(layout); break;
             case SettingsPage.Shortcuts: BuildShortcuts(layout); break;
             case SettingsPage.OpenWith: BuildOpenWith(layout); break;
-            case SettingsPage.Links: BuildLinks(layout); break;
             case SettingsPage.Storage: BuildStorage(layout); break;
             case SettingsPage.Advanced: BuildAdvanced(layout); break;
             case SettingsPage.About: BuildAbout(layout); break;
@@ -774,19 +780,6 @@ internal sealed partial class SettingsWindow : Window
     private static string CommandStatus(FileCommandRunner.Run run) => run.Error is not null ? Labels.Get("Failed") :
         run.ExitCode is null ? Labels.Get("Running…") : run.ExitCode is 0 ? Labels.Get("Completed") :
         Labels.Format("Exit code {0}", run.ExitCode);
-
-    private void BuildLinks(Panel layout)
-    {
-        var card = SettingsCard(layout, "Web page titles");
-        Switch(card, "Resolve copied links automatically", app.Settings.ResolveLinks,
-            (settings, value) => settings with { ResolveLinks = value }, "Public page titles are requested without browser cookies.");
-        card.Children.Add(Row("Unresolved links", Ui.Button("Retry", async () =>
-        {
-            await app.ResolveMatchingLinksAsync();
-            SetStatus(Labels.Get("Link resolution finished."));
-        })));
-        BuildLinkRules(layout);
-    }
 
     private void BuildAdvanced(Panel layout)
     {

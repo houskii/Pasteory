@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.Http;
@@ -11,9 +12,9 @@ using Pasteory.Core;
 
 namespace Pasteory.Windows;
 
-internal sealed partial class LinkResolver
+internal sealed partial class LinkResolver(LinkAccessPolicy access)
 {
-    private readonly HashSet<Guid> running = [];
+    private readonly HashSet<string> running = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim concurrency = new(2);
     private static readonly HttpClient Client = new(new SocketsHttpHandler
     {
@@ -21,14 +22,20 @@ internal sealed partial class LinkResolver
         MaxResponseHeadersLength = 32
     }) { Timeout = Timeout.InfiniteTimeSpan };
 
-    internal bool TryStart(Guid id) => running.Add(id);
-    internal void Finish(Guid id) => running.Remove(id);
+    internal bool TryStart(string key) => running.Add(key);
+    internal bool IsRunning(string key) => running.Contains(key);
+    internal void Finish(string key) => running.Remove(key);
 
     internal async Task<LinkDetails> ResolveAsync(string input, CancellationToken cancellation)
     {
-        if (!Uri.TryCreate(input.Trim(), UriKind.Absolute, out var uri) || !Allowed(uri))
-            return Failure("Invalid link");
+        if (!Uri.TryCreate(input.Trim(), UriKind.Absolute, out var uri) || !LinkAccessPolicy.IsWebAddress(uri))
+            return new("Invalid link", null, DateTimeOffset.UtcNow);
+        if (!access.Allows(uri)) return new("Link blocked by policy", null, DateTimeOffset.UtcNow, "Anonymous", DurationMilliseconds: 0);
         await concurrency.WaitAsync(cancellation);
+        var elapsed = Stopwatch.StartNew();
+        int? httpStatus = null;
+        LinkDetails Complete(LinkDetails details) => details with { HttpStatus = httpStatus, DurationMilliseconds = (int)elapsed.ElapsedMilliseconds };
+        LinkDetails Failure(string status) => Complete(new(status, null, DateTimeOffset.UtcNow, "Anonymous"));
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
@@ -39,17 +46,15 @@ internal sealed partial class LinkResolver
                 request.Headers.Accept.ParseAdd("text/html,application/xhtml+xml;q=0.9");
                 request.Headers.UserAgent.ParseAdd("Pasteory/1.0");
                 using var response = await Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
-                if ((int)response.StatusCode is >= 300 and < 400 && response.Headers.Location is { } location &&
-                    Uri.TryCreate(uri, location, out var destination) && Allowed(destination))
+                httpStatus = (int)response.StatusCode;
+                if (httpStatus is >= 300 and < 400 && response.Headers.Location is { } location && Uri.TryCreate(uri, location, out var destination))
                 {
+                    if (!access.Allows(destination)) return Failure("Link blocked by policy");
                     uri = destination;
                     continue;
                 }
-                if (!response.IsSuccessStatusCode) return Failure(response.StatusCode switch
-                {
-                    HttpStatusCode.Unauthorized => "Sign-in required", HttpStatusCode.Forbidden => "Access forbidden",
-                    HttpStatusCode.NotFound => "Page not found", _ => $"HTTP {(int)response.StatusCode}"
-                });
+                if (HttpFailure(httpStatus) is { } failure) return Failure(failure);
+                if (IsVerificationPage(null, uri)) return Failure("Web verification required");
                 string? type = response.Content.Headers.ContentType?.MediaType;
                 if (type is not null && type is not ("text/html" or "application/xhtml+xml")) return Failure("No page title");
                 await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
@@ -61,20 +66,24 @@ internal sealed partial class LinkResolver
                     try { encoding = Encoding.GetEncoding(charset); }
                     catch (ArgumentException) { }
                 }
-                return AssessTitle(ReadTitle(encoding.GetString(bytes, 0, size)), uri, "Anonymous");
+                return Complete(AssessTitle(ReadTitle(encoding.GetString(bytes, 0, size)), uri, "Anonymous"));
             }
             return Failure("Too many redirects");
         }
-        catch (Exception error) when (error is HttpRequestException or IOException ||
-            error is OperationCanceledException && !cancellation.IsCancellationRequested)
+        catch (OperationCanceledException) when (!cancellation.IsCancellationRequested) { return Failure("Request timed out"); }
+        catch (Exception error) when (error is HttpRequestException or IOException)
         {
-            return Failure("Could not resolve the link");
+            return Failure("Link network error");
         }
         finally { concurrency.Release(); }
     }
 
-    internal static bool Allowed(Uri uri) => uri.Scheme is "http" or "https" && uri.UserInfo.Length == 0;
-    private static LinkDetails Failure(string status) => new(status, null, DateTimeOffset.UtcNow);
+    internal static string? HttpFailure(int? status) => status switch
+    {
+        null or 0 or >= 200 and < 300 => null,
+        401 => "Sign-in required", 403 => "Access forbidden", 404 => "Page not found",
+        408 or 504 => "Request timed out", _ => "Link network error"
+    };
 
     internal static string? ReadTitle(string html)
     {
@@ -107,9 +116,12 @@ internal sealed partial class LinkResolver
     internal static LinkDetails AssessTitle(string? candidate, Uri finalUrl, string source)
     {
         string? title = NormalizeTitle(candidate);
+        if (IsVerificationPage(title, finalUrl))
+            return new("Web verification required", null, DateTimeOffset.UtcNow, source, "Login or error page");
         if (IsSignInPage(title, finalUrl))
             return new("Sign-in required", null, DateTimeOffset.UtcNow, source, "Login or error page");
-        if (string.IsNullOrEmpty(title)) return Failure("No page title");
+        if (string.IsNullOrEmpty(title)) return new("No page title", null, DateTimeOffset.UtcNow, source);
+        if (ForbiddenTitle().IsMatch(title)) return new("Access forbidden", null, DateTimeOffset.UtcNow, source, "Login or error page");
         string brand = finalUrl.Host.StartsWith("www.", StringComparison.OrdinalIgnoreCase) ? finalUrl.Host[4..] : finalUrl.Host;
         bool shell = title.Equals(brand, StringComparison.OrdinalIgnoreCase) ||
             title.Equals(brand.Split('.')[0], StringComparison.OrdinalIgnoreCase) ||
@@ -122,6 +134,10 @@ internal sealed partial class LinkResolver
 
     internal static bool IsSignInPage(string? title, Uri url) =>
         LoginRoute().IsMatch(url.AbsolutePath) || title is not null && LoginTitle().IsMatch(title);
+
+    internal static bool IsVerificationPage(string? title, Uri url) =>
+        url.IdnHost == "mp.weixin.qq.com" && url.AbsolutePath.Contains("appmsgcaptcha", StringComparison.OrdinalIgnoreCase) ||
+        title is not null && VerificationTitle().IsMatch(title);
 
     internal static Match? MatchRule(string pattern, Uri link)
     {
@@ -142,9 +158,13 @@ internal sealed partial class LinkResolver
     private static partial Regex MetaTags();
     [GeneratedRegex(@"([-\w]+)\s*=\s*(?:""([^""]*)""|'([^']*)')", RegexOptions.IgnoreCase)]
     private static partial Regex Attributes();
-    [GeneratedRegex(@"^\s*(?:sign in|log in|login|authentication required|access denied|forbidden|just a moment|请登录|登录|访问受限|统一身份认证|安全验证)(?:\s|$|[|·–—-])",
+    [GeneratedRegex(@"^\s*(?:sign in|log in|login|authentication required|请登录|登录|统一身份认证)(?:\s|$|[|·–—-])",
         RegexOptions.IgnoreCase)]
     private static partial Regex LoginTitle();
+    [GeneratedRegex(@"^\s*(?:just a moment|checking your browser|安全验证|请完成安全验证)(?:\s|$|[.!|·–—-])", RegexOptions.IgnoreCase)]
+    private static partial Regex VerificationTitle();
+    [GeneratedRegex(@"^\s*(?:access denied|forbidden|访问受限|没有访问权限)(?:\s|$|[.!|·–—-])", RegexOptions.IgnoreCase)]
+    private static partial Regex ForbiddenTitle();
     [GeneratedRegex(@"(?:^|/)(?:login|login\.html|log-in|signin|sign-in|oauth/authorize)(?:/|$)", RegexOptions.IgnoreCase)]
     private static partial Regex LoginRoute();
 }

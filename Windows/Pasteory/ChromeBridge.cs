@@ -28,6 +28,8 @@ internal sealed record ChromeSelection(DateTimeOffset Time, string Text, string 
 internal static class ChromeBridge
 {
     private const string Host = "app.pasteory.web_context";
+    private const string RegistrationKey = @"Software\Google\Chrome\NativeMessagingHosts\" + Host;
+    private const string ContactFile = "chrome-last-contact";
     internal const string Origin = "chrome-extension://mhmkadhgbgkioefidlaalkbdpndacikd/";
     private const int MaxMessageBytes = 128 * 1024;
 
@@ -48,9 +50,31 @@ internal static class ChromeBridge
             type = "stdio",
             allowed_origins = new[] { Origin }
         }));
-        using var key = Registry.CurrentUser.CreateSubKey(@"Software\Google\Chrome\NativeMessagingHosts\" + Host);
+        using var key = Registry.CurrentUser.CreateSubKey(RegistrationKey);
         key.SetValue("", nativeManifest);
         return destination;
+    }
+
+    internal static (bool Prepared, bool Registered, DateTimeOffset? LastContact) Status(string root)
+    {
+        bool prepared = File.Exists(Path.Combine(root, "ChromeExtension", "manifest.json"));
+        bool registered = false;
+        string manifest = Path.Combine(root, "chrome-native-host.json");
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(RegistrationKey);
+            registered = key?.GetValue(null) is string path && path.Equals(manifest, StringComparison.OrdinalIgnoreCase) && File.Exists(manifest);
+        }
+        catch (Exception error) when (App.IsLocalError(error) || error is System.Security.SecurityException) { }
+        string contactFile = Path.Combine(root, ContactFile);
+        DateTimeOffset? lastContact = File.Exists(contactFile) ? File.GetLastWriteTimeUtc(contactFile) : null;
+        return (prepared, registered, lastContact);
+    }
+
+    private static void RecordContact(string root)
+    {
+        try { File.WriteAllBytes(Path.Combine(root, ContactFile), []); }
+        catch (Exception error) when (App.IsLocalError(error)) { }
     }
 
     internal static async Task RunHostAsync(string root)
@@ -71,11 +95,13 @@ internal static class ChromeBridge
                 {
                     bool chinese = settings.Language == "简体中文" || settings.Language == "System" &&
                         CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "zh";
+                    RecordContact(root);
                     await WriteAsync(output, new { type = "config", requestId, chromeEnabled = enabled, language = chinese ? "zh-Hans" : "en" });
                     continue;
                 }
                 bool delivered = type == "capture" && enabled && message.TryGetProperty("payload", out var payload) &&
                     ParseSelection(payload) is { } selection && await ForwardAsync(root, selection);
+                if (delivered) RecordContact(root);
                 await WriteAsync(output, new { type = "ack", requestId, ok = delivered });
             }
         }

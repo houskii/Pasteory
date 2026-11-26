@@ -28,6 +28,13 @@ public partial class App
     internal LinkSignInRule? FindLinkSignInRule(Guid id) => Settings.LinkSignIns.FirstOrDefault(rule => rule.Id == id) ??
         LinkTitles.BuiltInSignIns.FirstOrDefault(rule => rule.Id == id);
 
+    internal IEnumerable<LinkSignInRule> LinkSignInRules() => LinkTitles.BuiltInSignIns.Select(preset => FindLinkSignInRule(preset.Id) ?? preset)
+        .Concat(Settings.LinkSignIns.Where(rule => !LinkTitles.IsBuiltInSignIn(rule)));
+
+    internal LinkSignInRule? MatchLinkSignInRule(Uri url, bool enabledOnly = false) => LinkSignInRules()
+        .Where(rule => !enabledOnly || rule.Enabled).OrderBy(LinkTitles.IsBuiltInSignIn)
+        .FirstOrDefault(rule => LinkResolver.MatchRule(rule.Pattern, url) is not null);
+
     internal bool IsRefreshingLinkSession(Guid id) => refreshingLinkSessions.Contains(id);
 
     internal bool SaveLinkSignInRule(LinkSignInRule rule)
@@ -64,7 +71,7 @@ public partial class App
             if (!SaveLinkSignInRule(rule with { Refresh = rule.Refresh with { LastAttemptAt = started } })) return;
             settingsWindow?.UpdateLinkSessionRows();
             LinkSessionOutcome result = LinkSessionOutcome.Blocked;
-            if (Uri.TryCreate(rule.SignInUrl, UriKind.Absolute, out var uri) && LinkResolver.Allowed(uri))
+            if (Uri.TryCreate(rule.SignInUrl, UriKind.Absolute, out var uri) && linkAccess.Allows(uri))
             {
                 nint parent = new WindowInteropHelper(window).EnsureHandle();
                 result = await LinkSessions.RefreshAsync(dataDirectory, rule, uri, parent, lifetime.Token);

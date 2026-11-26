@@ -21,6 +21,8 @@
     <SolidColorBrush x:Key="CodeInk" Color="#7438DC"/>
     <SolidColorBrush x:Key="LinkInk" Color="#0769DB"/>
     <SolidColorBrush x:Key="Danger" Color="#BE3441"/>
+    <SolidColorBrush x:Key="WarningInk" Color="#9A5409"/>
+    <SolidColorBrush x:Key="SuccessInk" Color="#217057"/>
     <SolidColorBrush x:Key="TransparentBrush" Color="Transparent"/>
     <SolidColorBrush x:Key="NavSelectionInk" Color="White"/>
     <LinearGradientBrush x:Key="AccentGradient" StartPoint="0,0" EndPoint="1,0">
@@ -253,10 +255,12 @@
             <Setter.Value>
                 <ControlTemplate TargetType="TabControl">
                     <DockPanel>
-                        <Border DockPanel.Dock="Top" HorizontalAlignment="Left" Padding="3"
-                                CornerRadius="9" Background="{DynamicResource SoftSurface}">
-                            <UniformGrid Rows="1" IsItemsHost="True" KeyboardNavigation.TabNavigation="Once"/>
-                        </Border>
+                        <WrapPanel DockPanel.Dock="Top">
+                            <Border Padding="3" CornerRadius="9" Background="{DynamicResource SoftSurface}">
+                                <UniformGrid Rows="1" IsItemsHost="True" KeyboardNavigation.TabNavigation="Once"/>
+                            </Border>
+                            <ContentPresenter Content="{TemplateBinding Tag}" VerticalAlignment="Center"/>
+                        </WrapPanel>
                         <ContentPresenter x:Name="PART_SelectedContentHost" ContentSource="SelectedContent"/>
                     </DockPanel>
                 </ControlTemplate>

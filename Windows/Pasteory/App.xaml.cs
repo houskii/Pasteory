@@ -60,6 +60,7 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        string regularDataDirectory = dataDirectory;
         int dataArgument = Array.IndexOf(e.Args, "--data-root");
         isolated = dataArgument >= 0 && dataArgument + 1 < e.Args.Length && Path.IsPathFullyQualified(e.Args[dataArgument + 1]);
         if (isolated) dataDirectory = Path.GetFullPath(e.Args[dataArgument + 1]);
@@ -82,6 +83,12 @@ public partial class App : Application
         disableHotkey = e.Args.Contains("--no-hotkey", StringComparer.Ordinal);
         disableCapture = e.Args.Contains("--no-capture", StringComparer.Ordinal);
         AutomationWindow = isolated && e.Args.Contains("--automation-window", StringComparer.Ordinal);
+        int fixtureOrigin = Array.IndexOf(e.Args, "--qa-link-origin");
+        if (isolated && !regularDataDirectory.Equals(Path.TrimEndingDirectorySeparator(dataDirectory), StringComparison.OrdinalIgnoreCase) &&
+            disableHotkey && disableCapture && fixtureOrigin >= 0 && fixtureOrigin + 1 < e.Args.Length &&
+            Uri.TryCreate(e.Args[fixtureOrigin + 1], UriKind.Absolute, out var fixture) &&
+            fixture is { Scheme: "http", Host: "127.0.0.1", Port: >= 1024, PathAndQuery: "/", UserInfo.Length: 0, Fragment.Length: 0 })
+            linkAccess.FixtureOrigin = fixture;
         Updates = new WindowsUpdates(dataDirectory);
         if (Updates.InstalledNewer() is { } newer && TryLaunchReplacement(newer, waitForExit: false))
         {
@@ -411,7 +418,11 @@ public partial class App : Application
             try { Ai?.ObserveClips(Settings.Ai, previous, history.Clips); }
             catch (Exception error) when (AiTasks.Expected(error)) { Notify(error.Message); }
             if (window.IsVisible) window.Refresh();
-            if (settingsWindow?.IsVisible == true) settingsWindow.RefreshLibrary();
+            if (settingsWindow?.IsVisible == true)
+            {
+                settingsWindow.RefreshLibrary();
+                settingsWindow.RefreshLinkHistory();
+            }
             return true;
         }
         catch (Exception error) when (IsLocalError(error) || error is ArgumentException)

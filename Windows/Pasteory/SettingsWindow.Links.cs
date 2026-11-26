@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -13,22 +14,60 @@ namespace Pasteory.Windows;
 internal sealed partial class SettingsWindow
 {
     private readonly Dictionary<Guid, Action> linkSessionRows = [];
+    private readonly HashSet<Guid> interactiveLinkSessions = [];
+    private TextBlock? linkSessionPaused;
+
+    private void BuildLinkConnections(Panel layout)
+    {
+        var sessions = SettingsCard(layout, "Pasteory sign-in sessions");
+        linkSessionPaused = Ui.Text(Labels.Get("Automatic resolution is off. Saved sessions can still be refreshed manually."), 11, "Muted");
+        linkSessionPaused.Visibility = app.Settings.ResolveLinks ? Visibility.Collapsed : Visibility.Visible;
+        sessions.Children.Add(linkSessionPaused);
+        foreach (var rule in app.LinkSignInRules())
+            sessions.Children.Add(BuildLinkSessionRow(rule));
+        sessions.Children.Add(Row("Site rules", Ui.Button("Add sign-in rule…", async () => await EditSignInAsync(null)),
+            "Each rule uses a separate browser profile. Automatic refresh runs when link resolution is enabled."));
+        sessions.Children.Add(Row("Browser compatibility", Ui.Text("Microsoft Edge WebView2", 12, "Muted")));
+
+        var chrome = SettingsCard(layout, "Google Chrome");
+        var integration = ChromeBridge.Status(app.DataDirectory);
+        chrome.Children.Add(Row("Extension files", Ui.Text(Labels.Get(integration.Prepared ? "Prepared" : "Missing"), 12, "Muted")));
+        chrome.Children.Add(Row("Native messaging host", Ui.Text(Labels.Get(integration.Registered ? "Registered" : "Unregistered"), 12, "Muted")));
+        chrome.Children.Add(Row("Last connected", Ui.Text(integration.LastContact?.ToLocalTime().ToString("g") ?? Labels.Get("Not connected yet"), 12, "Muted")));
+        chrome.Children.Add(Row("Pasteory Web Context", Ui.Button("Prepare Chrome extension", () =>
+        {
+            app.PrepareChromeExtension();
+            Select(SettingsPage.Links, rebuild: true);
+        }), "Load the prepared folder as an unpacked extension in Chrome."));
+
+        var access = SettingsCard(layout, "Web access");
+        access.Children.Add(Ui.Text(Labels.Get("Public page titles are requested without browser cookies."), 12));
+        access.Children.Add(Ui.Text(Labels.Get("Matching sites use their saved Pasteory sessions. Link resolution saves titles and diagnostics."), 12));
+        access.Children.Add(Ui.Text(Labels.Get("Local network addresses and high-risk action paths are blocked."), 12));
+    }
 
     private void BuildLinkRules(Panel layout)
     {
-        var sessions = SettingsCard(layout, "Pasteory sign-in sessions");
-        linkSessionRows.Clear();
-        foreach (var rule in LinkTitles.BuiltInSignIns.Select(preset =>
-            app.Settings.LinkSignIns.FirstOrDefault(item => item.Id == preset.Id) ?? preset)
-            .Concat(app.Settings.LinkSignIns.Where(rule => !LinkTitles.IsBuiltInSignIn(rule))))
-            sessions.Children.Add(BuildLinkSessionRow(rule));
-        sessions.Children.Add(Row("Site rules", Ui.Button("Add sign-in rule…", () => EditSignIn(null), "PrimaryButton"),
-            "Each rule uses a separate browser profile. Automatic refresh runs when link resolution is enabled."));
-
         var fallbacks = SettingsCard(layout, "Fallback rules");
+        if (app.Settings.LinkFallbacks.Length == 0)
+            fallbacks.Children.Add(Ui.Text(Labels.Get("Create a fallback rule from the More menu on a link, or add one here."), 12, "Muted"));
         foreach (var rule in app.Settings.LinkFallbacks)
         {
             var actions = new WrapPanel();
+            if (rule.Route is { } route)
+            {
+                var toggle = new CheckBox { IsChecked = route.Enabled, Margin = new Thickness(0, 0, 7, 0), VerticalAlignment = VerticalAlignment.Center };
+                toggle.SetResourceReference(StyleProperty, "SettingsSwitch");
+                AutomationProperties.SetName(toggle, Labels.Format("Enable fallback rule {0}", route.Name));
+                toggle.Click += (_, _) =>
+                {
+                    bool enabled = toggle.IsChecked == true;
+                    var rules = app.Settings.LinkFallbacks.Select(item => item == rule ? rule with { Route = route with { Enabled = enabled } } : item).ToArray();
+                    if (app.SaveSettings(app.Settings with { LinkFallbacks = rules })) Select(SettingsPage.Links, rebuild: true);
+                    else toggle.IsChecked = !enabled;
+                };
+                actions.Children.Add(toggle);
+            }
             AddAction(actions, "Edit", () =>
             {
                 if (rule.Route is not null) EditRouteFallback(rule);
@@ -36,82 +75,28 @@ internal sealed partial class SettingsWindow
             });
             actions.Children.Add(Ui.IconButton(Glyph.Close, "Remove fallback rule", () =>
             {
+                if (!ClipMenus.Confirm(this, "Remove this fallback rule?")) return;
                 if (app.SaveSettings(app.Settings with { LinkFallbacks = app.Settings.LinkFallbacks.Where(item => item != rule).ToArray() }))
                     Select(SettingsPage.Links, rebuild: true);
             }));
-            fallbacks.Children.Add(Row(rule.Route is { Name.Length: > 0 } route ? route.Name : rule.Title, actions, rule.Pattern));
+            string description = rule.Pattern;
+            if (rule.Route is { } configured)
+            {
+                if (configured.RequiredQueryKeys.Length > 0) description += "?" + string.Join("&", configured.RequiredQueryKeys);
+                description += Environment.NewLine + "→ " + rule.Title;
+            }
+            fallbacks.Children.Add(Row(rule.Route is { Name.Length: > 0 } named ? named.Name : rule.Title, actions, description));
         }
         var addFallback = new WrapPanel();
         AddAction(addFallback, "Add fallback rule…", () => EditRouteFallback(null));
         AddAction(addFallback, "Add regular expression…", () => EditFallback(null));
         fallbacks.Children.Add(Row("When no useful title is found", addFallback));
-
-        var resolved = app.Clips.Where(clip => clip.TrashedAt is null && clip.Kind == ClipKind.Link &&
-            clip.LinkDetails is { LastResolvedAt: not null, Title: not null })
-            .OrderByDescending(clip => clip.LinkDetails!.LastResolvedAt).Take(100).ToArray();
-        if (resolved.Length > 0)
-        {
-            var recent = SettingsCard(layout, "Resolved links");
-            foreach (var clip in resolved)
-            {
-                var details = clip.LinkDetails!;
-                string description = Labels.Format("Last successful resolution {0}", details.LastResolvedAt!.Value.ToLocalTime().ToString("g")) +
-                    " · " + Labels.Get(details.Status);
-                if (Uri.TryCreate(clip.Text, UriKind.Absolute, out var url))
-                    description = LinkTitles.DisplayUrl(url).Replace("%E2%80%A2", "•") + Environment.NewLine + description;
-                recent.Children.Add(Row(details.Title!, Ui.Button("Retry", async () =>
-                {
-                    await app.ResolveLinkAsync(clip);
-                    Select(SettingsPage.Links, rebuild: true);
-                }), description));
-            }
-        }
-
-        var failed = app.Clips.Where(clip => clip.TrashedAt is null && clip.Kind == ClipKind.Link &&
-            clip.LinkDetails is { Status: not "Resolved", Route: not null }).OrderByDescending(clip => clip.LinkDetails!.AttemptedAt).ToArray();
-        if (failed.Length == 0) return;
-        var history = SettingsCard(layout, "Unresolved routes");
-        foreach (var group in failed.GroupBy(clip => clip.LinkDetails!.Route!, StringComparer.Ordinal).Take(40))
-        {
-            var clips = group.ToArray();
-            var links = new StackPanel { Margin = new Thickness(8, 5, 0, 3) };
-            var actions = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
-            AddAction(actions, "Create fallback rule", () => EditFallback(null, LinkTitles.RulePattern(group.Key)));
-            AddAction(actions, "Retry route", async () =>
-            {
-                foreach (var clip in clips)
-                {
-                    if (app.Exiting) return;
-                    await app.ResolveLinkAsync(clip);
-                }
-                Select(SettingsPage.Links, rebuild: true);
-            });
-            links.Children.Add(actions);
-            foreach (var clip in clips.Take(40))
-            {
-                var title = ClipCard.Short(clip.DisplayTitle, 72, 1);
-                string status = Labels.Get(clip.LinkDetails!.Status);
-                if (Uri.TryCreate(clip.Text, UriKind.Absolute, out var url))
-                    status += " · " + LinkTitles.DisplayUrl(url).Replace("%E2%80%A2", "•");
-                links.Children.Add(Row(title, Ui.Button("Retry", async () =>
-                {
-                    await app.ResolveLinkAsync(clip);
-                    Select(SettingsPage.Links, rebuild: true);
-                }), status));
-            }
-            var route = new Expander
-            {
-                Header = group.Key + " · " + Labels.Format("{0} links", clips.Length),
-                Content = links, Margin = new Thickness(0, 0, 0, 8)
-            };
-            route.SetResourceReference(ForegroundProperty, "Ink");
-            history.Children.Add(route);
-        }
     }
 
     internal void UpdateLinkSessionRows()
     {
-        if (current != SettingsPage.Links || !IsVisible) return;
+        if (current != SettingsPage.Links) return;
+        if (linkSessionPaused is { } notice) notice.Visibility = app.Settings.ResolveLinks ? Visibility.Collapsed : Visibility.Visible;
         foreach (var update in linkSessionRows.Values) update();
     }
 
@@ -123,17 +108,7 @@ internal sealed partial class SettingsWindow
         var refresh = Ui.Button("Refresh now", async () => await app.RefreshLinkSessionAsync(rule.Id));
         refresh.Margin = new Thickness(5, 0, 0, 2);
         actions.Children.Add(refresh);
-        var signIn = Ui.Button("Sign in…", async () =>
-        {
-            var requested = Current();
-            if (!await app.LinkSessions.ShowAsync(app.DataDirectory, requested, this)) return;
-            if (app.FindLinkSignInRule(rule.Id) is not { } latest || latest.SignInUrl != requested.SignInUrl) return;
-            if (!app.SaveLinkSignInRule(latest with { Enabled = true, Refresh = latest.Refresh.Reset(DateTimeOffset.UtcNow) })) return;
-            UpdateLinkSessionRows();
-            int count = await app.ResolveMatchingLinksAsync(latest.Pattern);
-            SetStatus(Labels.Format("Retried {0} links.", count));
-            if (current == SettingsPage.Links) Select(SettingsPage.Links, rebuild: true);
-        });
+        var signIn = Ui.Button("Sign in…", async () => await ShowLinkSignInAsync(Current(), null));
         signIn.Margin = new Thickness(5, 0, 0, 2);
         actions.Children.Add(signIn);
         var clear = Ui.Button("Clear session", async () =>
@@ -152,7 +127,7 @@ internal sealed partial class SettingsWindow
         actions.Children.Add(clear);
         if (!LinkTitles.IsBuiltInSignIn(rule))
         {
-            AddAction(actions, "Edit", () => EditSignIn(Current()));
+            AddAction(actions, "Edit", async () => await EditSignInAsync(Current()));
             actions.Children.Add(Ui.IconButton(Glyph.Close, "Remove sign-in rule", async () =>
             {
                 if (!ClipMenus.Confirm(this, "Remove this sign-in rule and clear its session?")) return;
@@ -199,7 +174,7 @@ internal sealed partial class SettingsWindow
             bool running = app.IsRefreshingLinkSession(rule.Id);
             signIn.Content = Labels.Get(latest.Enabled ? "Sign in again…" : "Sign in…");
             clear.Visibility = latest.Enabled ? Visibility.Visible : Visibility.Collapsed;
-            refresh.IsEnabled = latest.Enabled && !running;
+            refresh.IsEnabled = latest.Enabled && !running && !interactiveLinkSessions.Contains(rule.Id);
             automatic.IsChecked = state.Automatic;
             interval.SelectedValue = LinkSessionRefresh.Intervals.Contains(state.IntervalDays) ? state.IntervalDays : 14;
             var lines = new List<string>();
@@ -254,58 +229,105 @@ internal sealed partial class SettingsWindow
         target.Children.Add(button);
     }
 
-    private void EditSignIn(LinkSignInRule? rule) => LibraryEditors.ShowModal(this, "Add sign-in rule…", close =>
+    private Task SignInForLinkAsync(LinkHistoryEntry entry) => app.AllowsLinkRequest(entry.Url) &&
+        app.MatchLinkSignInRule(entry.Url) is { } rule ? ShowLinkSignInAsync(rule, entry) : EditSignInAsync(null, entry);
+
+    private async Task ShowLinkSignInAsync(LinkSignInRule requested, LinkHistoryEntry? entry)
     {
-        var form = new StackPanel();
-        var name = Ui.Field("Name", rule?.Name ?? "", 80);
-        var pattern = Ui.Field("URL regular expression", rule?.Pattern ?? "", 500);
-        var start = Ui.Field("Sign-in address", rule?.SignInUrl ?? "", 4096);
-        var matches = Ui.Text("", 11, "Muted");
-        Ui.AddField(form, "Name", name);
-        Ui.AddField(form, "URL regular expression", pattern);
-        Ui.AddField(form, "Sign-in address", start);
-        form.Children.Add(matches);
-        void ShowMatches()
+        if (!interactiveLinkSessions.Add(requested.Id)) return;
+        UpdateLinkSessionRows();
+        try
         {
-            string expression = NormalizePattern(pattern.Text);
-            if (!ValidPattern(expression))
+            if (!await app.LinkSessions.ShowAsync(app.DataDirectory, requested, this) || app.Exiting) return;
+            if (app.FindLinkSignInRule(requested.Id) is not { } latest || latest.SignInUrl != requested.SignInUrl) return;
+            if (!app.SaveLinkSignInRule(latest with { Enabled = true, Refresh = latest.Refresh.Reset(DateTimeOffset.UtcNow) })) return;
+            if (entry is not null && LinkResolver.MatchRule(latest.Pattern, entry.Url) is not null)
             {
-                matches.Text = Labels.Get("Enter a valid regular expression matching host and path.");
+                await app.ResolveLinkAsync(entry.Clip, latest);
                 return;
             }
-            int count = app.Clips.Count(clip => clip.Kind == ClipKind.Link && clip.TrashedAt is null &&
-                clip.LinkDetails?.Status != "Resolved" && Uri.TryCreate(clip.Text?.Trim(), UriKind.Absolute, out var uri) &&
-                LinkResolver.MatchRule(expression, uri) is not null);
-            matches.Text = Labels.Format("{0} unresolved links match", count);
+            int count = await app.ResolveMatchingLinksAsync(latest.Pattern, latest);
+            SetStatus(Labels.Format("Retried {0} links.", count));
         }
-        pattern.TextChanged += (_, _) => ShowMatches();
-        ShowMatches();
-        return LibraryEditors.Wrap(rule is null ? "Add sign-in rule…" : "Edit sign-in rule", form, name, () =>
+        finally
         {
-            string expression = NormalizePattern(pattern.Text);
-            if (string.IsNullOrWhiteSpace(name.Text) || !ValidPattern(expression) ||
-                !Uri.TryCreate(start.Text.Trim(), UriKind.Absolute, out var uri) || !LinkResolver.Allowed(uri))
-            {
-                matches.Text = Labels.Get("Enter a name, valid rule and web address.");
-                return false;
-            }
-            var latest = rule is null ? null : app.FindLinkSignInRule(rule.Id);
-            bool sameAddress = latest?.SignInUrl == uri.AbsoluteUri;
-            var next = new LinkSignInRule(rule?.Id ?? Guid.NewGuid(), name.Text.Trim(), expression, uri.AbsoluteUri,
-                sameAddress && latest is { Enabled: true })
-            {
-                Refresh = latest is null ? new() : sameAddress ? latest.Refresh : latest.Refresh.Reset(null)
-            };
-            if (!app.SaveLinkSignInRule(next)) return false;
-            Select(SettingsPage.Links, rebuild: true);
-            return true;
-        }, close);
-    }, 480, 390);
+            interactiveLinkSessions.Remove(requested.Id);
+            UpdateLinkSessionRows();
+            RefreshLinkHistory();
+        }
+    }
 
-    private void EditFallback(LinkFallbackRule? rule, string? initialPattern = null) => LibraryEditors.ShowModal(this, "Fallback rules", close =>
+    private async Task EditSignInAsync(LinkSignInRule? rule, LinkHistoryEntry? sample = null)
+    {
+        LinkSignInRule? saved = null;
+        var entries = LinkHistory.Build(app.Clips);
+        string heading = rule is null ? "Add sign-in rule…" : "Edit sign-in rule";
+        LibraryEditors.ShowModal(this, heading, close =>
+        {
+            var form = new StackPanel();
+            var name = Ui.Field("Name", rule?.Name ?? sample?.Host ?? "", 80);
+            var pattern = Ui.Field("URL regular expression", rule?.Pattern ?? (sample is null ? "" : LinkTitles.RulePattern(LinkTitles.Route(sample.Url).Key)), 500);
+            string suggestedStart = sample?.Url.GetLeftPart(UriPartial.Authority) ?? "";
+            var start = Ui.Field("Sign-in address", rule?.SignInUrl ?? suggestedStart, 4096);
+            var matches = Ui.Text("", 11, "Muted");
+            Ui.AddField(form, "Name", name);
+            Ui.AddField(form, "URL regular expression", pattern);
+            Ui.AddField(form, "Sign-in address", start);
+            form.Children.Add(matches);
+            void ShowMatches()
+            {
+                string expression = NormalizePattern(pattern.Text);
+                if (!ValidPattern(expression))
+                {
+                    matches.Text = Labels.Get("Enter a valid regular expression matching host and path.");
+                    return;
+                }
+                var matching = entries.Where(entry => entry.Status != "Resolved" && LinkResolver.MatchRule(expression, entry.Url) is not null).ToArray();
+                int routes = matching.Select(entry => entry.Clip.LinkDetails?.Route ?? LinkTitles.Route(entry.Url).Key).Distinct().Count();
+                matches.Text = Labels.Format("Matches {0} routes and {1} links", routes, matching.Length);
+                if (matching.FirstOrDefault() is { } example)
+                {
+                    matches.Text += Environment.NewLine + Labels.Format("Matching example {0}", example.Address);
+                    if (start.Text.Length == 0 || start.Text == suggestedStart)
+                    {
+                        suggestedStart = example.Url.GetLeftPart(UriPartial.Authority);
+                        start.Text = suggestedStart;
+                    }
+                    if (name.Text.Trim().Length == 0) name.Text = example.Host;
+                }
+            }
+            pattern.TextChanged += (_, _) => ShowMatches();
+            ShowMatches();
+            return LibraryEditors.Wrap(heading, form, name, () =>
+            {
+                string expression = NormalizePattern(pattern.Text);
+                if (string.IsNullOrWhiteSpace(name.Text) || !ValidPattern(expression) ||
+                    !Uri.TryCreate(start.Text.Trim(), UriKind.Absolute, out var uri) || !app.AllowsLinkRequest(uri))
+                {
+                    matches.Text = Labels.Get("Enter a name, valid rule and allowed web address.");
+                    return false;
+                }
+                var latest = rule is null ? null : app.FindLinkSignInRule(rule.Id);
+                bool sameAddress = latest?.SignInUrl == uri.AbsoluteUri;
+                var next = new LinkSignInRule(rule?.Id ?? Guid.NewGuid(), name.Text.Trim(), expression, uri.AbsoluteUri,
+                    sameAddress && latest is { Enabled: true })
+                {
+                    Refresh = latest is null ? new() : sameAddress ? latest.Refresh : latest.Refresh.Reset(null)
+                };
+                if (!app.SaveLinkSignInRule(next)) return false;
+                saved = next;
+                return true;
+            }, close, rule is null ? "Save and sign in" : "Save");
+        }, 500, 410);
+        if (saved is null || app.Exiting) return;
+        if (current == SettingsPage.Links) Select(SettingsPage.Links, rebuild: true);
+        if (rule is null) await ShowLinkSignInAsync(saved, sample);
+    }
+
+    private void EditFallback(LinkFallbackRule? rule) => LibraryEditors.ShowModal(this, "Fallback rules", close =>
     {
         var form = new StackPanel();
-        var pattern = Ui.Field("URL regular expression", rule?.Pattern ?? initialPattern ?? "", 500);
+        var pattern = Ui.Field("URL regular expression", rule?.Pattern ?? "", 500);
         var title = Ui.Field("Title format", rule?.Title ?? "", 220);
         var help = Ui.Text(Labels.Get("Match the host and path. Use $1 for the first capture group."), 11, "Muted");
         Ui.AddField(form, "URL regular expression", pattern);
@@ -329,15 +351,16 @@ internal sealed partial class SettingsWindow
         }, close);
     }, 480, 330);
 
-    private void EditRouteFallback(LinkFallbackRule? rule) => LibraryEditors.ShowModal(this, "Fallback rules", close =>
+    private void EditRouteFallback(LinkFallbackRule? rule, LinkHistoryEntry? sample = null) => LibraryEditors.ShowModal(this, "Fallback rules", close =>
     {
         var form = new StackPanel();
         var route = rule?.Route;
-        var name = Ui.Field("Rule name", route?.Name ?? "", 100);
-        var host = Ui.Field("Host pattern", route?.Host ?? "", 253);
-        var path = Ui.Field("Path template", route?.Path ?? "/", 300);
+        var suggested = sample is null ? null : LinkTitles.Route(sample.Url);
+        var name = Ui.Field("Rule name", route?.Name ?? suggested?.Key ?? "", 100);
+        var host = Ui.Field("Host pattern", route?.Host ?? sample?.Host ?? "", 253);
+        var path = Ui.Field("Path template", route?.Path ?? suggested?.Path ?? "/", 300);
         var query = Ui.Field("Required query keys", string.Join(", ", route?.RequiredQueryKeys ?? []), 260);
-        var title = Ui.Field("Title format", rule?.Title ?? "", 220);
+        var title = Ui.Field("Title format", rule?.Title ?? suggested?.TitleTemplate ?? "", 220);
         Ui.AddField(form, "Rule name", name);
         Ui.AddField(form, "Host pattern", host);
         Ui.AddField(form, "Path template", path);
@@ -349,6 +372,15 @@ internal sealed partial class SettingsWindow
         var help = Ui.Text(Labels.Get("Use {id} in a path and {{path.id}} in the title."), 11, "Muted");
         help.Margin = new Thickness(0, 8, 0, 0);
         form.Children.Add(help);
+        if (suggested is not null)
+        {
+            query.IsReadOnly = true;
+            void UpdateRequiredKeys() => query.Text = string.Join(", ", LinkTitles.ReferencedQueryKeys(title.Text, suggested.QueryKeys));
+            title.TextChanged += (_, _) => UpdateRequiredKeys();
+            UpdateRequiredKeys();
+            if (suggested.QueryKeys.Length > 0)
+                help.Text += Environment.NewLine + Labels.Format("Query variables {0}", string.Join(", ", suggested.QueryKeys.Select(key => "{{query." + key + "}}")));
+        }
         return LibraryEditors.Wrap(rule is null ? "Add fallback rule…" : "Edit fallback rule", form, name, () =>
         {
             string matchHost = host.Text.Trim().ToLowerInvariant();

@@ -13,10 +13,11 @@ public sealed record MacClipboardIdentity(string Kind, string[] SecondaryKinds, 
 public sealed record CaptureEvent(DateTimeOffset CapturedAt, string Source, string? Context = null, string? Url = null,
     Dictionary<string, string>? Details = null);
 public sealed record ConversionRecord(TextTool Tool, string Original, string Source);
-public sealed record LinkAttempt(string Status, DateTimeOffset At, string? Source, string? Quality);
+public sealed record LinkAttempt(string Status, DateTimeOffset At, string? Source, string? Quality,
+    int? HttpStatus = null, int? DurationMilliseconds = null);
 public sealed record LinkDetails(string Status, string? Title, DateTimeOffset AttemptedAt, string? Source = null,
     string? Quality = null, string? FallbackTitle = null, string? FallbackSource = null, string? Route = null,
-    DateTimeOffset? LastResolvedAt = null, LinkAttempt[]? Attempts = null);
+    DateTimeOffset? LastResolvedAt = null, LinkAttempt[]? Attempts = null, int? HttpStatus = null, int? DurationMilliseconds = null);
 
 public enum ClipPriority { None, P1, P2, P3 }
 
@@ -146,6 +147,9 @@ public sealed record Clip
     [JsonIgnore]
     public string DisplayTitle => Title.Length > 0 ? Title : LinkDetails?.Title ?? LinkDetails?.FallbackTitle ?? "";
 
+    [JsonIgnore]
+    public string? LinkResourceKey => Kind == ClipKind.Link ? LinkKey(Text) : null;
+
     internal bool SameContent(Clip other)
     {
         if (Kind != other.Kind || Kind == ClipKind.Aggregate) return false;
@@ -169,7 +173,8 @@ public sealed record Clip
     }
 
     internal static string? LinkKey(string? text) => Uri.TryCreate(text?.Trim(), UriKind.Absolute, out var uri) &&
-        uri.Scheme is "http" or "https" ? uri.IdnHost.ToLowerInvariant() + uri.AbsolutePath.TrimEnd('/') : null;
+        uri.Scheme is "http" or "https" && uri.Host.Length != 0 && uri.UserInfo.Length == 0
+        ? uri.IdnHost.ToLowerInvariant() + uri.AbsolutePath.TrimEnd('/') : null;
 
     private bool SamePaths(Clip other) => Files.SequenceEqual(other.Files, StringComparer.OrdinalIgnoreCase);
 
