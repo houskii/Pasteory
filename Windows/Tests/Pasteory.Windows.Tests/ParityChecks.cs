@@ -186,10 +186,10 @@ internal static partial class Program
                 }
             };
             byte[] jpeg = SampleImage(new JpegBitmapEncoder());
-            Guid pictureId = Guid.NewGuid(), referenceId = Guid.NewGuid();
+            Guid pictureId = Guid.NewGuid(), referenceId = Guid.NewGuid(), pendingId = Guid.NewGuid(), staleId = Guid.NewGuid();
             var recognizedAt = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             string pictureHash = Convert.ToHexString(SHA256.HashData(jpeg));
-            object ImageClip(Guid clipId, string kind) => new
+            object ImageClip(Guid clipId, string kind, bool pending = false, bool stale = false) => new
             {
                 id = clipId, createdAt = DateTimeOffset.UtcNow, primaryKind = kind,
                 source = new { appName = "Finder" },
@@ -197,8 +197,10 @@ internal static partial class Program
                 note = kind == "image" ? "Image caption\n\n[OCR:Corrected Mac OCR]" : "",
                 localOCR = kind == "image" ? new
                 {
-                    version = 1, contentHash = pictureHash, text = "Raw Mac OCR", recognizedAt, appendedNote = "[OCR:Raw Mac OCR]"
+                    version = 1, contentHash = stale ? "previous-content" : pictureHash, text = "Raw Mac OCR", recognizedAt,
+                    method = "visionFast", appendedNote = "[OCR:Raw Mac OCR]"
                 } : null,
+                localOCRRequest = pending || stale ? new { contentHash = stale ? "previous-content" : pictureHash, method = "visionFast" } : null,
                 items = new[]
                 {
                     new
@@ -207,13 +209,14 @@ internal static partial class Program
                         {
                             new { uti = "public.jpeg", storage = new { type = "inline", data = jpeg } },
                             new { uti = "public.file-url", storage = new
-                                { type = "inline", data = Encoding.UTF8.GetBytes("file:///Users/qa/picture.jpeg") } }
+                                { type = "inline", data = Encoding.UTF8.GetBytes(stale ? "file:///Users/qa/previous.jpeg" : "file:///Users/qa/picture.jpeg") } }
                         }
                     }
                 }
             };
-            Add("clips.jsonl", Encoding.UTF8.GetBytes(string.Join("\n", new object[] { clip, ImageClip(pictureId, "image"), ImageClip(referenceId, "file") }
-                .Select(item => JsonSerializer.Serialize(item)))));
+            object[] entries = [clip, ImageClip(pictureId, "image"), ImageClip(referenceId, "file"),
+                ImageClip(pendingId, "mixed", pending: true), ImageClip(staleId, "image", stale: true)];
+            Add("clips.jsonl", Encoding.UTF8.GetBytes(string.Join("\n", entries.Select(item => JsonSerializer.Serialize(item)))));
             Add("collections.json", JsonSerializer.SerializeToUtf8Bytes(new[]
             {
                 new { id = group, name = "Mac group", kind = "normal", sortOrder = 0 }
@@ -221,7 +224,7 @@ internal static partial class Program
             File.WriteAllBytes(Path.Combine(backup, "manifest.json"),
                 JsonSerializer.SerializeToUtf8Bytes(new { formatVersion = 5, fileChecksums = manifest }));
             var store = new HistoryStore(Path.Combine(root, "history"));
-            Check(new MacBackupReader(backup).Import(store).Count == 3, "Import Mac v5 archived and inline items");
+            Check(new MacBackupReader(backup).Import(store).Count == entries.Length, "Import Mac v5 archived and inline items");
             var archived = store.Clips.Single(item => item.Id == id);
             Check(archived.Text == text + Environment.NewLine + Encoding.UTF8.GetString(alternate) &&
                 archived.ArchivedAt is not null && archived.CollectionIds.SequenceEqual([group]) && archived.ExcludeFromAi &&
@@ -236,12 +239,15 @@ internal static partial class Program
             Check(picture is { ImageFormat: ClipImageFormat.Jpeg, ImageWidth: 13, ImageHeight: 7 } &&
                 store.ReadImage(picture).SequenceEqual(jpeg) && reference.Kind == ClipKind.Files &&
                 !reference.HasImage && reference.Files.Length == 1, "Keep Mac image bytes and leave file references as files");
-            Check(picture.OcrInNote && picture.RecognizedAt == recognizedAt && picture.RecognizedImageText == "Corrected Mac OCR" &&
+            Check(picture.OcrInNote && picture.OcrMode == ImageOcrMode.Fast && picture.RecognizedAt == recognizedAt && picture.RecognizedImageText == "Corrected Mac OCR" &&
                 picture.PlainClipboardText == "Image caption\n\nCorrected Mac OCR", "Import the Mac editable OCR block and recognition timestamp");
+            Check(store.Clips.Single(item => item.Id == pendingId) is { OcrPending: true, OcrMode: ImageOcrMode.Fast } &&
+                store.Clips.Single(item => item.Id == staleId) is { OcrPending: false, RecognizedImageText: null, Note.Length: > 0 },
+                "Keep the mode of pending Mac OCR and reject stale requests and results while preserving notes");
             string zip = Path.Combine(root, "windows.zip");
             store.ExportBackup(zip);
             var restored = new HistoryStore(Path.Combine(root, "restored"));
-            Check(restored.ImportBackup(zip) == 3 && restored.ImportBackup(zip) == 0, "Windows restores multi-item backups idempotently");
+            Check(restored.ImportBackup(zip) == entries.Length && restored.ImportBackup(zip) == 0, "Windows restores multi-item backups idempotently");
             var restoredClip = restored.Clips.Single(item => item.Id == id);
             Check(restored.ReadRepresentation(restoredClip.OriginalItems![1].Representations[1]).SequenceEqual(opaque),
                 "Windows ZIP restoration retains opaque Mac clipboard data");
@@ -259,7 +265,7 @@ internal static partial class Program
             new MacBackupWriter(restored, ai, [route]).Export(exported);
             var returned = new HistoryStore(Path.Combine(root, "returned"));
             var exportedArchive = new MacBackupReader(exported).Import(returned);
-            Check(exportedArchive.Count == 4 && exportedArchive.Ai.Stories.Single().Id == recapId &&
+            Check(exportedArchive.Count == entries.Length + 1 && exportedArchive.Ai.Stories.Single().Id == recapId &&
                 exportedArchive.Ai.Usage.Single().Output == 50 &&
                 returned.Clips.Single(item => item.Id == native.Id).Html == native.Html,
                 "Reimport the Mac v5 export with Windows rich text, saved Story and usage");
@@ -268,7 +274,9 @@ internal static partial class Program
                 "Cross-platform backup round trips preserve per-clip AI privacy and exact clipboard bytes");
             var returnedImage = returned.Clips.Single(item => item.Id == pictureId);
             Check(returnedImage.OcrInNote && returnedImage.RecognizedAt == recognizedAt && returnedImage.RecognizedImageText == "Corrected Mac OCR" &&
-                returnedImage.RecognizedText == "Raw Mac OCR", "Round-trip editable OCR metadata in Mac v5 format");
+                returnedImage.RecognizedText == "Raw Mac OCR" && returnedImage.OcrMode == ImageOcrMode.Fast &&
+                returned.Clips.Single(item => item.Id == pendingId) is { OcrPending: true, OcrMode: ImageOcrMode.Fast },
+                "Round-trip completed and pending OCR metadata in Mac v5 format");
             var ticket = new Clip { Kind = ClipKind.Link, Text = "https://test.example.com/issues/42?view=summary" };
             Check(exportedArchive.Fallbacks.Single().Route?.Id == route.Route!.Id &&
                 LinkTitles.UpdateFallback(ticket, exportedArchive.Fallbacks)?.FallbackTitle == "Ticket 42 · summary",
@@ -281,7 +289,7 @@ internal static partial class Program
                 throw new InvalidOperationException("Expected Mac backup checksum rejection");
             }
             catch (InvalidDataException) { }
-            Check(store.Clips.Count == 3, "Reject altered Mac backup without changing existing clips");
+            Check(store.Clips.Count == entries.Length, "Reject altered Mac backup without changing existing clips");
         }
         finally { Directory.Delete(root, recursive: true); }
     }
@@ -494,17 +502,17 @@ internal static partial class Program
         catch (InvalidDataException) { }
     }
 
-    private static byte[] OcrSampleImage()
+    private static byte[] OcrSampleImage(string label = "PASTEORY LOCAL OCR")
     {
         var visual = new DrawingVisual();
         using (var draw = visual.RenderOpen())
         {
-            draw.DrawRectangle(Brushes.White, null, new Rect(0, 0, 800, 190));
-            var text = new FormattedText("PASTEORY LOCAL OCR", CultureInfo.GetCultureInfo("en-US"),
+            draw.DrawRectangle(Brushes.White, null, new Rect(0, 0, 1920, 288));
+            var text = new FormattedText(label, CultureInfo.GetCultureInfo("en-US"),
                 FlowDirection.LeftToRight, new Typeface("Segoe UI"), 56, Brushes.Black, 1);
             draw.DrawText(text, new Point(24, 48));
         }
-        var bitmap = new RenderTargetBitmap(800, 190, 96, 96, PixelFormats.Pbgra32);
+        var bitmap = new RenderTargetBitmap(1920, 288, 96, 96, PixelFormats.Pbgra32);
         bitmap.Render(visual);
         var encoder = new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
@@ -517,13 +525,26 @@ internal static partial class Program
     {
         using var trace = new System.Diagnostics.TextWriterTraceListener(Console.Out);
         System.Diagnostics.Trace.Listeners.Add(trace);
-        string? result = ImageOcr.ReadAsync(OcrSampleImage(), "English", CancellationToken.None).GetAwaiter().GetResult();
-        System.Diagnostics.Trace.Flush();
-        System.Diagnostics.Trace.Listeners.Remove(trace);
-        Console.WriteLine("Windows OCR languages: " + string.Join(", ",
-            global::Windows.Media.Ocr.OcrEngine.AvailableRecognizerLanguages.Select(language => language.LanguageTag)));
-        Check(result?.Contains("PASTEORY", StringComparison.OrdinalIgnoreCase) == true,
-            $"Recognize synthetic text with Windows OCR. Observed: {result ?? "(none)"}");
+        try
+        {
+            byte[] sample = OcrSampleImage();
+            using var accurate = ImageOcr.DecodeAsync(sample, ImageOcrMode.Accurate, CancellationToken.None).GetAwaiter().GetResult();
+            using var fast = ImageOcr.DecodeAsync(sample, ImageOcrMode.Fast, CancellationToken.None).GetAwaiter().GetResult();
+            Check(accurate.PixelWidth == 1920 && accurate.PixelHeight == 288 && fast.PixelWidth == 1280 && fast.PixelHeight == 192,
+                $"OCR uses distinct working resolutions. Accurate {accurate.PixelWidth}×{accurate.PixelHeight}, fast {fast.PixelWidth}×{fast.PixelHeight}.");
+            Console.WriteLine("Windows OCR languages: " + string.Join(", ",
+                global::Windows.Media.Ocr.OcrEngine.AvailableRecognizerLanguages.Select(language => language.LanguageTag)));
+            foreach (var mode in Enum.GetValues<ImageOcrMode>())
+            {
+                string result = ImageOcr.ReadAsync(sample, "English", mode, CancellationToken.None).GetAwaiter().GetResult();
+                Check(result.Contains("PASTEORY", StringComparison.OrdinalIgnoreCase), $"Recognize synthetic text in {mode} mode. Observed: {result}");
+            }
+        }
+        finally
+        {
+            System.Diagnostics.Trace.Flush();
+            System.Diagnostics.Trace.Listeners.Remove(trace);
+        }
     }
 
     private static void CheckPackagedOcr(string executable)
@@ -531,14 +552,59 @@ internal static partial class Program
         string root = Directory.CreateTempSubdirectory("Pasteory-OCR-QA-").FullName;
         try
         {
-            byte[] image = OcrSampleImage();
-            var clip = new Clip
+            byte[] image = OcrSampleImage(), second = OcrSampleImage("SECOND IMAGE"), rejected = OcrSampleImage("SKIP THIS VERSION");
+            byte[] damaged = new byte[image.Length];
+            var broken = new Clip
             {
-                Kind = ClipKind.Image, Source = "Test fixture", ImageSize = image.Length, ImageHash = Convert.ToHexString(SHA256.HashData(image)),
-                ImageWidth = 800, ImageHeight = 190, OcrPending = true, Note = "Saved caption"
+                Kind = ClipKind.Image, ImageSize = image.Length, ImageHash = Convert.ToHexString(SHA256.HashData(image)),
+                ImageWidth = 1920, ImageHeight = 288, OcrPending = true, Note = "Saved caption"
             };
-            Check(new HistoryStore(root).Capture(clip, image), "Seed a pending image recognition job");
-            new LocalSettings { Language = "English", RecognizeImages = true }.Save(root);
+            var store = new HistoryStore(root);
+            Check(store.Capture(broken, damaged), "Seed an unreadable OCR job saved by an earlier version");
+            var inputs = new Dictionary<Guid, byte[]>();
+            ClipboardRepresentation Input(string uti, byte[] data)
+            {
+                var id = Guid.NewGuid();
+                inputs.Add(id, data);
+                return new(id, uti, Convert.ToHexString(SHA256.HashData(data)), data.Length);
+            }
+
+            var imported = new Clip
+            {
+                Kind = ClipKind.Mixed, OcrPending = true, OcrMode = ImageOcrMode.Fast, Note = "Imported caption",
+                OriginalItems =
+                [
+                    new(Guid.NewGuid(), 1, [Input("public.png", second), Input("public.tiff", rejected)]),
+                    new(Guid.NewGuid(), 0, [Input("public.png", damaged), Input("public.tiff", image)])
+                ]
+            };
+            Check(store.ImportClips([imported], [], _ => throw new InvalidOperationException(), rep => inputs[rep.Id]) == 1,
+                "Seed a Mac OCR job with two ordered items and alternate representations");
+            new LocalSettings { Language = "English", RecognizeImages = true, OcrMode = ImageOcrMode.Fast }.Save(root);
+            WaitForJob(imported.Id, (snapshot, current) =>
+            {
+                var text = current.RecognizedImageText ?? "";
+                Check(current is { OcrInNote: true, OcrMode: ImageOcrMode.Fast } &&
+                    text.Split('\n') is [var first, var next] && first.Contains("PASTEORY", StringComparison.OrdinalIgnoreCase) &&
+                    next.Contains("SECOND IMAGE", StringComparison.OrdinalIgnoreCase) &&
+                    snapshot.Clips.Single(item => item.Id == broken.Id) is { OcrPending: true, RecognizedText: null },
+                    $"Recognize one representation per original item in order and keep the unreadable job. Text: {text}");
+            });
+
+            File.WriteAllBytes(Path.Combine(root, "images", broken.ImageFileName), image);
+            WaitForJob(broken.Id, (snapshot, current) =>
+            {
+                Check(current is { OcrInNote: true, OcrMode: ImageOcrMode.Accurate } &&
+                    current.Note.StartsWith("Saved caption\n\n[OCR:", StringComparison.Ordinal) &&
+                    current.RecognizedImageText?.Contains("PASTEORY", StringComparison.OrdinalIgnoreCase) == true &&
+                    snapshot.SearchIds("local ocr").Contains(broken.Id), "Resume a recovered legacy job and index its editable text");
+            });
+            Console.WriteLine("The portable app recognized multi-item images, retained an unreadable job and indexed it after recovery.");
+        }
+        finally { Directory.Delete(root, recursive: true); }
+
+        void WaitForJob(Guid id, Action<HistoryStore, Clip> verify)
+        {
             var start = new ProcessStartInfo(Path.GetFullPath(executable)) { UseShellExecute = false, CreateNoWindow = true };
             foreach (string arg in new[] { "--data-root", root, "--no-hotkey", "--no-capture", "--tray" }) start.ArgumentList.Add(arg);
             using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not launch the OCR fixture.");
@@ -549,13 +615,10 @@ internal static partial class Program
                 {
                     Check(!process.HasExited, "The packaged app stays running while processing an OCR job");
                     var store = new HistoryStore(root);
-                    var current = store.Clips.Single();
+                    var current = store.Clips.Single(item => item.Id == id);
                     if (!current.OcrPending)
                     {
-                        Check(current.OcrInNote && current.Note.StartsWith("Saved caption\n\n[OCR:", StringComparison.Ordinal) &&
-                            current.RecognizedImageText?.Contains("PASTEORY", StringComparison.OrdinalIgnoreCase) == true &&
-                            store.SearchIds("local ocr").SequenceEqual([clip.Id]), "The packaged app resumes OCR and commits a searchable note");
-                        Console.WriteLine("The portable app resumed a saved OCR job and indexed the editable note.");
+                        verify(store, current);
                         return;
                     }
                     Thread.Sleep(150);
@@ -567,6 +630,5 @@ internal static partial class Program
                 if (!process.HasExited) { process.Kill(); process.WaitForExit(3000); }
             }
         }
-        finally { Directory.Delete(root, recursive: true); }
     }
 }

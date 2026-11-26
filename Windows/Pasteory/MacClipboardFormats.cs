@@ -46,7 +46,7 @@ internal static class MacClipboardFormats
                             Uri.UnescapeDataString(reference.AbsolutePath);
                     if (file.Length > 0) files.Add(file);
                     break;
-                case var type when includeImage && image is null && Priority(type) >= 10 && Priority(type) < int.MaxValue:
+                case var type when includeImage && image is null && IsImage(type):
                     image = ClipboardImage.Read(read(representation), 48_000_000);
                     break;
             }
@@ -55,6 +55,11 @@ internal static class MacClipboardFormats
     }
 
     internal static bool CanProject(ClipboardItem item) => item.Representations.Any(rep => Priority(rep.Uti) < int.MaxValue);
+
+    internal static bool IsImage(string uti) => Priority(uti) is >= 10 and < int.MaxValue;
+
+    internal static IEnumerable<ClipboardRepresentation> Images(ClipboardItem item) =>
+        item.Representations.Where(rep => IsImage(rep.Uti)).OrderBy(rep => Priority(rep.Uti));
 
     private static bool LooksLikeDrive(string path) => path is ['/', _, ':', ..] || path is [_, ':', ..];
 

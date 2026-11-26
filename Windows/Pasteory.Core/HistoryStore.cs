@@ -187,7 +187,8 @@ public sealed partial class HistoryStore
             RecognizedText = existing.RecognizedText ?? latest.RecognizedText,
             RecognizedAt = existing.RecognizedAt ?? latest.RecognizedAt,
             OcrInNote = existing.OcrInNote,
-            OcrPending = existing.RecognizedText is null && latest.RecognizedText is null && (existing.OcrPending || latest.OcrPending),
+            OcrPending = existing.RecognizedText is null && latest.RecognizedText is null && existing.OcrPending,
+            OcrMode = existing.RecognizedText is not null || latest.RecognizedText is null ? existing.OcrMode : latest.OcrMode,
             LinkDetails = latest.LinkDetails is { Status: "Not attempted" } fallback && existing.LinkDetails is { } known
                 ? known with { FallbackTitle = fallback.FallbackTitle, FallbackSource = fallback.FallbackSource, Route = fallback.Route }
                 : latest.LinkDetails ?? existing.LinkDetails

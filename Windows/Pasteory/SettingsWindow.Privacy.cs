@@ -11,6 +11,11 @@ namespace Pasteory.Windows;
 
 internal sealed partial class SettingsWindow
 {
+    private ComboBox? imageOcrMode;
+    private ProgressBar? imageOcrProgress;
+    private TextBlock? imageOcrStatus;
+    private TextBlock? imageOcrError;
+
     private void BuildPrivacy(Panel layout)
     {
         var capture = SettingsCard(layout, "Clipboard capture");
@@ -33,10 +38,7 @@ internal sealed partial class SettingsWindow
         Switch(capture, "Pause clipboard capture", app.Settings.Paused, (settings, value) => settings with { Paused = value },
             "Capture pauses while Windows is locked or asleep.");
 
-        var recognition = SettingsCard(layout, "Image text recognition");
-        Switch(recognition, "Recognize image text", app.Settings.RecognizeImages,
-            (settings, value) => settings with { RecognizeImages = value },
-            "Recognition runs on this device and appends [OCR:…] to the note. You can edit the result, search it or copy it as plain text.");
+        BuildImageOcr(layout);
 
         var protections = SettingsCard(layout, "Default protections");
         protections.Children.Add(Ui.Text(Labels.Get("Known password managers are excluded automatically."), 12));
@@ -92,6 +94,49 @@ internal sealed partial class SettingsWindow
         }, "PrimaryButton");
         actions.Children.Add(choose);
         exclusions.Children.Add(actions);
+    }
+
+    private void BuildImageOcr(Panel layout)
+    {
+        var recognition = SettingsCard(layout, "Image text recognition");
+        Switch(recognition, "Automatically recognize text in new images", app.Settings.RecognizeImages,
+            (settings, value) => settings with { RecognizeImages = value });
+        var mode = Picker("OCR mode", ["Accurate", "Fast"], app.Settings.OcrMode.ToString());
+        mode.SelectionChanged += (_, _) =>
+        {
+            if (mode.SelectedValue is string value && Enum.TryParse(value, out ImageOcrMode next) && next != app.Settings.OcrMode &&
+                !app.SaveSettings(app.Settings with { OcrMode = next })) mode.SelectedValue = app.Settings.OcrMode.ToString();
+        };
+        recognition.Children.Add(Row("OCR mode", mode,
+            "Accurate uses the full resolution Windows OCR supports. Fast uses up to 1,280 pixels on the longest side."));
+        recognition.Children.Add(Ui.Text(Labels.Get("Recognition runs on this device and appends [OCR:…] to the note. You can edit the result, search it or copy it as plain text."), 11, "Muted"));
+        recognition.Children.Add(Ui.Text(Labels.Get("Pending jobs resume the next time you enable recognition or start Pasteory."), 11, "Muted"));
+        imageOcrMode = mode;
+        imageOcrProgress = new ProgressBar { Height = 4, Margin = new Thickness(0, 8, 0, 3) };
+        AutomationProperties.SetName(imageOcrProgress, Labels.Get("Image text recognition"));
+        imageOcrStatus = Ui.Text("", 11, "Muted");
+        AutomationProperties.SetLiveSetting(imageOcrStatus, AutomationLiveSetting.Polite);
+        imageOcrError = Ui.Text("", 11, "WarningInk");
+        recognition.Children.Add(imageOcrProgress);
+        recognition.Children.Add(imageOcrStatus);
+        recognition.Children.Add(imageOcrError);
+        RefreshImageOcrStatus();
+    }
+
+    internal void RefreshImageOcrStatus()
+    {
+        if (current != SettingsPage.Privacy || imageOcrMode is null || imageOcrProgress is null ||
+            imageOcrStatus is null || imageOcrError is null) return;
+        bool enabled = app.Settings.RecognizeImages;
+        bool running = enabled && app.ImageOcrRunning;
+        imageOcrMode.IsEnabled = enabled;
+        imageOcrProgress.IsIndeterminate = running;
+        imageOcrProgress.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
+        imageOcrStatus.Text = Labels.Format(running ? "Recognizing images in the background. {0} completed since launch." :
+            "{0} image recognition jobs completed since launch.", app.ImageOcrCompleted);
+        imageOcrStatus.Visibility = enabled && (running || app.ImageOcrCompleted > 0) ? Visibility.Visible : Visibility.Collapsed;
+        imageOcrError.Text = app.ImageOcrError ?? "";
+        imageOcrError.Visibility = enabled && app.ImageOcrError is not null ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void AddChatSource(Panel sources, string title, SourceCaptureApplication source, string[] processNames,

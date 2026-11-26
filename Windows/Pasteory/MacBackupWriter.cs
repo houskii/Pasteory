@@ -61,6 +61,12 @@ internal sealed partial class MacBackupWriter(HistoryStore store, AiTasks ai, IR
             Hash(JsonSerializer.SerializeToUtf8Bytes(items.OrderBy(item => item.Order).Select(item =>
                 item.Representations.Select(rep => new { rep.Uti, rep.Hash })), Json));
         var original = clip.OriginalMacIdentity;
+        string? ocrMethod = clip.OcrMode switch
+        {
+            ImageOcrMode.Fast => "visionFast",
+            ImageOcrMode.Accurate => "visionAccurate",
+            _ => null
+        };
         return new
         {
             id = clip.Id, createdAt = Date(clip.CreatedAt ?? clip.CapturedAt), updatedAt = Date(ClipActivity.LastUsed(clip)),
@@ -85,9 +91,10 @@ internal sealed partial class MacBackupWriter(HistoryStore store, AiTasks ai, IR
             localOCR = clip.RecognizedText is { } text ? new
             {
                 version = 1, contentHash, text, recognizedAt = Date(clip.RecognizedAt ?? ClipActivity.LastUsed(clip)),
+                method = ocrMethod,
                 appendedNote = clip.OcrInNote ? "[OCR:" + text + "]" : null
             } : null,
-            localOCRRequest = clip.OcrPending ? new { contentHash, method = "visionAccurate" } : null,
+            localOCRRequest = clip.OcrPending ? new { contentHash, method = ocrMethod ?? "visionAccurate" } : null,
             items = items.Select(item => new
             {
                 item.Id, item.Order, representations = item.Representations.Select(rep => new

@@ -60,6 +60,7 @@ public sealed record LocalSettings
     public string? QuickGroupPlacement { get; init; }
     public string GroupDisplay { get; init; } = "Common groups";
     public bool RecognizeImages { get; init; }
+    public ImageOcrMode OcrMode { get; init; } = ImageOcrMode.Accurate;
     public bool IncludeBrowserContext { get; init; }
     public bool IncludeChatContext { get; init; }
     public bool? IncludeWeChatContext { get; init; }

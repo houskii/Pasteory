@@ -75,9 +75,8 @@ internal sealed class MacBackupReader(string root)
         var copiedAt = Date(item, "lastCopiedAt") ?? created;
         var ocr = Child(item, "localOCR");
         string? contentHash = Optional(item, "contentHash");
-        string? recognized = Int(ocr, "version", 1) == 1 && (Optional(ocr, "contentHash") is not { } ocrHash ||
-            string.Equals(ocrHash, contentHash, StringComparison.OrdinalIgnoreCase)) ? Optional(ocr, "text") : null;
-        var pending = Optional(Child(item, "localOCRRequest"), "contentHash");
+        string? recognized = Int(ocr, "version", 0) == 1 && MatchesContent(ocr, contentHash) ? Optional(ocr, "text") : null;
+        var request = Child(item, "localOCRRequest");
         var clip = new Clip
         {
             Id = id, Kind = kind, CreatedAt = created, CapturedAt = copiedAt, LastPastedAt = Date(item, "lastPastedAt"),
@@ -91,6 +90,7 @@ internal sealed class MacBackupReader(string root)
             CodeLanguage = CodeExtension(Optional(Child(item, "codeMetadata"), "language")), RecognizedText = recognized,
             RecognizedAt = recognized is null ? null : Date(ocr, "recognizedAt"),
             OcrInNote = recognized is not null && Optional(ocr, "appendedNote") is not null,
+            OcrMode = recognized is null ? null : OcrMode(ocr),
             Conversions = Array(item, "quickTextTransformations").Select(ToConversion).OfType<ConversionRecord>().ToArray()
         };
         if (Optional(item, "automaticTitle") is { } title)
@@ -137,8 +137,7 @@ internal sealed class MacBackupReader(string root)
             clip = clip with
             {
                 ImageFormat = image.Format, ImageSize = image.Bytes.Length, ImageWidth = image.Width, ImageHeight = image.Height,
-                ImageHash = Convert.ToHexString(SHA256.HashData(image.Bytes)),
-                OcrPending = recognized is null && pending is not null && string.Equals(pending, contentHash, StringComparison.OrdinalIgnoreCase)
+                ImageHash = Convert.ToHexString(SHA256.HashData(image.Bytes))
             };
             File.WriteAllBytes(Path.Combine(staging, clip.ImageFileName), image.Bytes);
         }
@@ -147,12 +146,25 @@ internal sealed class MacBackupReader(string root)
             clip = clip with { Kind = ClipKind.Text };
             text ??= $"[Mac image] {String(item, "previewText")}";
         }
+        if (recognized is null && MatchesContent(request, contentHash) && (image is not null ||
+            originals.SelectMany(selection => selection.Representations).Any(rep => MacClipboardFormats.IsImage(rep.Uti))))
+            clip = clip with { OcrPending = true, OcrMode = OcrMode(request) ?? ImageOcrMode.Accurate };
         if (text is null && html is null && rtf is null && image is null && files.Count == 0) text = String(item, "previewText");
         return clip with { Text = text, Html = html, Rtf = rtf, Files = files.Where(path => path.Length > 0).Distinct().ToArray(),
             OriginalItems = originals.Count == 0 ? null : originals.ToArray(),
             OriginalMacIdentity = originals.Count == 0 ? null : new(String(item, "primaryKind"), Strings(item, "secondaryKinds"),
-                Optional(item, "contentHash"), Optional(item, "identityKey")) };
+                contentHash, Optional(item, "identityKey")) };
     }
+
+    private static bool MatchesContent(JsonElement data, string? contentHash) => !string.IsNullOrEmpty(contentHash) &&
+        string.Equals(Optional(data, "contentHash"), contentHash, StringComparison.OrdinalIgnoreCase);
+
+    private static ImageOcrMode? OcrMode(JsonElement data) => Optional(data, "method") switch
+    {
+        "visionFast" => ImageOcrMode.Fast,
+        "visionAccurate" => ImageOcrMode.Accurate,
+        _ => null
+    };
 
     private static byte[] ReadStaged(string staging, ClipboardRepresentation rep) =>
         File.ReadAllBytes(Path.Combine(staging, rep.Hash + ".bin"));

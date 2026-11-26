@@ -94,14 +94,26 @@ static void CheckOcrNotes(string root)
     var store = new HistoryStore(folder);
     byte[] bytes = [1, 2, 3];
     var image = new Clip { Kind = ClipKind.Image, ImageSize = bytes.Length, ImageHash = "ocr-fixture", OcrPending = true, Note = "Caption [ref]" };
-    Check(store.Capture(image, bytes) && new HistoryStore(folder).Clips.Single().OcrPending, "Keep queued image recognition across restarts");
+    Check(store.Capture(image, bytes) && new HistoryStore(folder).Clips.Single() is { OcrPending: true, OcrMode: null },
+        "Keep queued image recognition from older versions across restarts");
+    var oldImage = image with { Id = Guid.NewGuid(), ImageHash = "previously-captured", OcrPending = false };
+    Check(store.Capture(oldImage, bytes) && store.Capture(oldImage with
+        { Id = Guid.NewGuid(), OcrPending = true, OcrMode = ImageOcrMode.Fast }, bytes) &&
+        store.Clips.Single(clip => clip.Id == oldImage.Id) is { OcrPending: false, OcrMode: null, CopyCount: 2 },
+        "Recapturing an image from before OCR was enabled keeps the original capture policy");
+    store.Delete(oldImage);
+    Check(store.Capture(image with { Id = Guid.NewGuid(), OcrPending = true, OcrMode = ImageOcrMode.Fast }, bytes) &&
+        store.Clips.Single() is { OcrPending: true, OcrMode: null }, "Recapturing a pending image preserves the mode of the first job");
     var now = DateTimeOffset.UtcNow;
+    Check(image.WithImageRecognition(" \n", now, ImageOcrMode.Fast) is
+        { OcrPending: false, OcrMode: ImageOcrMode.Fast, OcrInNote: false, RecognizedText: "", Note: "Caption [ref]" },
+        "A successful scan of a blank image keeps its caption and clears the job");
     const string original = "Original transcription\nAn unbalanced [ bracket and a ] here]";
     Check(store.Update(image.Id, clip => clip.WithImageRecognition(original, now)), "Save recognition on the existing image");
     var saved = store.Clips.Single();
     Check(saved.RecognizedImageText == original && saved.NoteWithoutImageOcr == "Caption [ref]" && saved.RecognizedAt == now &&
         !saved.OcrPending && saved.PlainClipboardText == "Caption [ref]\n\n" + original, "Keep literal brackets and line breaks in the plain clipboard");
-    Check(saved.CapturedAt == image.CapturedAt && saved.CopyCount == image.CopyCount, "Recognition preserves capture activity");
+    Check(saved.CapturedAt == image.CapturedAt && saved.CopyCount == 2, "Recognition preserves capture activity");
     Check(saved.WithNoteEdit(image, image.Note) == saved && saved.WithNoteEdit(image, "Caption edited during OCR").PlainClipboardText ==
         "Caption edited during OCR\n\n" + original, "A recognition result arriving during an edit survives saving the draft");
     Check(store.Update(image.Id, clip => clip with { Note = " Caption [ref]\n[OCR:Corrected [example]]\nTail [link] " }), "Edit an OCR note");

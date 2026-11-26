@@ -52,7 +52,8 @@ public partial class App
     internal void TrashClip(Clip clip) => ChangeHistory(() => history.Trash(clip.Id));
     internal void RestoreClip(Clip clip)
     {
-        if (ChangeHistory(() => history.Restore(clip.Id)) && clip.OcrPending) _ = RecognizePendingImagesAsync();
+        if (ChangeHistory(() => history.Restore(clip.Id)) && Clips.FirstOrDefault(item => item.Id == clip.Id) is { } restored)
+            EnqueueImageOcr(restored);
     }
     internal void EraseClip(Clip clip) => ChangeHistory(() => history.Delete(clip));
     internal void EmptyTrash() => ChangeHistory(history.EmptyTrash);
@@ -93,7 +94,7 @@ public partial class App
             if (ChangeHistory(() => count = history.ImportBackup(path)))
             {
                 Notify(Labels.Format("Imported {0} clips.", count));
-                if (count != 0) _ = RecognizePendingImagesAsync();
+                if (count != 0) ResumePendingImageOcr();
             }
         }
         catch (Exception error) when (error is InvalidDataException or System.Text.Json.JsonException) { Notify(error.Message); }
@@ -109,7 +110,7 @@ public partial class App
                 SaveSettings(Settings with { LinkFallbacks = Settings.LinkFallbacks.Concat(result.Fallbacks)
                     .DistinctBy(rule => (rule.Route?.Id, rule.Pattern, rule.Title)).ToArray() });
             Notify(Labels.Format("Imported {0} clips.", result.Count));
-            if (result.Count != 0) _ = RecognizePendingImagesAsync();
+            if (result.Count != 0) ResumePendingImageOcr();
         }
         catch (Exception error) when (AiTasks.Expected(error) || error is FormatException or
             NotSupportedException or System.Runtime.InteropServices.COMException)

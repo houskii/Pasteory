@@ -5,6 +5,7 @@ namespace Pasteory.Core;
 
 public enum ClipKind { Text, Link, Image, Files, Color, Code, Mixed, Aggregate }
 public enum ClipImageFormat { Png, Jpeg, Tiff, Gif, Bmp, WebP, Heif, Avif }
+public enum ImageOcrMode { Accurate, Fast }
 
 public sealed record ClipboardRepresentation(Guid Id, string Uti, string Hash, int Size);
 public sealed record ClipboardItem(Guid Id, int Order, ClipboardRepresentation[] Representations);
@@ -51,6 +52,8 @@ public sealed record Clip
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool OcrPending { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ImageOcrMode? OcrMode { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public DateTimeOffset? RecognizedAt { get; init; }
     public string? CodeLanguage { get; init; }
     public LinkDetails? LinkDetails { get; init; }
@@ -92,7 +95,7 @@ public sealed record Clip
     {
         get
         {
-            if (Kind is ClipKind.Image or ClipKind.Files or ClipKind.Mixed)
+            if (Kind is ClipKind.Image or ClipKind.Files or ClipKind.Mixed || OriginalMacIdentity?.Kind == "image")
             {
                 string note = OcrInNote && ImageNotes.Find(Note, RecognizedText) is { } block
                     ? ImageNotes.Unwrap(Note[..block.Start]) + block.Text + ImageNotes.Unwrap(Note[block.End..])
@@ -108,20 +111,23 @@ public sealed record Clip
     public bool HasImage => ImageSize > 0 || Kind == ClipKind.Image;
 
     [JsonIgnore]
-    public string? RecognizedImageText => HasImage
-        ? ImageNotes.Find(Note, OcrInNote ? RecognizedText : null)?.Text ?? (OcrInNote ? "" : RecognizedText)
-        : null;
+    public string? RecognizedImageText => OcrInNote ? ImageNotes.Find(Note, RecognizedText)?.Text ?? "" : RecognizedText;
 
     [JsonIgnore]
     public string NoteWithoutImageOcr => (HasImage || OcrInNote) && ImageNotes.Find(Note, OcrInNote ? RecognizedText : null) is { } block
         ? Note.Remove(block.Start, block.End - block.Start).Trim() : Note;
 
-    public Clip WithImageRecognition(string result, DateTimeOffset recognizedAt)
+    public Clip WithImageRecognition(string result, DateTimeOffset recognizedAt, ImageOcrMode? mode = null)
     {
         string text = result.Trim();
+        if (text.Length > 32_000) text = text[..(char.IsHighSurrogate(text[31_999]) ? 31_999 : 32_000)];
         string note = OcrInNote ? NoteWithoutImageOcr : Note;
         if (text.Length > 0) note = ImageNotes.Append(note, ImageNotes.Wrap(text));
-        return this with { Note = note, RecognizedText = text, RecognizedAt = recognizedAt, OcrInNote = text.Length > 0, OcrPending = false };
+        return this with
+        {
+            Note = note, RecognizedText = text, RecognizedAt = recognizedAt, OcrInNote = text.Length > 0,
+            OcrPending = false, OcrMode = mode ?? OcrMode
+        };
     }
 
     public Clip WithNoteEdit(Clip opened, string editedNote)

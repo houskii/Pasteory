@@ -158,7 +158,7 @@ public partial class App : Application
         };
         maintenance.Start();
         StartWebCache();
-        _ = RecognizePendingImagesAsync();
+        ResumePendingImageOcr();
         aiTimer.Tick += (_, _) => AiTick();
         aiTimer.Start();
         _ = ChromeBridge.ReceiveAsync(dataDirectory, ChromeEventAsync, lifetime.Token);
@@ -315,7 +315,8 @@ public partial class App : Application
                     sourceContext = new(clip.CapturedAt, clip.Source);
                     chatWindow = 0;
                 }
-                clip = clip with { Captures = [sourceContext], OcrPending = item.Image is not null && Settings.RecognizeImages };
+                bool requestOcr = item.Image is not null && Settings.RecognizeImages;
+                clip = clip with { Captures = [sourceContext], OcrPending = requestOcr, OcrMode = requestOcr ? Settings.OcrMode : null };
                 if (clip.Kind == ClipKind.Link) clip = clip with { LinkDetails = LinkFallback(clip) };
                 Clip? saved = null;
                 ChangeHistory(() =>
@@ -326,7 +327,7 @@ public partial class App : Application
                 if (saved is not null)
                 {
                     _ = EnrichLinkAsync(saved);
-                    if (saved.OcrPending) _ = RecognizePendingImagesAsync();
+                    if (saved.Id == clip.Id) EnqueueImageOcr(saved);
                     if (chatWindow != 0) _ = EnrichChatAsync(saved.Id, sourceContext, chatWindow);
                 }
             }
@@ -517,7 +518,7 @@ public partial class App : Application
         bool themeChanged = Settings.Theme != next.Theme || Settings.Appearance != next.Appearance;
         bool linkRulesChanged = !Settings.LinkFallbacks.SequenceEqual(next.LinkFallbacks);
         bool enableWebCacheCleanup = !Settings.AutomaticWebCacheCleanup && next.AutomaticWebCacheCleanup;
-        bool enableImageOcr = !Settings.RecognizeImages && next.RecognizeImages;
+        bool imageOcrToggled = Settings.RecognizeImages != next.RecognizeImages;
         bool linkRefreshChanged = Settings.ResolveLinks != next.ResolveLinks;
         bool aiScopeChanged = Settings.Ai.Enabled != next.Ai.Enabled || Settings.Ai.ShareNotes != next.Ai.ShareNotes ||
             Settings.Ai.ShareOcr != next.Ai.ShareOcr || Settings.Ai.ShareSource != next.Ai.ShareSource ||
@@ -538,7 +539,12 @@ public partial class App : Application
         Settings = next;
         if (!next.AllowsSourceContext("chrome")) chromeSelections.Clear();
         if (enableWebCacheCleanup) ScheduleWebCacheCheck();
-        if (enableImageOcr) _ = RecognizePendingImagesAsync();
+        if (imageOcrToggled)
+        {
+            if (next.RecognizeImages) ResumePendingImageOcr();
+            else StopImageOcr();
+            settingsWindow?.RefreshImageOcrStatus();
+        }
         if (linkRefreshChanged)
         {
             settingsWindow?.UpdateLinkSessionRows();
