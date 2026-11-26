@@ -126,6 +126,7 @@ public partial class App : Application
         if (AutomationWindow) window.ShowInTaskbar = true;
         MainWindow = window;
         SystemEvents.UserPreferenceChanged += OnSystemPreferenceChanged;
+        SystemEvents.PowerModeChanged += OnAiPowerModeChanged;
         CreateTray();
         messages = new HwndSource(new HwndSourceParameters("Pasteory clipboard messages") { ParentWindow = new nint(-3) });
         messages.AddHook(ReceiveMessage);
@@ -291,15 +292,34 @@ public partial class App : Application
         _ = ShowAfterCaptureAsync();
     }
 
-    internal async Task UseClipAsync(Clip clip, bool paste, bool plainText)
+    internal async Task UseClipAsync(Clip clip, bool paste, bool plainText, ClipboardItem? original = null)
     {
         if (pasting || clip.Kind == ClipKind.Aggregate || clip.TrashedAt is not null) return;
         if (plainText && string.IsNullOrEmpty(clip.PlainText)) return;
         uint writtenSequence;
         try
         {
-            byte[]? image = clip.HasImage && !plainText ? history.ReadImage(clip) : null;
-            Clipboard.SetDataObject(ClipboardFormats.Create(clip, plainText, image), copy: true);
+            DataObject data;
+            if (original is null)
+            {
+                byte[]? image = clip.HasImage && !plainText ? history.ReadImage(clip) : null;
+                data = ClipboardFormats.Create(clip, plainText, image);
+            }
+            else
+            {
+                var item = MacClipboardFormats.Project(original, history.ReadRepresentation, includeImage: !plainText);
+                if (item.IsEmpty)
+                {
+                    Notify("This clipboard format could not be opened on Windows.");
+                    return;
+                }
+                data = ClipboardFormats.Create(clip with
+                {
+                    Text = item.Text, Html = item.Html, Rtf = item.Rtf, Files = item.Files,
+                    ImageFormat = item.Image?.Format ?? ClipImageFormat.Png
+                }, plainText, item.Image?.Bytes);
+            }
+            Clipboard.SetDataObject(data, copy: true);
             writtenSequence = NativeMethods.GetClipboardSequenceNumber();
             if (!NativeMethods.OwnsClipboard())
             {
@@ -313,7 +333,7 @@ public partial class App : Application
             Notify("The clipboard is busy. Try again.");
             return;
         }
-        catch (Exception error) when (IsLocalError(error) || error is ArgumentException or NotSupportedException)
+        catch (Exception error) when (IsLocalError(error) || error is ArgumentException or NotSupportedException or InvalidDataException)
         {
             Notify(clip.HasImage ? "The saved image could not be opened." : error.Message);
             return;
@@ -369,7 +389,10 @@ public partial class App : Application
     {
         try
         {
+            var previous = history.Clips;
             change();
+            try { Ai?.ObserveClips(Settings.Ai, previous, history.Clips); }
+            catch (Exception error) when (AiTasks.Expected(error)) { Notify(error.Message); }
             if (window.IsVisible) window.Refresh();
             if (settingsWindow?.IsVisible == true) settingsWindow.RefreshLibrary();
             return true;
@@ -482,6 +505,7 @@ public partial class App : Application
         aiTimer.Stop();
         lifetime.Cancel();
         SystemEvents.UserPreferenceChanged -= OnSystemPreferenceChanged;
+        SystemEvents.PowerModeChanged -= OnAiPowerModeChanged;
         openRegistration?.Unregister(null);
         openRequest?.Dispose();
         if (messages is not null)

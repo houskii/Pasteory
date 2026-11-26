@@ -57,7 +57,20 @@ public partial class App
     internal void ExportBackup(string path)
     {
         try { history.ExportBackup(path); Notify("Backup exported."); }
-        catch (Exception error) when (IsLocalError(error)) { Notify(error.Message); }
+        catch (Exception error) when (IsLocalError(error) || error is InvalidDataException) { Notify(error.Message); }
+    }
+    internal void ExportMacBackup(string parent)
+    {
+        string name = $"Pasteory-{DateTime.Now:yyyy-MM-dd-HHmmss}";
+        string target = Path.Combine(parent, name + ".pasteorybackup");
+        for (int suffix = 2; Directory.Exists(target) || File.Exists(target); suffix++)
+            target = Path.Combine(parent, $"{name}-{suffix}.pasteorybackup");
+        try
+        {
+            new MacBackupWriter(history, Ai, Settings.LinkFallbacks).Export(target);
+            Notify(Labels.Format("Mac backup exported to {0}.", target));
+        }
+        catch (Exception error) when (AiTasks.Expected(error)) { Notify(error.Message); }
     }
     internal void ImportBackup(string path)
     {
@@ -73,14 +86,16 @@ public partial class App
     {
         try
         {
-            (int Count, LinkFallbackRule[] Fallbacks) result = (0, []);
+            (int Count, LinkFallbackRule[] Fallbacks, MacBackupAiArchive Ai) result = (0, [], MacBackupAiArchive.Empty);
             if (!ChangeHistory(() => result = new MacBackupReader(path).Import(history))) return;
+            Ai.ImportArchive(result.Ai);
             if (result.Fallbacks.Length > 0)
-                SaveSettings(Settings with { LinkFallbacks = Settings.LinkFallbacks.Concat(result.Fallbacks).Distinct().ToArray() });
+                SaveSettings(Settings with { LinkFallbacks = Settings.LinkFallbacks.Concat(result.Fallbacks)
+                    .DistinctBy(rule => (rule.Route?.Id, rule.Pattern, rule.Title)).ToArray() });
             Notify(Labels.Format("Imported {0} clips.", result.Count));
         }
-        catch (Exception error) when (error is InvalidDataException or System.Text.Json.JsonException or FormatException or
-            InvalidOperationException or NotSupportedException or System.Runtime.InteropServices.COMException)
+        catch (Exception error) when (AiTasks.Expected(error) || error is FormatException or
+            NotSupportedException or System.Runtime.InteropServices.COMException)
         { Notify(error.Message); }
     }
     internal void RemoveMember(Guid parent, Guid child)

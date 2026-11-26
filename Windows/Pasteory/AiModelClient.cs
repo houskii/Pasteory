@@ -155,6 +155,7 @@ internal static class AiFile
     {
         WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
+    internal static readonly JsonSerializerOptions Wire = new(Json) { WriteIndented = false };
     internal static T? Load<T>(string file) where T : class
     {
         if (!File.Exists(file)) return null;

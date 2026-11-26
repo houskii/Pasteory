@@ -67,15 +67,22 @@ internal sealed partial class SettingsWindow
         foreach (var rule in app.Settings.LinkFallbacks)
         {
             var actions = new WrapPanel();
-            AddAction(actions, "Edit", () => EditFallback(rule));
+            AddAction(actions, "Edit", () =>
+            {
+                if (rule.Route is not null) EditRouteFallback(rule);
+                else EditFallback(rule);
+            });
             actions.Children.Add(Ui.IconButton(Glyph.Close, "Remove fallback rule", () =>
             {
                 if (app.SaveSettings(app.Settings with { LinkFallbacks = app.Settings.LinkFallbacks.Where(item => item != rule).ToArray() }))
                     Select(SettingsPage.Links, rebuild: true);
             }));
-            fallbacks.Children.Add(Row(rule.Title, actions, rule.Pattern));
+            fallbacks.Children.Add(Row(rule.Route is { Name.Length: > 0 } route ? route.Name : rule.Title, actions, rule.Pattern));
         }
-        fallbacks.Children.Add(Row("When no useful title is found", Ui.Button("Add fallback rule…", () => EditFallback(null))));
+        var addFallback = new WrapPanel();
+        AddAction(addFallback, "Add fallback rule…", () => EditRouteFallback(null));
+        AddAction(addFallback, "Add regular expression…", () => EditFallback(null));
+        fallbacks.Children.Add(Row("When no useful title is found", addFallback));
 
         var resolved = app.Clips.Where(clip => clip.TrashedAt is null && clip.Kind == ClipKind.Link &&
             clip.LinkDetails is { LastResolvedAt: not null, Title: not null })
@@ -219,6 +226,49 @@ internal sealed partial class SettingsWindow
             return true;
         }, close);
     }, 480, 330);
+
+    private void EditRouteFallback(LinkFallbackRule? rule) => LibraryEditors.ShowModal(this, "Fallback rules", close =>
+    {
+        var form = new StackPanel();
+        var route = rule?.Route;
+        var name = Ui.Field("Rule name", route?.Name ?? "", 100);
+        var host = Ui.Field("Host pattern", route?.Host ?? "", 253);
+        var path = Ui.Field("Path template", route?.Path ?? "/", 300);
+        var query = Ui.Field("Required query keys", string.Join(", ", route?.RequiredQueryKeys ?? []), 260);
+        var title = Ui.Field("Title format", rule?.Title ?? "", 220);
+        Ui.AddField(form, "Rule name", name);
+        Ui.AddField(form, "Host pattern", host);
+        Ui.AddField(form, "Path template", path);
+        Ui.AddField(form, "Required query keys", query);
+        Ui.AddField(form, "Title format", title);
+        var enabled = new CheckBox { Content = Labels.Get("Enabled"), IsChecked = route?.Enabled != false,
+            Margin = new Thickness(0, 6, 0, 0) };
+        form.Children.Add(enabled);
+        var help = Ui.Text(Labels.Get("Use {id} in a path and {{path.id}} in the title."), 11, "Muted");
+        help.Margin = new Thickness(0, 8, 0, 0);
+        form.Children.Add(help);
+        return LibraryEditors.Wrap(rule is null ? "Add fallback rule…" : "Edit fallback rule", form, name, () =>
+        {
+            string matchHost = host.Text.Trim().ToLowerInvariant();
+            string apex = matchHost.StartsWith("*.", StringComparison.Ordinal) ? matchHost[2..] : matchHost;
+            string matchPath = path.Text.Trim();
+            if (name.Text.Trim().Length == 0 || Uri.CheckHostName(apex) == UriHostNameType.Unknown ||
+                !matchPath.StartsWith('/') || matchPath.Contains('?') || string.IsNullOrWhiteSpace(title.Text))
+            {
+                help.Text = Labels.Get("Enter a name, host, path and title.");
+                return false;
+            }
+            var keys = query.Text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct().ToArray();
+            var next = new LinkFallbackRule(matchHost + matchPath, title.Text.Trim(), new(route?.Id ?? Guid.NewGuid(),
+                name.Text.Trim(), matchHost, matchPath, keys, enabled.IsChecked == true, route?.Priority ?? 100));
+            var rules = app.Settings.LinkFallbacks.ToList();
+            int index = rule is null ? -1 : rules.IndexOf(rule);
+            if (index < 0) rules.Add(next); else rules[index] = next;
+            if (!app.SaveSettings(app.Settings with { LinkFallbacks = rules.ToArray() })) return false;
+            Select(SettingsPage.Links, rebuild: true);
+            return true;
+        }, close);
+    }, 500, 530);
 
     private static string NormalizePattern(string raw) => Regex.Replace(raw.Trim(), @"^\^?https?://", "^", RegexOptions.IgnoreCase);
 

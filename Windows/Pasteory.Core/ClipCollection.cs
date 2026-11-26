@@ -1,7 +1,8 @@
 namespace Pasteory.Core;
 
 public sealed record ClipCollection(Guid Id, string Name, SmartRules? Rules = null, bool IsAi = false,
-    string Overview = "", bool Locked = false, Guid[]? ExcludedClips = null, bool PackPayloads = false)
+    string Overview = "", bool Locked = false, Guid[]? ExcludedClips = null, bool PackPayloads = false,
+    string Definition = "", Guid[]? OverviewClips = null)
 {
     public bool IsSmart => Rules is not null;
 }

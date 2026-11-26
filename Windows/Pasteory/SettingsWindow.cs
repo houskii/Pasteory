@@ -83,6 +83,11 @@ internal sealed partial class SettingsWindow : Window
 
     internal void Present(SettingsPage? requested)
     {
+        if (requested is null && IsActive)
+        {
+            Activate();
+            return;
+        }
         var next = requested ?? (Enum.TryParse(app.Settings.LastSettingsPage, out SettingsPage page) ? page : SettingsPage.General);
         bool storyEnabled = app.Settings.Ai.Enabled && app.Settings.Ai.Story;
         bool newOpening = !IsVisible || !IsActive;

@@ -81,8 +81,14 @@ internal static partial class LinkTitles
 
         // Match captures against the redacted query so a title template cannot display a query credential.
         var safeUrl = new Uri(DisplayUrl(url));
-        foreach (var rule in rules)
+        foreach (var rule in rules.OrderByDescending(rule => rule.Route?.Priority ?? 100))
         {
+            if (rule.Route is { } routeRule)
+            {
+                string? routedTitle = MatchRoute(routeRule, rule.Title, url.IdnHost, segments, query);
+                if (routedTitle is not null) return (routedTitle, "User fallback", route);
+                continue;
+            }
             var match = LinkResolver.MatchRule(rule.Pattern, safeUrl);
             string? title = null;
             try { if (match is not null) title = LinkResolver.NormalizeTitle(match.Result(rule.Title)); }
@@ -94,6 +100,31 @@ internal static partial class LinkTitles
         string? last = segments.LastOrDefault();
         return (last is null ? host : host + " · " + ClipCard.Short(last, 48, 1), "URL fallback", route);
     }
+
+    private static string? MatchRoute(LinkFallbackRoute rule, string title, string host, string[] segments,
+        Dictionary<string, string> query)
+    {
+        if (!rule.Enabled || rule.RequiredQueryKeys.Any(key => !query.ContainsKey(key))) return null;
+        bool wildcard = rule.Host.StartsWith("*.", StringComparison.Ordinal);
+        string apex = wildcard ? rule.Host[2..] : rule.Host;
+        if (!host.Equals(apex, StringComparison.OrdinalIgnoreCase) &&
+            (!wildcard || !host.EndsWith("." + apex, StringComparison.OrdinalIgnoreCase))) return null;
+        string[] path = rule.Path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (path.Length != segments.Length) return null;
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        for (int index = 0; index < path.Length; index++)
+        {
+            if (path[index] is ['{', .., '}']) values["path." + path[index][1..^1]] = segments[index];
+            else if (!path[index].Equals(segments[index], StringComparison.Ordinal)) return null;
+        }
+        foreach (var entry in query)
+            values["query." + entry.Key] = SensitiveName(entry.Key) ? "••••" : entry.Value;
+        values["host"] = host;
+        return LinkResolver.NormalizeTitle(RouteVariable().Replace(title, match => values.GetValueOrDefault(match.Groups[1].Value, "")));
+    }
+
+    [GeneratedRegex(@"\{\{\s*([A-Za-z0-9_.-]+)\s*\}\}", RegexOptions.CultureInvariant)]
+    private static partial Regex RouteVariable();
 
     private static string? Match(Rule rule, Uri url, string[] segments, Dictionary<string, string> query)
     {

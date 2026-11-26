@@ -105,15 +105,29 @@ internal static partial class Program
                 manifest[path] = Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();
             }
             Add("data/Archives/clip.lzfse", compressed);
+            var alternate = Encoding.UTF8.GetBytes("Second Mac clipboard item");
+            var opaque = new byte[] { 0, 128, 255, 7 };
+            Guid firstItem = Guid.NewGuid(), secondItem = Guid.NewGuid();
             var clip = new
             {
                 id, createdAt = DateTimeOffset.UtcNow, updatedAt = DateTimeOffset.UtcNow, lastCopiedAt = DateTimeOffset.UtcNow,
                 primaryKind = "text", isArchived = true, source = new { appName = "Notes", confidence = "high" },
-                collectionIDs = new[] { group }, copyCount = 3, title = "Archived", note = "Kept",
-                items = new[] { new { order = 0, representations = new[] { new { uti = "public.utf8-plain-text", storage = new
+                collectionIDs = new[] { group }, copyCount = 3, title = "Archived", note = "Kept", aiAnalysisExcluded = true,
+                items = new[]
                 {
-                    type = "archived", relativePath = "clip.lzfse", checksum = Convert.ToHexString(SHA256.HashData(raw)), size = raw.Length
-                } } } } }
+                    new { id = firstItem, order = 0, representations = new object[]
+                    {
+                        new { uti = "public.utf8-plain-text", storage = new
+                        {
+                            type = "archived", relativePath = "clip.lzfse", checksum = Convert.ToHexString(SHA256.HashData(raw)), size = raw.Length
+                        } }
+                    } },
+                    new { id = secondItem, order = 1, representations = new object[]
+                    {
+                        new { uti = "public.utf8-plain-text", storage = new { type = "inline", data = alternate } },
+                        new { uti = "example.fixture.bin", storage = new { type = "inline", data = opaque } }
+                    } }
+                }
             };
             byte[] jpeg = SampleImage(new JpegBitmapEncoder());
             Guid pictureId = Guid.NewGuid(), referenceId = Guid.NewGuid();
@@ -145,13 +159,52 @@ internal static partial class Program
             var store = new HistoryStore(Path.Combine(root, "history"));
             Check(new MacBackupReader(backup).Import(store).Count == 3, "Import Mac v5 archived and inline items");
             var archived = store.Clips.Single(item => item.Id == id);
-            Check(archived.Text == text && archived.ArchivedAt is not null && archived.CollectionIds.SequenceEqual([group]) &&
-                archived.CopyCount == 3, "Import Mac v5 archive and its metadata");
+            Check(archived.Text == text + Environment.NewLine + Encoding.UTF8.GetString(alternate) &&
+                archived.ArchivedAt is not null && archived.CollectionIds.SequenceEqual([group]) && archived.ExcludeFromAi &&
+                archived.CopyCount == 3, "Import all Mac text items and retain the AI sharing opt-out");
+            var originalItems = archived.OriginalItems!;
+            Check(originalItems.Select(item => item.Id).SequenceEqual([firstItem, secondItem]) &&
+                store.ReadRepresentation(originalItems[1].Representations[1]).SequenceEqual(opaque) &&
+                MacClipboardFormats.Project(originalItems[1], store.ReadRepresentation, true).Text == Encoding.UTF8.GetString(alternate),
+                "Preserve original item order, supported copy formats and opaque bytes");
             var picture = store.Clips.Single(item => item.Id == pictureId);
             var reference = store.Clips.Single(item => item.Id == referenceId);
             Check(picture is { ImageFormat: ClipImageFormat.Jpeg, ImageWidth: 13, ImageHeight: 7 } &&
                 store.ReadImage(picture).SequenceEqual(jpeg) && reference.Kind == ClipKind.Files &&
                 !reference.HasImage && reference.Files.Length == 1, "Keep Mac image bytes and leave file references as files");
+            string zip = Path.Combine(root, "windows.zip");
+            store.ExportBackup(zip);
+            var restored = new HistoryStore(Path.Combine(root, "restored"));
+            Check(restored.ImportBackup(zip) == 3 && restored.ImportBackup(zip) == 0, "Windows restores multi-item backups idempotently");
+            var restoredClip = restored.Clips.Single(item => item.Id == id);
+            Check(restored.ReadRepresentation(restoredClip.OriginalItems![1].Representations[1]).SequenceEqual(opaque),
+                "Windows ZIP restoration retains opaque Mac clipboard data");
+
+            string exported = Path.Combine(root, "exported-for-mac");
+            var ai = new AiTasks(root);
+            Guid recapId = Guid.NewGuid();
+            ai.ImportArchive(new([], [new(recapId, DateTimeOffset.UtcNow, DateOnly.FromDateTime(DateTime.Now.AddDays(-7)),
+                DateOnly.FromDateTime(DateTime.Now), new("Saved Story", "A test recap", "Keep going", [], []), 3)],
+                [new(recapId, DateTimeOffset.UtcNow, "test model", "story", 100, 50, 5, 10, false)]));
+            var native = new Clip { Text = "Windows 备份", Html = ClipboardFormats.WindowsHtml("<b>Windows 备份</b>"), Source = "Notepad" };
+            Check(restored.Capture(native), "Add Windows clipboard content to the cross-platform backup");
+            var route = new LinkFallbackRule("*.example.com/issues/{id}", "Ticket {{path.id}} · {{query.view}}",
+                new(Guid.NewGuid(), "Ticket", "*.example.com", "/issues/{id}", ["view"]));
+            new MacBackupWriter(restored, ai, [route]).Export(exported);
+            var returned = new HistoryStore(Path.Combine(root, "returned"));
+            var exportedArchive = new MacBackupReader(exported).Import(returned);
+            Check(exportedArchive.Count == 4 && exportedArchive.Ai.Stories.Single().Id == recapId &&
+                exportedArchive.Ai.Usage.Single().Output == 50 &&
+                returned.Clips.Single(item => item.Id == native.Id).Html == native.Html,
+                "Reimport the Mac v5 export with Windows rich text, saved Story and usage");
+            var returnedClip = returned.Clips.Single(item => item.Id == id);
+            Check(returnedClip.ExcludeFromAi && returned.ReadRepresentation(returnedClip.OriginalItems![1].Representations[1]).SequenceEqual(opaque),
+                "Cross-platform backup round trips preserve per-clip AI privacy and exact clipboard bytes");
+            var ticket = new Clip { Kind = ClipKind.Link, Text = "https://test.example.com/issues/42?view=summary" };
+            Check(exportedArchive.Fallbacks.Single().Route?.Id == route.Route!.Id &&
+                LinkTitles.UpdateFallback(ticket, exportedArchive.Fallbacks)?.FallbackTitle == "Ticket 42 · summary",
+                "Restore Mac route rules and expand both path and query variables on Windows");
+
             File.AppendAllText(Path.Combine(backup, "clips.jsonl"), "\n");
             try
             {
@@ -189,6 +242,8 @@ internal static partial class Program
                 "Keep exact Story citations and discard unsupported observations");
             var reopened = new AiTasks(root);
             Check(reopened.Stories.Count == 1 && reopened.Usage.Count == 3, "Persist Story and usage across sessions");
+            Check(reopened.RecentHistory().Any(job => job.Status == "Discarded") &&
+                reopened.RecentHistory().Any(job => job.Status == "Complete"), "Reopen independent Story and organization history");
             Check(!AiModelClient.TryEndpoint("http://example.com/v1", out _) &&
                 AiTasks.Project(new Clip { Text = "-----BEGIN PRIVATE KEY-----" }, settings) is null,
                 "Filter visible credentials and reject unencrypted nonlocal APIs");
@@ -242,7 +297,51 @@ internal static partial class Program
         finally { Directory.Delete(root, recursive: true); }
     }
 
-    private sealed class MockAiResponses(Clip[] clips) : HttpMessageHandler
+    private static async Task CheckAiRecovery()
+    {
+        string root = Directory.CreateTempSubdirectory("Pasteory-AI-Recovery-").FullName;
+        try
+        {
+            var clips = Enumerable.Range(0, 25).Select(index => new Clip { Text = $"Synthetic clip {index} " +
+                (index == 3 ? new string('x', 62_000) + " complete ending" : "") }).ToArray();
+            var settings = new AiPreferences { Enabled = true, Model = "synthetic-model", TaskRounds = 1, RecentLimit = 2 };
+            using var transport = new HttpClient(new MockAiResponses(clips, wide: true));
+            var first = new AiTasks(root, new AiModelClient(transport));
+            first.Credentials.Set(settings.Endpoint, "only-a-test-value");
+            first.ObserveClips(settings, [], clips);
+            Check(first.DueIncremental(settings, clips, DateTimeOffset.UtcNow)?.Count == clips.Length,
+                "Queue all newly copied contents independently of the recent limit");
+            await first.AnalyzeAsync(settings, clips, [], false, "full", false, CancellationToken.None);
+            var paused = first.Job(false)!;
+            Check(paused is { Status: "Paused", Cursor: 25 } && paused.Error!.Contains("round limit"),
+                "Retain the staged classification when the round budget pauses a task");
+            string path = first.DirectoryFor(paused.Id);
+            Check(File.ReadAllText(Path.Combine(path, "items.json")).Contains(" complete ending") &&
+                File.Exists(Path.Combine(path, "plan.schema.json")) && File.Exists(Path.Combine(path, "agent-state.json")),
+                "Save complete text and restartable task files");
+
+            var reopened = new AiTasks(root, new AiModelClient(transport));
+            await reopened.ResumeAsync(settings with { Model = "replacement-model" },
+                clips, [], false, false, CancellationToken.None);
+            Check(reopened.Review?.Id == paused.Id && reopened.Review.Proposal.Groups.Single().Members.Length == 3 &&
+                reopened.Review.Proposal.Unassigned.Length == 22 &&
+                reopened.Usage.Any(call => call.Model == "replacement-model"),
+                "Resume the original task and its staged decisions under current model settings");
+            reopened.ClearReview(applied: true);
+            Check(new AiTasks(root).RecentHistory().Single().Status == "Applied" &&
+                File.ReadAllLines(Path.Combine(path, "execution.jsonl")).Length == 2,
+                "Preserve applied history and both model calls after restart");
+            Check(reopened.DueIncremental(settings, clips, DateTimeOffset.UtcNow) is null,
+                "Remove analyzed versions from the new-content queue");
+            var changed = clips.Select((clip, index) => index == 0 ? clip with { Text = "Updated synthetic content" } : clip).ToArray();
+            await reopened.AnalyzeAsync(settings with { NightlyTokens = 1000 }, changed, [], false, "idle", false, CancellationToken.None);
+            Check(reopened.Job(false)?.Error == "Nightly token budget reached." && reopened.Usage.Count == 2,
+                "Enforce a separate nightly budget before a model request");
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    private sealed class MockAiResponses(Clip[] clips, bool wide = false) : HttpMessageHandler
     {
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -258,31 +357,36 @@ internal static partial class Program
                 string args = messages[1].GetProperty("content").GetString()!;
                 JsonElement input = JsonSerializer.Deserialize<JsonElement>(args);
                 bool story = input.GetProperty("task").GetString() == "story";
-                if (!story && messages.GetArrayLength() == 2)
+                Guid taskId = input.GetProperty("taskId").GetGuid();
+                var replies = messages.EnumerateArray().Where(message => message.GetProperty("role").GetString() == "tool").ToArray();
+                var assignments = clips.Select((_, index) => new AiAssignment(AiTaskWorkspace.ItemKey(index),
+                    index < 3 ? ["topic"] : [], index < 3 ? null : "Unrelated")).ToArray();
+                if (!story && replies.Length == 0)
                 {
-                    Check(sent.RootElement.GetProperty("tools").GetArrayLength() == 2, "Expose only bounded reading tools");
+                    Check(sent.RootElement.GetProperty("tools").GetArrayLength() == 4, "Expose only scoped reading and staging tools");
+                    var tools = wide ? new[]
+                    {
+                        Tool("call_page", "clips_list", new { offset = 16, limit = 6 }),
+                        Tool("call_stage", "stage_assignments", new { assignments })
+                    } : [Tool("call_test", "clips_get", new { id = clips[0].Id, offset = 0, maxChars = 40 })];
                     json = JsonSerializer.Serialize(new
                     {
                         choices = new[] { new { message = new
                         {
-                            content = (string?)null, tool_calls = new[] { new
-                            {
-                                id = "call_test", type = "function", function = new
-                                {
-                                    name = "clips_get", arguments = JsonSerializer.Serialize(new { id = clips[0].Id, offset = 0, maxChars = 40 })
-                                }
-                            } }
+                            content = (string?)null, tool_calls = tools
                         } } },
                         usage = new { prompt_tokens = 100, completion_tokens = 40 }
                     });
                     return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
                 }
-                if (!story) Check(messages[messages.GetArrayLength() - 1].GetProperty("content").GetString()!.Contains("alpha task"),
-                    "Return only the requested clipboard excerpt");
-                string response = story ? JsonSerializer.Serialize(new StoryDraft("Weekly story", "Three sample tasks", "Keep going",
-                        [new("Alpha", "First task", [new(clips[0].Id, "alpha task")])],
-                        [new("Unsupported", "Missing evidence", [new(clips[0].Id, "invented text")])]), AiFile.Json)
-                    : JsonSerializer.Serialize(new AiProposal([new("Test project", "Fictional clips", clips.Select(clip => clip.Id).ToArray())], []),
+                if (!story) Check(replies[0].GetProperty("content").GetString()!.Contains(wide ? "\"i17\"" : "alpha task"),
+                    "Retain the requested clipboard page as part of the task conversation");
+                string response = story ? JsonSerializer.Serialize(new AiStoryResult(taskId,
+                        new StoryDraft("Weekly story", "Three sample tasks", "Keep going",
+                            [new("Alpha", "First task", [new(clips[0].Id, "alpha task")])],
+                            [new("Unsupported", "Missing evidence", [new(clips[0].Id, "invented text")])])), AiFile.Json)
+                    : JsonSerializer.Serialize(new AiOrganizationResult(taskId,
+                        [new("topic", "Test project", "Fictional clips", null, "Test summary", ["i1"])], wide ? [] : assignments),
                         AiFile.Json);
                 json = JsonSerializer.Serialize(new
                 {
@@ -292,6 +396,11 @@ internal static partial class Program
             }
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
         }
+
+        private static object Tool(string id, string name, object args) => new
+        {
+            id, type = "function", function = new { name, arguments = JsonSerializer.Serialize(args) }
+        };
     }
 
     private static void CheckUpdateSignature()

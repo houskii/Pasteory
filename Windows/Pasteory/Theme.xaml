@@ -248,6 +248,52 @@
         <Setter Property="Padding" Value="14,6"/>
         <Setter Property="Margin" Value="0,0,0,8"/>
     </Style>
+    <Style x:Key="SettingsSegmentedTabs" TargetType="TabControl">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TabControl">
+                    <DockPanel>
+                        <Border DockPanel.Dock="Top" HorizontalAlignment="Left" Padding="3"
+                                CornerRadius="9" Background="{DynamicResource SoftSurface}">
+                            <UniformGrid Rows="1" IsItemsHost="True" KeyboardNavigation.TabNavigation="Once"/>
+                        </Border>
+                        <ContentPresenter x:Name="PART_SelectedContentHost" ContentSource="SelectedContent"/>
+                    </DockPanel>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Setter Property="ItemContainerStyle">
+            <Setter.Value>
+                <Style TargetType="TabItem">
+                    <Setter Property="Foreground" Value="{DynamicResource Muted}"/>
+                    <Setter Property="FontSize" Value="13"/>
+                    <Setter Property="Padding" Value="12,5"/>
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="TabItem">
+                                <Border x:Name="Segment" Margin="1,0" Padding="{TemplateBinding Padding}" CornerRadius="7"
+                                        BorderBrush="Transparent" BorderThickness="1" Background="Transparent">
+                                    <ContentPresenter ContentSource="Header" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsSelected" Value="True">
+                                        <Setter TargetName="Segment" Property="Background" Value="{DynamicResource Surface}"/>
+                                        <Setter TargetName="Segment" Property="BorderBrush" Value="{DynamicResource Line}"/>
+                                        <Setter Property="Foreground" Value="{DynamicResource Ink}"/>
+                                        <Setter Property="FontWeight" Value="SemiBold"/>
+                                    </Trigger>
+                                    <Trigger Property="IsKeyboardFocused" Value="True">
+                                        <Setter TargetName="Segment" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <Style x:Key="TabList" TargetType="ListBox">
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="BorderThickness" Value="0"/>

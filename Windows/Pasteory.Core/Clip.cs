@@ -6,6 +6,10 @@ namespace Pasteory.Core;
 public enum ClipKind { Text, Link, Image, Files, Color, Code, Mixed, Aggregate }
 public enum ClipImageFormat { Png, Jpeg, Tiff, Gif, Bmp, WebP, Heif, Avif }
 
+public sealed record ClipboardRepresentation(Guid Id, string Uti, string Hash, int Size);
+public sealed record ClipboardItem(Guid Id, int Order, ClipboardRepresentation[] Representations);
+public sealed record MacClipboardIdentity(string Kind, string[] SecondaryKinds, string? ContentHash, string? IdentityKey);
+
 public sealed record CaptureEvent(DateTimeOffset CapturedAt, string Source, string? Context = null, string? Url = null,
     Dictionary<string, string>? Details = null);
 public sealed record ConversionRecord(TextTool Tool, string Original, string Source);
@@ -60,6 +64,14 @@ public sealed record Clip
     public bool ExcludeFromAi { get; init; }
     public bool IsManual { get; init; }
     public ClipUse[] Uses { get; init; } = [];
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ClipboardItem[]? OriginalItems { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public MacClipboardIdentity? OriginalMacIdentity { get; init; }
+
+    [JsonIgnore]
+    public IEnumerable<ClipboardRepresentation> OriginalRepresentations =>
+        (OriginalItems ?? []).SelectMany(item => item.Representations);
 
     [JsonIgnore]
     public string? PlainText => Text ?? (Files.Length > 0 ? string.Join(Environment.NewLine, Files) : null);
@@ -84,6 +96,12 @@ public sealed record Clip
     internal bool SameContent(Clip other)
     {
         if (Kind != other.Kind || Kind == ClipKind.Aggregate) return false;
+        if (OriginalItems is not null || other.OriginalItems is not null)
+            return OriginalItems is not null && other.OriginalItems is not null &&
+                OriginalItems.OrderBy(item => item.Order).SelectMany(item => item.Representations
+                    .Select(rep => (item.Order, rep.Uti, rep.Hash)))
+                .SequenceEqual(other.OriginalItems.OrderBy(item => item.Order).SelectMany(item => item.Representations
+                    .Select(rep => (item.Order, rep.Uti, rep.Hash))));
         return Kind switch
         {
             ClipKind.Link when LinkKey(Text) is { } link => link == LinkKey(other.Text),
@@ -102,7 +120,7 @@ public sealed record Clip
 
     private bool SamePaths(Clip other) => Files.SequenceEqual(other.Files, StringComparer.OrdinalIgnoreCase);
 
-    internal long Size => IndexSize + ImageSize;
+    internal long Size => IndexSize + ImageSize + OriginalRepresentations.DistinctBy(rep => rep.Hash).Sum(rep => (long)rep.Size);
 
     internal long IndexSize => 256L + Encoding.UTF8.GetByteCount(Title) + Encoding.UTF8.GetByteCount(Note) +
         Encoding.UTF8.GetByteCount(Group) + Encoding.UTF8.GetByteCount(Source) + Bytes(Text) + Bytes(Html) + Bytes(Rtf) +

@@ -122,7 +122,15 @@ internal sealed partial class SettingsWindow
             }
         }));
         backup.Children.Add(Row("Windows backup", controls));
-        backup.Children.Add(Row("Mac backup", Ui.Button("Import Mac backup…", () =>
+        var mac = new WrapPanel();
+        var exportForMac = Ui.Button("Export Mac backup…", () =>
+        {
+            var dialog = new OpenFolderDialog { Title = Labels.Get("Choose a folder for the backup.") };
+            if (dialog.ShowDialog(this) == true) app.ExportMacBackup(dialog.FolderName);
+        });
+        exportForMac.Margin = new Thickness(0, 0, 6, 0);
+        mac.Children.Add(exportForMac);
+        mac.Children.Add(Ui.Button("Import Mac backup…", () =>
         {
             var dialog = new OpenFolderDialog { Title = Labels.Get("Import Mac backup…") };
             if (dialog.ShowDialog(this) == true)
@@ -130,7 +138,8 @@ internal sealed partial class SettingsWindow
                 app.ImportMacBackup(dialog.FolderName);
                 Select(SettingsPage.Storage, rebuild: true);
             }
-        })));
+        }));
+        backup.Children.Add(Row("Mac backup", mac));
     }
 
     private void BuildWebCache(Panel layout, Func<Task> refreshStorage)
@@ -346,7 +355,7 @@ internal sealed partial class SettingsWindow
             string category = location[0].ToLowerInvariant() switch
             {
                 HistoryStore.CatalogFileName or HistoryStore.CatalogFileName + "-wal" or HistoryStore.CatalogFileName + "-shm" => "Database",
-                "history.json" or "backups" => "Backup", "images" => "Images & attachments", "archives" => "Archive",
+                "history.json" or "backups" => "Backup", "images" or "representations" => "Images & attachments", "archives" => "Archive",
                 "logs" => "File command logs", "aitasks" => "AI task history", "web-sessions" => "WebView2 site data", _ => "Other"
             };
             space[category] += LocalStorage.AllocatedBytes(path);

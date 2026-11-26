@@ -118,6 +118,8 @@ public sealed partial class HistoryStore
     {
         if (clip.HasImage) yield return ImagePath(clip);
         if (packed is not null) yield return ArchivePath(packed.Hash);
+        foreach (var rep in clip.OriginalRepresentations.DistinctBy(rep => rep.Hash))
+            yield return RepresentationPath(rep);
     }
 
     private static long Utf8Bytes(string? value) => value is null ? 0 : Encoding.UTF8.GetByteCount(value);

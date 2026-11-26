@@ -118,7 +118,8 @@ internal static class LibraryEditors
         return Wrap(existing is null ? "Aggregate clips" : "Edit aggregation", form, title, Save, close);
     }
 
-    internal static EditorView Wrap(string heading, FrameworkElement body, IInputElement focus, Func<bool> save, Action close)
+    internal static EditorView Wrap(string heading, FrameworkElement body, IInputElement focus, Func<bool> save, Action close,
+        string submitLabel = "Save")
     {
         var layout = new DockPanel { Margin = new Thickness(14) };
         KeyboardNavigation.SetTabNavigation(layout, KeyboardNavigationMode.Cycle);
@@ -132,7 +133,7 @@ internal static class LibraryEditors
         cancel.Margin = new Thickness(0, 0, 7, 0);
         buttons.Children.Add(cancel);
         void Submit() { if (save()) close(); }
-        buttons.Children.Add(Ui.Button("Save", Submit, "PrimaryButton"));
+        buttons.Children.Add(Ui.Button(submitLabel, Submit, "PrimaryButton"));
         DockPanel.SetDock(buttons, Dock.Bottom);
         layout.Children.Add(buttons);
         layout.Children.Add(new ScrollViewer { Content = body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });

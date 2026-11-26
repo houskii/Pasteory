@@ -76,6 +76,7 @@ public partial class LibraryPage : UserControl
         var collection = app.Collections.FirstOrDefault(group => group.Id == groupId);
         var refresh = results.Refresh(Search.Text, reset, scope, kind, collection, select, focusChildren);
         Heading.Text = selected.Name;
+        RefreshThemeOverview(collection);
         Subtitle.Text = Search.Text.Trim().Length > 0 ? Labels.Format("Searching in {0}", selected.Name) :
             Labels.Get(scope switch
             {
@@ -102,6 +103,58 @@ public partial class LibraryPage : UserControl
         UpdateActions();
         return true;
     }
+
+    private ClipCollection? shownTheme;
+
+    private void RefreshThemeOverview(ClipCollection? collection)
+    {
+        var theme = collection is { IsAi: true } ? collection : null;
+        if (theme is not null && ReferenceEquals(shownTheme, theme)) return;
+        if (shownTheme?.Id != theme?.Id) ThemeOverview.IsExpanded = false;
+        shownTheme = theme;
+        ThemeOverviewBody.Children.Clear();
+        ThemeOverview.Visibility = theme is null ? Visibility.Collapsed : Visibility.Visible;
+        if (theme is null) return;
+        if (theme.Definition.Length > 0)
+        {
+            ThemeOverviewBody.Children.Add(Ui.SectionTitle("Theme definition"));
+            ThemeOverviewBody.Children.Add(Ui.Text(theme.Definition, 12));
+        }
+        if (theme.Overview.Length > 0)
+        {
+            ThemeOverviewBody.Children.Add(Ui.Text(theme.Overview, 12, "Muted"));
+            if (theme.OverviewClips is { Length: > 0 } sources)
+            {
+                var names = new WrapPanel { Margin = new Thickness(0, 5, 0, 0) };
+                foreach (Guid id in sources.Take(8))
+                {
+                    var action = Ui.Button("View source clip", () =>
+                    {
+                        if (app.Clips.FirstOrDefault(item => item.Id == id && item.TrashedAt is null) is { } clip) Reveal(clip);
+                    });
+                    action.Margin = new Thickness(0, 3, 5, 3);
+                    names.Children.Add(action);
+                }
+                ThemeOverviewBody.Children.Add(names);
+            }
+        }
+        var edit = Ui.Button("Edit theme definition", () => ShowThemeDefinitionEditor(theme));
+        edit.HorizontalAlignment = HorizontalAlignment.Left;
+        edit.Margin = new Thickness(0, 6, 0, 0);
+        ThemeOverviewBody.Children.Add(edit);
+    }
+
+    private void ShowThemeDefinitionEditor(ClipCollection group) => LibraryEditors.ShowModal(Owner, "Edit theme definition", close =>
+    {
+        var body = new StackPanel();
+        var value = Ui.Field("Theme definition", group.Definition, 2000);
+        value.AcceptsReturn = true;
+        value.MinHeight = 130;
+        value.TextWrapping = TextWrapping.Wrap;
+        value.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+        Ui.AddField(body, "Theme definition", value);
+        return LibraryEditors.Wrap("Edit theme definition", body, value, () => app.EditAiGroupDefinition(group, value.Text), close);
+    }, 520, 350);
 
     private void BuildNav()
     {
@@ -140,6 +193,8 @@ public partial class LibraryPage : UserControl
         });
         if (group.IsAi)
         {
+            ClipMenus.Add(button.ContextMenu, "Edit theme definition", () => ShowThemeDefinitionEditor(group));
+            ClipMenus.Add(button.ContextMenu, "Review existing theme", async () => await app.ReviewThemeAsync(group));
             ClipMenus.Add(button.ContextMenu, group.Locked ? "Unlock AI group" : "Lock AI group", () => app.ToggleAiGroupLock(group));
             ClipMenus.Add(button.ContextMenu, group.PackPayloads ? "Unpack saved content" : "Compress saved content", () => app.ToggleAiCompression(group));
         }

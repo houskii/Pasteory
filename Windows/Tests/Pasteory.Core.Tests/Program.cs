@@ -193,6 +193,27 @@ static void CheckLibrary(string root)
     withUndo.UndoAiTopics();
     Check(!withUndo.Collections.Any(group => group.IsAi) && withUndo.Clips.Single(clip => clip.Id == text.Id).Note == "Keep this later note",
         "Undo reviewed organization after restart preserves unrelated edits");
+    var members = new[] { text.Id, docs.Id, image.Id };
+    Check(withUndo.ApplyAiTopics([
+        new("First theme", "First overview", members, Definition: "Definition one", OverviewSources: [text.Id]),
+        new("Second theme", "Second overview", members, Definition: "Definition two", OverviewSources: [docs.Id])]) == 3,
+        "Apply overlapping memberships and overview evidence transactionally");
+    var overlap = new HistoryStore(folder);
+    Check(overlap.Clips.Single(clip => clip.Id == text.Id).CollectionIds.Count(group =>
+        overlap.Collections.Any(item => item.Id == group && item.IsAi)) == 2, "Restore overlapping memberships from the catalog");
+    var firstTheme = overlap.Collections.Single(group => group.Name == "First theme");
+    overlap.ApplyAiTopics([new("First theme", "Updated overview", [text.Id], firstTheme.Id, OverviewSources: [text.Id])]);
+    Check(overlap.Collections.Single(group => group.Id == firstTheme.Id).Overview == "Updated overview", "Update a theme overview by stable ID");
+    new HistoryStore(folder).UndoAiTopics();
+    var editedThemeStore = new HistoryStore(folder);
+    Check(editedThemeStore.Collections.Single(group => group.Id == firstTheme.Id).Overview == "First overview",
+        "Undo an overview update after reopening the catalog");
+    editedThemeStore.SetAiGroupDefinition(firstTheme.Id, "Updated manual definition");
+    editedThemeStore.ApplyAiTopics([new("First theme", "Stale proposed overview", [docs.Id], firstTheme.Id,
+        OverviewSources: [docs.Id], ExpectedDefinition: firstTheme.Definition)]);
+    var editedTheme = new HistoryStore(folder).Collections.Single(group => group.Id == firstTheme.Id);
+    Check(editedTheme.Definition == "Updated manual definition" && editedTheme.Overview == "First overview",
+        "Preserve a manually edited definition from an outdated AI proposal");
     var now = DateTimeOffset.UtcNow;
     var idle = new Clip { CreatedAt = now.AddHours(-48), CapturedAt = now.AddHours(-48) };
     var values = new ActivityPreferences();

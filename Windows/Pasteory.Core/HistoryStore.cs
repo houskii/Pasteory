@@ -9,6 +9,7 @@ public sealed partial class HistoryStore
     private readonly string catalogPath;
     private readonly string imageDirectory;
     private readonly string archiveDirectory;
+    private readonly string representationDirectory;
     private readonly int maxClips;
     private readonly long maxBytes;
     private readonly bool archiveOverflow;
@@ -29,6 +30,7 @@ public sealed partial class HistoryStore
         catalogPath = Path.Combine(dataDirectory, CatalogFileName);
         imageDirectory = Path.Combine(dataDirectory, "images");
         archiveDirectory = Path.Combine(dataDirectory, "archives");
+        representationDirectory = Path.Combine(dataDirectory, "representations");
         string legacyPath = Path.Combine(dataDirectory, "history.json");
         var state = File.Exists(catalogPath) ? ReadCatalog() : ReadLegacyState(legacyPath);
         if (!File.Exists(catalogPath) && File.Exists(legacyPath))
@@ -37,6 +39,7 @@ public sealed partial class HistoryStore
         Clips = state.Clips.AsReadOnly();
         aiUndo = state.AiUndo;
         RemoveOrphanedImages();
+        RemoveOrphanedRepresentations(Clips);
         RemoveOrphanedArchives((state.Payloads ?? []).Values.Select(payload => payload.Hash).ToHashSet(StringComparer.OrdinalIgnoreCase));
     }
 
@@ -394,6 +397,9 @@ public sealed partial class HistoryStore
             var retained = next.Where(clip => clip.HasImage).Select(clip => clip.ImageFileName).ToHashSet(StringComparer.OrdinalIgnoreCase);
             foreach (var clip in Clips)
                 if (clip.HasImage && !retained.Contains(clip.ImageFileName)) DiscardManagedFile(ImagePath(clip));
+            if (!Clips.Where(clip => clip.OriginalItems is not null).Select(clip => clip.OriginalItems)
+                .SequenceEqual(next.Where(clip => clip.OriginalItems is not null).Select(clip => clip.OriginalItems)))
+                RemoveOrphanedRepresentations(next);
             RemoveOrphanedArchives(packed.Values.Select(payload => payload.Hash).ToHashSet(StringComparer.OrdinalIgnoreCase));
         }
         Clips = next.AsReadOnly();

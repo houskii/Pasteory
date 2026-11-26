@@ -6,7 +6,9 @@ public sealed record FileOpenRule(string Extension, string? ApplicationPath = nu
     bool ShowTerminal = false);
 
 public sealed record LinkSignInRule(Guid Id, string Name, string Pattern, string SignInUrl, bool Enabled = false);
-public sealed record LinkFallbackRule(string Pattern, string Title);
+public sealed record LinkFallbackRule(string Pattern, string Title, LinkFallbackRoute? Route = null);
+public sealed record LinkFallbackRoute(Guid Id, string Name, string Host, string Path, string[] RequiredQueryKeys,
+    bool Enabled = true, int Priority = 100);
 
 public sealed record AiPreferences
 {
@@ -19,11 +21,18 @@ public sealed record AiPreferences
     public bool ShareSource { get; init; }
     public bool ShareOcr { get; init; }
     public bool ShareResources { get; init; }
-    public bool AutoOrganize { get; init; }
-    public bool IdleOrganize { get; init; }
+    public bool AutoOrganize { get; init; } = true;
+    public bool IdleOrganize { get; init; } = true;
+    public bool WeeklyThemeReview { get; init; } = true;
+    public bool AppendExistingAiGroups { get; init; }
+    public int IdleStartHour { get; init; } = 1;
+    public int IdleEndHour { get; init; } = 2;
     public bool Story { get; init; } = true;
     public int RecentLimit { get; init; } = 100;
+    public int TargetGroupCount { get; init; } = 7;
+    public int TaskRounds { get; init; } = 80;
     public int DailyTokens { get; init; } = 300_000;
+    public int NightlyTokens { get; init; } = 300_000;
     public int DailyAutomaticTasks { get; init; } = 3;
     public ActivityPreferences Activity { get; init; } = new();
 }
@@ -59,6 +68,7 @@ public sealed record LocalSettings
     public double PanelWidth { get; init; } = 380;
     public double PanelHeight { get; init; } = 660;
     public string LastSettingsPage { get; init; } = "General";
+    public int LastAiTab { get; init; }
     public AiPreferences Ai { get; init; } = new();
     public Guid? SeenStory { get; init; }
     public int StoryOpenings { get; init; }

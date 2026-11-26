@@ -122,6 +122,7 @@ internal static partial class Program
         Check(panel.Title == "Pasteory", "Load the native WPF history panel and resources");
         CheckMacBackup();
         CheckAiModel().GetAwaiter().GetResult();
+        CheckAiRecovery().GetAwaiter().GetResult();
         CheckUpdateSignature();
         if (args.Contains("--ocr")) CheckOcr();
         if (args.Contains("--system-clipboard"))

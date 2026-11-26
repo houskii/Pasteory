@@ -29,6 +29,7 @@ internal sealed class ClipDetails : DockPanel
             return;
         }
         Preview(expand);
+        OriginalItems();
         if (clip.Kind != ClipKind.Aggregate) Sources();
         if (clip.TrashedAt is null)
         {
@@ -43,6 +44,26 @@ internal sealed class ClipDetails : DockPanel
             body.Children.Add(Ui.Button("Restore", () => app.RestoreClip(clip), "PrimaryButton"));
         }
         Metadata();
+    }
+
+    private void OriginalItems()
+    {
+        if (clip?.OriginalItems is not { Length: > 1 } items) return;
+        var body = Card("Clipboard items");
+        int index = 0;
+        foreach (var item in items.OrderBy(item => item.Order))
+        {
+            var row = new DockPanel { Margin = new Thickness(0, 4, 0, 4) };
+            var copy = Ui.Button("Copy item", async () => await app.UseClipAsync(clip, paste: false, plainText: false, original: item));
+            copy.IsEnabled = clip.TrashedAt is null && MacClipboardFormats.CanProject(item);
+            DockPanel.SetDock(copy, Dock.Right);
+            row.Children.Add(copy);
+            var details = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 7, 0) };
+            details.Children.Add(Ui.Text(Labels.Format("Item {0}", ++index), 12, strong: true));
+            details.Children.Add(Ui.Text(string.Join(" · ", item.Representations.Select(rep => rep.Uti)), 10, "Muted"));
+            row.Children.Add(details);
+            body.Children.Add(row);
+        }
     }
 
     private static Border Header(Clip? clip)

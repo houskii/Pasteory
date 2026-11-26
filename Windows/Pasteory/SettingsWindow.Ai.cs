@@ -14,28 +14,31 @@ namespace Pasteory.Windows;
 
 internal sealed partial class SettingsWindow
 {
-    private int aiTab;
-
     private void BuildAi(Panel layout)
     {
-        var tabs = new TabControl { Margin = new Thickness(0, 0, 0, 13), BorderThickness = new Thickness(0) };
-        tabs.SetResourceReference(BackgroundProperty, "Canvas");
-        tabs.SetResourceReference(ForegroundProperty, "Ink");
+        var tabs = new TabControl { Margin = new Thickness(0, 0, 0, 13) };
+        tabs.SetResourceReference(StyleProperty, "SettingsSegmentedTabs");
+        AutomationProperties.SetName(tabs, Labels.Get("AI settings"));
         var analysis = new StackPanel { Margin = new Thickness(0, 11, 0, 0) };
         var life = new StackPanel { Margin = new Thickness(0, 11, 0, 0) };
         var usage = new StackPanel { Margin = new Thickness(0, 11, 0, 0) };
         var tasks = new StackPanel { Margin = new Thickness(0, 11, 0, 0) };
         tabs.Items.Add(new TabItem { Header = Labels.Get("Model & analysis"), Content = analysis });
-        tabs.Items.Add(new TabItem { Header = Labels.Get("Lifecycle"), Content = life });
+        tabs.Items.Add(new TabItem { Header = Labels.Get("Lifecycle and compression"), Content = life });
         tabs.Items.Add(new TabItem { Header = Labels.Get("Token usage"), Content = usage });
         tabs.Items.Add(new TabItem { Header = Labels.Get("Tasks"), Content = tasks });
-        tabs.SelectedIndex = Math.Clamp(aiTab, 0, 3);
-        tabs.SelectionChanged += (_, e) => { if (e.Source == tabs) aiTab = tabs.SelectedIndex; };
+        tabs.SelectedIndex = Math.Clamp(app.Settings.LastAiTab, 0, 3);
+        tabs.SelectionChanged += (_, e) =>
+        {
+            if (e.Source == tabs && tabs.SelectedIndex >= 0 && app.Settings.LastAiTab != tabs.SelectedIndex)
+                app.SaveSettings(app.Settings with { LastAiTab = tabs.SelectedIndex });
+        };
         layout.Children.Add(tabs);
         BuildModel(analysis);
         BuildAiPolicy(life);
         BuildAiUsage(usage);
         BuildTaskStatus(tasks, false);
+        BuildAiHistory(tasks);
     }
 
     private void BuildModel(Panel layout)
@@ -151,6 +154,19 @@ internal sealed partial class SettingsWindow
         }, "PrimaryButton"));
         connect.Children.Add(buttons);
 
+        var story = SettingsCard(layout, "Story");
+        var summarize = new CheckBox { IsChecked = preferences.Story };
+        summarize.SetResourceReference(StyleProperty, "SettingsSwitch");
+        AutomationProperties.SetName(summarize, Labels.Get("Enable Story"));
+        summarize.Click += (_, _) =>
+        {
+            bool next = summarize.IsChecked == true;
+            if (!app.SaveSettings(app.Settings with { Ai = app.Settings.Ai with { Story = next } }))
+                summarize.IsChecked = !next;
+            UpdateStoryNav();
+        };
+        story.Children.Add(Row("Enable Story", summarize, "Make a recap from eligible clips in the last seven days."));
+
         var share = SettingsCard(layout, "Shared content");
         Switch(share, "Share notes", preferences.ShareNotes, (settings, flag) => settings with { Ai = settings.Ai with { ShareNotes = flag } });
         Switch(share, "Share source app names", preferences.ShareSource, (settings, flag) => settings with { Ai = settings.Ai with { ShareSource = flag } });
@@ -178,24 +194,54 @@ internal sealed partial class SettingsWindow
             (settings, flag) => settings with { Ai = settings.Ai with { AutoOrganize = flag } });
         Switch(automatic, "Organize while idle", prefs.IdleOrganize,
             (settings, flag) => settings with { Ai = settings.Ai with { IdleOrganize = flag } },
-            "Runs between 01:00 and 02:00 after five minutes of inactivity.");
-        var story = new CheckBox { IsChecked = prefs.Story };
-        story.SetResourceReference(StyleProperty, "SettingsSwitch");
-        AutomationProperties.SetName(story, Labels.Get("Enable Story"));
-        story.Click += (_, _) =>
-        {
-            app.SaveSettings(app.Settings with { Ai = app.Settings.Ai with { Story = story.IsChecked == true } });
-            UpdateStoryNav();
-        };
-        automatic.Children.Add(Row("Enable Story", story, "Make a recap from eligible clips in the last seven days."));
+            "Runs in the chosen hours after five minutes of inactivity.");
+        Switch(automatic, "Review low-activity themes every seven days", prefs.WeeklyThemeReview,
+            (settings, flag) => settings with { Ai = settings.Ai with { WeeklyThemeReview = flag } });
         var limit = Ui.Field("Recent clip limit", prefs.RecentLimit.ToString(CultureInfo.InvariantCulture), 4);
-        limit.Width = 100;
+        var themes = Picker("Target theme count", ["6", "7", "8"], Math.Clamp(prefs.TargetGroupCount, 6, 8).ToString(CultureInfo.InvariantCulture));
+        var rounds = Ui.Field("Model rounds per run", prefs.TaskRounds.ToString(CultureInfo.InvariantCulture), 3);
+        var starts = Enumerable.Range(0, 23).Select(hour => $"{hour:D2}:00").ToArray();
+        var ends = Enumerable.Range(1, 23).Select(hour => $"{hour:D2}:00").ToArray();
+        var start = Picker("Idle start", starts, $"{Math.Clamp(prefs.IdleStartHour, 0, 22):D2}:00");
+        var end = Picker("Idle end", ends, $"{Math.Clamp(prefs.IdleEndHour, 1, 23):D2}:00");
+        var mode = Picker("Application mode", ["Review before applying", "Automatically add to existing AI groups"],
+            prefs.AppendExistingAiGroups ? "Automatically add to existing AI groups" : "Review before applying");
+        limit.Width = rounds.Width = 104;
+        automatic.Children.Add(Row("Idle start", start));
+        automatic.Children.Add(Row("Idle end", end));
+        automatic.Children.Add(Row("Application mode", mode));
         automatic.Children.Add(Row("Recent clip limit", limit));
+        automatic.Children.Add(Row("Target theme count", themes));
+        automatic.Children.Add(Row("Model rounds per run", rounds));
         automatic.Children.Add(Row("Manual organization", Ui.Button("Save", () =>
         {
-            if (int.TryParse(limit.Text, out int value) && value is >= 1 and <= 1000)
-                app.SaveSettings(app.Settings with { Ai = app.Settings.Ai with { RecentLimit = value } });
-            else SetStatus(Labels.Get("Enter a limit between 1 and 1000."));
+            if (!int.TryParse(limit.Text, out int value) || value is < 1 or > 1000)
+            {
+                SetStatus(Labels.Get("Enter a limit between 1 and 1000."));
+                return;
+            }
+            if (!int.TryParse(rounds.Text, out int roundLimit) || roundLimit is < 1 or > 500)
+            {
+                SetStatus(Labels.Get("Enter a model round limit between 1 and 500."));
+                return;
+            }
+            int target = int.Parse((string?)themes.SelectedValue ?? "7", CultureInfo.InvariantCulture);
+            int from = Array.IndexOf(starts, (string?)start.SelectedValue);
+            int through = Array.IndexOf(ends, (string?)end.SelectedValue) + 1;
+            if (from < 0 || through <= from)
+            {
+                SetStatus(Labels.Get("The idle end must be after the start."));
+                return;
+            }
+            app.SaveSettings(app.Settings with
+            {
+                Ai = app.Settings.Ai with
+                {
+                    RecentLimit = value, TargetGroupCount = target, TaskRounds = roundLimit, IdleStartHour = from, IdleEndHour = through,
+                    AppendExistingAiGroups = (string?)mode.SelectedValue == "Automatically add to existing AI groups"
+                }
+            });
+            SetStatus(Labels.Get("Settings saved."));
         }, "PrimaryButton")));
         BuildActivityPreferences(layout, prefs.Activity);
     }
@@ -252,19 +298,25 @@ internal sealed partial class SettingsWindow
         var card = SettingsCard(layout, "Daily budget");
         card.Children.Add(Ui.Text(Labels.Format("{0:N0} tokens used today", app.Ai.TodayTokens), 17, "AccentInk", strong: true));
         var budget = Ui.Field("Daily token limit", app.Settings.Ai.DailyTokens.ToString(CultureInfo.InvariantCulture), 9);
-        var count = Ui.Field("Daily automatic tasks", app.Settings.Ai.DailyAutomaticTasks.ToString(CultureInfo.InvariantCulture), 2);
-        budget.Width = count.Width = 124;
+        var nightly = Ui.Field("Nightly token limit", app.Settings.Ai.NightlyTokens.ToString(CultureInfo.InvariantCulture), 8);
+        var count = Ui.Field("Daily automatic tasks", app.Settings.Ai.DailyAutomaticTasks.ToString(CultureInfo.InvariantCulture), 4);
+        budget.Width = count.Width = nightly.Width = 124;
         card.Children.Add(Row("Daily token limit", budget));
+        card.Children.Add(Row("Nightly token limit", nightly));
         card.Children.Add(Row("Daily automatic tasks", count));
         card.Children.Add(Row("Token usage", Ui.Button("Save", () =>
         {
             if (!int.TryParse(budget.Text, out int tokens) || tokens is < 1000 or > 50_000_000 ||
-                !int.TryParse(count.Text, out int jobs) || jobs is < 0 or > 30)
+                !int.TryParse(nightly.Text, out int night) || night is < 1000 or > 10_000_000 ||
+                !int.TryParse(count.Text, out int jobs) || jobs is < 0 or > 1000)
             {
                 SetStatus(Labels.Get("Enter a valid token budget and automatic task limit."));
                 return;
             }
-            app.SaveSettings(app.Settings with { Ai = app.Settings.Ai with { DailyTokens = tokens, DailyAutomaticTasks = jobs } });
+            app.SaveSettings(app.Settings with { Ai = app.Settings.Ai with
+            {
+                DailyTokens = tokens, NightlyTokens = night, DailyAutomaticTasks = jobs
+            } });
         }, "PrimaryButton")));
 
         var chart = SettingsCard(layout, "Last 7 days");
@@ -290,23 +342,63 @@ internal sealed partial class SettingsWindow
             row.Children.Add(width);
             chart.Children.Add(row);
         }
-        var recent = SettingsCard(layout, "Recent calls");
-        foreach (var group in app.Ai.Usage.OrderByDescending(call => call.At).GroupBy(call => call.Task).Take(18))
+        var recent = new StackPanel();
+        SettingsCard(layout, "Recent calls").Children.Add(recent);
+        void Refresh()
         {
-            var summary = new Expander
+            recent.Children.Clear();
+            foreach (var group in app.Ai.Usage.OrderByDescending(call => call.At).GroupBy(call => call.Task).Take(18))
             {
-                Header = $"{Labels.Get(group.First().Kind)} · {group.First().Model} · {group.Sum(call => call.Tokens):N0}",
-                Margin = new Thickness(0, 6, 0, 0)
-            };
-            summary.SetResourceReference(ForegroundProperty, "Ink");
-            var calls = new StackPanel { Margin = new Thickness(12, 4, 0, 3) };
-            foreach (var call in group)
-                calls.Children.Add(Ui.Text(Labels.Format("{0:g} · input {1:N0} · output {2:N0} · cache {3:N0} · reasoning {4:N0}",
-                    call.At.ToLocalTime(), call.Input, call.Output, call.Cached, call.Reasoning) +
-                    (call.Estimated ? " · " + Labels.Get("Estimated") : ""), 11, "Muted"));
-            summary.Content = calls;
-            recent.Children.Add(summary);
+                var summary = new Expander
+                {
+                    Header = $"{Labels.Get(group.First().Kind)} · {group.First().Model} · {group.Sum(call => call.Tokens):N0}",
+                    Margin = new Thickness(0, 6, 0, 0)
+                };
+                summary.SetResourceReference(ForegroundProperty, "Ink");
+                var calls = new StackPanel { Margin = new Thickness(12, 4, 0, 3) };
+                foreach (var call in group)
+                    calls.Children.Add(Ui.Text(Labels.Format("{0:g} · input {1:N0} · output {2:N0} · cache {3:N0} · reasoning {4:N0}",
+                        call.At.ToLocalTime(), call.Input, call.Output, call.Cached, call.Reasoning) +
+                        $" · {Labels.Get(call.Estimated ? "Estimated" : "Reported")} · {Labels.Get(call.Outcome)}", 11, "Muted"));
+                calls.Children.Add(Ui.Button("Open task files", () => OpenAiTask(group.Key)));
+                summary.Content = calls;
+                recent.Children.Add(summary);
+            }
         }
+        recent.Loaded += (_, _) => { app.Ai.Changed += Refresh; Refresh(); };
+        recent.Unloaded += (_, _) => app.Ai.Changed -= Refresh;
+    }
+
+    private void OpenAiTask(Guid id)
+    {
+        string path = app.Ai.DirectoryFor(id);
+        try
+        {
+            if (!Directory.Exists(path)) path = app.Ai.Folder;
+            Directory.CreateDirectory(path);
+            App.OpenInShell(path);
+        }
+        catch (Exception error) when (AiTasks.Expected(error)) { SetStatus(Labels.Get(error.Message)); }
+    }
+
+    private void BuildAiHistory(Panel layout)
+    {
+        var list = new StackPanel();
+        SettingsCard(layout, "Task history").Children.Add(list);
+        void Refresh()
+        {
+            list.Children.Clear();
+            var tasks = app.Ai.RecentHistory();
+            if (tasks.Length == 0) list.Children.Add(Ui.Text(Labels.Get("No AI tasks yet."), 12, "Muted"));
+            foreach (var item in tasks)
+            {
+                var open = Ui.Button("Open task files", () => OpenAiTask(item.Id));
+                list.Children.Add(Row(Labels.Get(item.Trigger), open,
+                    Labels.Format("{0:g} · {1} clips · {2}", item.Started.ToLocalTime(), item.Total, Labels.Get(item.Status))));
+            }
+        }
+        list.Loaded += (_, _) => { app.Ai.Changed += Refresh; Refresh(); };
+        list.Unloaded += (_, _) => app.Ai.Changed -= Refresh;
     }
 
     private void BuildTaskStatus(Panel layout, bool story)
@@ -325,19 +417,24 @@ internal sealed partial class SettingsWindow
         actions.Children.Add(primary);
         var full = Ui.Button("Organize all clips", async () => await app.RunAiAsync(false, "full"));
         if (!story) actions.Children.Add(full);
+        var groupReview = Ui.Button("Review existing themes", async () => await app.RunAiAsync(false, "manual-review"));
+        groupReview.Margin = new Thickness(5, 0, 0, 0);
+        if (!story) actions.Children.Add(groupReview);
         var pause = Ui.Button("Pause", app.Ai.Pause);
         var resume = Ui.Button("Resume last task", async () => await app.RunAiAsync(story, "", resume: true));
+        var abandon = Ui.Button("Abandon task", () =>
+        {
+            if (!ClipMenus.Confirm(this, "Abandon this paused task?")) return;
+            try { app.Ai.Abandon(story); }
+            catch (Exception error) when (AiTasks.Expected(error)) { SetStatus(Labels.Get(error.Message)); }
+        });
         var review = Ui.Button("Review suggestions", ShowReview, "PrimaryButton");
         var undo = Ui.Button("Undo AI organization", () => { app.UndoAi(); Select(SettingsPage.Ai, rebuild: true); });
         var files = Ui.Button("Open task files", () =>
         {
-            if (app.Ai.Job(story) is { } job)
-            {
-                string path = Path.Combine(app.Ai.Folder, job.Id.ToString("N") + ".agent");
-                if (Directory.Exists(path)) App.OpenInShell(path);
-            }
+            if (app.Ai.Job(story) is { } job) OpenAiTask(job.Id);
         });
-        foreach (var button in new[] { pause, resume, review, undo, files })
+        foreach (var button in new[] { pause, resume, abandon, review, undo, files })
         {
             button.Margin = new Thickness(0, 0, 6, 3);
             actions.Children.Add(button);
@@ -348,17 +445,19 @@ internal sealed partial class SettingsWindow
         {
             var job = app.Ai.Job(story);
             bool running = app.Ai.Running;
-            bool canStart = !running && app.Settings.Ai.Enabled && app.Ai.CanConnect(app.Settings.Ai) &&
-                (story || app.Ai.Review is null);
-            primary.IsEnabled = full.IsEnabled = canStart;
+            bool ready = !running && app.Settings.Ai.Enabled && app.Ai.CanConnect(app.Settings.Ai);
+            bool canStart = ready && (story || app.Ai.Review is null && job?.Status != "Paused");
+            primary.IsEnabled = full.IsEnabled = groupReview.IsEnabled = canStart;
+            resume.IsEnabled = ready;
             caption.Text = job is null ? Labels.Get(canStart ? "Ready" : "Configure and enable AI analysis to begin.") :
                 Labels.Get(job.Status) + $"  ·  {job.Cursor} / {job.Total}" + (job.Error is { Length: > 0 } error ? "  ·  " + Labels.Get(error) : "");
-            progressBar.Visibility = job is { Total: > 0 } ? Visibility.Visible : Visibility.Collapsed;
+            progressBar.Visibility = job is { Total: > 0, Status: "Running" or "Paused" } ? Visibility.Visible : Visibility.Collapsed;
             progressBar.Maximum = Math.Max(1, job?.Total ?? 0);
             progressBar.Value = job?.Cursor ?? 0;
+            progressBar.IsIndeterminate = running && job?.Status == "Running" && job.Cursor == 0;
             pause.Visibility = running && app.Ai.ActiveJob?.Kind == (story ? "story" : "organization") ? Visibility.Visible : Visibility.Collapsed;
-            resume.Visibility = !running && job?.Status == "Paused" ? Visibility.Visible : Visibility.Collapsed;
-            files.Visibility = job is null ? Visibility.Collapsed : Visibility.Visible;
+            resume.Visibility = abandon.Visibility = !running && job?.Status == "Paused" ? Visibility.Visible : Visibility.Collapsed;
+            files.Visibility = job is { Total: > 0 } ? Visibility.Visible : Visibility.Collapsed;
             review.Visibility = !story && app.Ai.Review is not null ? Visibility.Visible : Visibility.Collapsed;
             undo.Visibility = !story && app.CanUndoAi ? Visibility.Visible : Visibility.Collapsed;
         }
@@ -373,8 +472,9 @@ internal sealed partial class SettingsWindow
         LibraryEditors.ShowModal(this, "Review suggestions", close =>
         {
             var body = new StackPanel();
+            var clips = app.Clips.ToDictionary(clip => clip.Id);
             body.Children.Add(Ui.Text(Labels.Format("{0} topics · {1} clips · {2} unassigned", review.Proposal.Groups.Length,
-                review.Proposal.Groups.Sum(group => group.Members.Length), review.Proposal.Unassigned.Length), 12, "Muted"));
+                review.Proposal.Groups.SelectMany(group => group.Members).Distinct().Count(), review.Proposal.Unassigned.Length), 12, "Muted"));
             var checks = new List<CheckBox>();
             foreach (var topic in review.Proposal.Groups)
             {
@@ -382,20 +482,51 @@ internal sealed partial class SettingsWindow
                 var check = new CheckBox { Content = Labels.Format("Organize {0} clips", topic.Members.Length), IsChecked = true, Tag = topic.Name };
                 checks.Add(check);
                 card.Children.Add(check);
+                if (topic.Definition.Length > 0) card.Children.Add(Ui.Text(topic.Definition, 12));
                 if (topic.Overview.Length > 0) card.Children.Add(Ui.Text(topic.Overview, 12, "Muted"));
-                foreach (var item in app.Clips.Where(clip => topic.Members.Contains(clip.Id)).Take(7))
-                    card.Children.Add(Ui.Text("• " + ClipCard.Short(item.DisplayTitle.Length > 0 ? item.DisplayTitle : item.PlainText ?? Labels.Get(item.Kind.ToString()), 95, 1)));
+                var sources = new Expander { Header = Labels.Get("Clips"), Margin = new Thickness(0, 8, 0, 0) };
+                sources.Expanded += (_, _) =>
+                {
+                    if (sources.Content is not null) return;
+                    var entries = new StackPanel { Margin = new Thickness(12, 5, 0, 0) };
+                    foreach (Guid id in topic.Members)
+                        entries.Children.Add(Ui.Text("• " + ClipLabel(id), 12, "Muted"));
+                    sources.Content = entries;
+                };
+                card.Children.Add(sources);
             }
-            body.Children.Add(Ui.Button("Discard proposal", () =>
+            if (review.Proposal.Unassigned.Length > 0)
             {
-                if (ClipMenus.Confirm(this, "Discard these AI suggestions?")) { app.Ai.ClearReview(); close(); }
-            }));
+                var unassigned = new Expander { Header = Labels.Get("Unassigned clips"), Margin = new Thickness(0, 8, 0, 5) };
+                unassigned.Expanded += (_, _) =>
+                {
+                    if (unassigned.Content is not null) return;
+                    var entries = new StackPanel { Margin = new Thickness(12, 5, 0, 0) };
+                    foreach (var item in review.Proposal.Unassigned)
+                        entries.Children.Add(Ui.Text($"{ClipLabel(item.Id)} · {Labels.Get(item.Reason)}", 12, "Muted"));
+                    unassigned.Content = entries;
+                };
+                body.Children.Add(unassigned);
+            }
+            var discard = Ui.Button("Discard proposal", () =>
+            {
+                if (!ClipMenus.Confirm(this, "Discard these AI suggestions?")) return;
+                try { app.Ai.ClearReview(); close(); }
+                catch (Exception error) when (AiTasks.Expected(error)) { SetStatus(Labels.Get(error.Message)); }
+            });
+            discard.HorizontalAlignment = HorizontalAlignment.Left;
+            discard.Margin = new Thickness(0, 5, 0, 0);
+            body.Children.Add(discard);
             return LibraryEditors.Wrap("Review suggestions", body, (System.Windows.IInputElement?)checks.FirstOrDefault() ?? body,
                 () =>
                 {
                     app.ApplyAiPlan(review, checks.Where(check => check.IsChecked == true).Select(check => (string)check.Tag));
                     return app.Ai.Review is null;
-                }, close);
+                }, close, "Apply selected groups");
+
+            string ClipLabel(Guid id) => clips.TryGetValue(id, out var clip) ?
+                ClipCard.Short(clip.DisplayTitle.Length > 0 ? clip.DisplayTitle : clip.PlainText ?? Labels.Get(clip.Kind.ToString()), 95, 1) :
+                Labels.Get("Source no longer matches");
         }, 640, 670);
     }
 
@@ -403,6 +534,7 @@ internal sealed partial class SettingsWindow
     {
         var content = new StackPanel();
         layout.Children.Add(content);
+        Guid? latestId = null, selectedId = null;
         void Refresh()
         {
             if (current != SettingsPage.Story) return;
@@ -412,9 +544,11 @@ internal sealed partial class SettingsWindow
                 content.Children.Add(Ui.Section(Ui.Text(Labels.Get("Your first Story will appear here."), 15, "Muted")));
                 return;
             }
+            if (latestId != recap.Id) selectedId = latestId = recap.Id;
             var pick = new ComboBox
             {
-                ItemsSource = app.Ai.Stories.ToArray(), SelectedIndex = 0, DisplayMemberPath = nameof(SavedStory.GeneratedAt),
+                ItemsSource = app.Ai.Stories.ToArray(), SelectedItem = app.Ai.Stories.FirstOrDefault(item => item.Id == selectedId) ?? recap,
+                DisplayMemberPath = nameof(SavedStory.GeneratedAt),
                 MinWidth = 170, Margin = new Thickness(0, 0, 0, 9), HorizontalAlignment = HorizontalAlignment.Right
             };
             AutomationProperties.SetName(pick, Labels.Get("Past Stories"));
@@ -423,9 +557,11 @@ internal sealed partial class SettingsWindow
             content.Children.Add(cards);
             pick.SelectionChanged += (_, _) =>
             {
-                if (pick.SelectedItem is SavedStory selected) ShowRecap(cards, selected);
+                if (pick.SelectedItem is not SavedStory selected) return;
+                selectedId = selected.Id;
+                ShowRecap(cards, selected);
             };
-            ShowRecap(cards, recap);
+            ShowRecap(cards, pick.SelectedItem as SavedStory ?? recap);
         }
         content.Loaded += (_, _) => { app.Ai.Changed += Refresh; Refresh(); };
         content.Unloaded += (_, _) => app.Ai.Changed -= Refresh;
@@ -442,12 +578,19 @@ internal sealed partial class SettingsWindow
         headline.Margin = new Thickness(0, 5, 0, 12);
         cover.Children.Add(headline);
         cover.Children.Add(Ui.Text(recap.Story.Summary, 14));
+        if (recap.SourceCount > 0)
+            cover.Children.Add(Ui.Text(Labels.Format("Based on {0} clips · generated {1:g}", recap.SourceCount, recap.GeneratedAt.ToLocalTime()),
+                11, "Muted"));
         var encouragement = Ui.Text(recap.Story.Encouragement, 13, "AccentInk", strong: true);
         encouragement.Margin = new Thickness(0, 13, 0, 3);
         cover.Children.Add(encouragement);
         layout.Children.Add(Ui.Section(cover));
         AddSections("Recent work", recap.Story.Work);
         AddSections("Observations", recap.Story.Observations);
+        var record = Ui.Button("View this generation record", () => OpenAiTask(recap.Id));
+        record.Margin = new Thickness(0, 8, 0, 0);
+        record.HorizontalAlignment = HorizontalAlignment.Left;
+        layout.Children.Add(record);
         void AddSections(string label, IEnumerable<StorySection> summaries)
         {
             var sections = summaries.ToArray();
@@ -464,7 +607,8 @@ internal sealed partial class SettingsWindow
                 {
                     var clip = app.Clips.FirstOrDefault(item => item.Id == reference.ClipId && item.TrashedAt is null);
                     var current = clip is null ? null : AiTasks.Project(clip, app.Settings.Ai);
-                    bool available = current is not null && new[] { current.Text, current.Title, current.Note }
+                    bool available = current is not null && (recap.Versions?.TryGetValue(reference.ClipId, out var version) != true ||
+                        version == current.Version) && new[] { current.Text, current.Title, current.Note }
                         .Any(value => value.Contains(reference.Quote, StringComparison.Ordinal));
                     var action = Ui.Button(available ? "View source clip" : "Source no longer matches", () =>
                     {

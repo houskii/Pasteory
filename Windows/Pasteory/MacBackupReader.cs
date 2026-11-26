@@ -13,11 +13,11 @@ namespace Pasteory.Windows;
 
 internal sealed class MacBackupReader(string root)
 {
-    private const int MaximumRepresentation = 64 * 1024 * 1024;
+    private const int MaximumRepresentation = HistoryStore.MaximumRepresentationBytes;
     private readonly string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
     private readonly Dictionary<string, string> checksums = new(StringComparer.Ordinal);
 
-    internal (int Count, LinkFallbackRule[] Fallbacks) Import(HistoryStore store)
+    internal (int Count, LinkFallbackRule[] Fallbacks, MacBackupAiArchive Ai) Import(HistoryStore store)
     {
         using var manifest = JsonDocument.Parse(File.ReadAllBytes(Resolve("manifest.json")));
         var description = manifest.RootElement;
@@ -35,7 +35,14 @@ internal sealed class MacBackupReader(string root)
 
         var events = ReadLines("capture-events.jsonl").GroupBy(item => Id(item, "clipID"))
             .ToDictionary(group => group.Key, group => group.Select(ToCapture).OrderByDescending(item => item.CapturedAt).ToArray());
-        var collections = ReadCollections().ToList();
+        var ai = checksums.ContainsKey("ai-state.json") ?
+            MacBackupAiState.Read(Verified("ai-state.json")) : MacBackupAiArchive.Empty;
+        var collections = ReadCollections().Select(collection => ai.Groups.TryGetValue(collection.Id, out var theme) ?
+            collection with
+            {
+                IsAi = true, Definition = theme.Definition, Overview = theme.Overview, Locked = theme.Retained,
+                ExcludedClips = theme.ExcludedClipIds
+            } : collection).ToList();
         var fallback = ReadLines("url-fallback-rules.jsonl").Select(ToFallback).OfType<LinkFallbackRule>().ToArray();
         var clips = new List<Clip>();
         string staging = Directory.CreateTempSubdirectory("Pasteory-MacImport-").FullName;
@@ -47,8 +54,9 @@ internal sealed class MacBackupReader(string root)
             var existing = collections.Select(group => group.Id).ToHashSet();
             foreach (var missing in clips.SelectMany(clip => clip.CollectionIds).Distinct().Where(id => !existing.Contains(id)))
                 collections.Add(new ClipCollection(missing, "Recovered " + missing.ToString("D")));
-            int count = store.ImportClips(clips, collections, clip => File.ReadAllBytes(Path.Combine(staging, clip.ImageFileName)));
-            return (count, fallback);
+            int count = store.ImportClips(clips, collections, clip => File.ReadAllBytes(Path.Combine(staging, clip.ImageFileName)),
+                rep => ReadStaged(staging, rep));
+            return (count, fallback, ai);
         }
         finally
         {
@@ -74,50 +82,44 @@ internal sealed class MacBackupReader(string root)
             Priority = (ClipPriority)Math.Clamp(Int(item, "priority"), 0, 3), Favorite = Bool(item, "isFavorite"), Pinned = Bool(item, "isPinned"),
             CopyCount = Math.Max(0, Int(item, "copyCount", 1)), PasteCount = Math.Max(0, Int(item, "pasteCount")),
             CollectionIds = Guids(item, "collectionIDs"), Captures = events.GetValueOrDefault(id, []),
+            ExcludeFromAi = Bool(item, "aiAnalysisExcluded"),
             CodeLanguage = CodeExtension(Optional(Child(item, "codeMetadata"), "language")), RecognizedText = Optional(Child(item, "localOCR"), "text"),
             Conversions = Array(item, "quickTextTransformations").Select(ToConversion).OfType<ConversionRecord>().ToArray()
         };
         if (Optional(item, "automaticTitle") is { } title)
             clip = clip with { LinkDetails = new("Resolved", title, copiedAt, "Mac backup") };
 
-        string? text = null, html = null, rtf = null;
+        var originals = new List<ClipboardItem>();
+        var texts = new List<string>();
+        string? html = null, rtf = null;
         var files = new List<string>();
         ClipboardImage? image = null;
         foreach (var selection in Array(item, "items").OrderBy(selection => Int(selection, "order")))
         {
-            foreach (var rep in Array(selection, "representations").OrderBy(rep => ImagePriority(String(rep, "uti"))))
+            var representations = new List<ClipboardRepresentation>();
+            foreach (var rep in Array(selection, "representations"))
             {
                 string uti = String(rep, "uti");
-                var storage = Child(rep, "storage");
-                switch (uti)
-                {
-                    case "public.utf8-plain-text" or "public.plain-text" or "public.text":
-                        text ??= Encoding.UTF8.GetString(ReadRepresentation(storage)).TrimStart('\uFEFF');
-                        break;
-                    case "public.utf16-plain-text":
-                        text ??= Encoding.Unicode.GetString(ReadRepresentation(storage)).TrimStart('\uFEFF');
-                        break;
-                    case "public.url" when kind == ClipKind.Link:
-                        text ??= Encoding.UTF8.GetString(ReadRepresentation(storage));
-                        break;
-                    case "public.html":
-                        html ??= ClipboardFormats.WindowsHtml(Encoding.UTF8.GetString(ReadRepresentation(storage)));
-                        break;
-                    case "public.rtf":
-                        rtf ??= Encoding.Latin1.GetString(ReadRepresentation(storage));
-                        break;
-                    case "public.file-url":
-                        string file = Encoding.UTF8.GetString(ReadRepresentation(storage)).Trim();
-                        files.Add(Uri.TryCreate(file, UriKind.Absolute, out var reference) && reference.IsFile
-                            ? Uri.UnescapeDataString(reference.AbsolutePath) : file);
-                        break;
-                    case var type when image is null && (kind is ClipKind.Image or ClipKind.Mixed) && ImagePriority(type) < int.MaxValue:
-                        image = ClipboardImage.Read(ReadRepresentation(storage), 48_000_000)
-                            ?? throw new InvalidDataException("The Mac backup contains an invalid or oversized image.");
-                        break;
-                }
+                if (string.IsNullOrWhiteSpace(uti)) throw new InvalidDataException("Missing clipboard representation type.");
+                byte[] bytes = ReadRepresentation(Child(rep, "storage"));
+                string hash = Convert.ToHexString(SHA256.HashData(bytes));
+                var original = new ClipboardRepresentation(GuidOrNew(rep, "id"), uti, hash, bytes.Length);
+                string path = Path.Combine(staging, hash + ".bin");
+                if (!File.Exists(path)) File.WriteAllBytes(path, bytes);
+                representations.Add(original);
             }
+            var originalItem = new ClipboardItem(GuidOrNew(selection, "id"), Int(selection, "order"), representations.ToArray());
+            originals.Add(originalItem);
+            var projected = MacClipboardFormats.Project(originalItem, rep => ReadStaged(staging, rep),
+                image is null && kind is ClipKind.Image or ClipKind.Mixed);
+            if (projected.Text is not null) texts.Add(projected.Text);
+            html ??= projected.Html;
+            rtf ??= projected.Rtf;
+            files.AddRange(projected.Files);
+            image ??= projected.Image;
         }
+        string? text = texts.Count > 0 ? string.Join(Environment.NewLine, texts) : null;
+        if (originals.Count > 1 && text is not null) html = rtf = null;
         var fileDetails = Child(item, "fileMetadata");
         var paths = Strings(fileDetails, "filePaths");
         if (paths.Length > 0) files = paths.ToList();
@@ -138,15 +140,14 @@ internal sealed class MacBackupReader(string root)
             text ??= $"[Mac image] {String(item, "previewText")}";
         }
         if (text is null && html is null && rtf is null && image is null && files.Count == 0) text = String(item, "previewText");
-        return clip with { Text = text, Html = html, Rtf = rtf, Files = files.Where(path => path.Length > 0).Distinct().ToArray() };
+        return clip with { Text = text, Html = html, Rtf = rtf, Files = files.Where(path => path.Length > 0).Distinct().ToArray(),
+            OriginalItems = originals.Count == 0 ? null : originals.ToArray(),
+            OriginalMacIdentity = originals.Count == 0 ? null : new(String(item, "primaryKind"), Strings(item, "secondaryKinds"),
+                Optional(item, "contentHash"), Optional(item, "identityKey")) };
     }
 
-    private static int ImagePriority(string uti) => uti switch
-    {
-        "public.png" => 0, "public.jpeg" => 1, "public.heic" or "public.heif" => 2, "public.tiff" => 3,
-        "com.compuserve.gif" or "com.microsoft.bmp" or "org.webmproject.webp" or "public.webp" or "public.avif" => 4,
-        _ => int.MaxValue
-    };
+    private static byte[] ReadStaged(string staging, ClipboardRepresentation rep) =>
+        File.ReadAllBytes(Path.Combine(staging, rep.Hash + ".bin"));
 
     private byte[] ReadRepresentation(JsonElement storage)
     {
@@ -156,7 +157,9 @@ internal sealed class MacBackupReader(string root)
             var data = Child(storage, "data");
             if (data.ValueKind != JsonValueKind.String || (data.GetString()?.Length ?? 0) > MaximumRepresentation * 2)
                 throw new InvalidDataException("Invalid inline payload.");
-            return data.GetBytesFromBase64();
+            byte[] bytes = data.GetBytesFromBase64();
+            if (bytes.Length > MaximumRepresentation) throw new InvalidDataException("The inline clipboard representation is too large.");
+            return bytes;
         }
         int size = Int(storage, "size", -1);
         string hash = String(storage, "checksum");
@@ -202,7 +205,9 @@ internal sealed class MacBackupReader(string root)
         foreach (var collection in document.RootElement.EnumerateArray().OrderBy(item => Int(item, "sortOrder")))
         {
             Guid id = Id(collection, "id");
-            SmartRules? rule = String(collection, "kind") == "smart" ? ReadRule(Child(collection, "ruleSet")) : null;
+            SmartRules? rule = Child(collection, "windowsRuleSet") is { ValueKind: JsonValueKind.Object } windowsRule ?
+                windowsRule.Deserialize<SmartRules>(AiFile.Wire) :
+                String(collection, "kind") == "smart" ? ReadRule(Child(collection, "ruleSet")) : null;
             yield return new ClipCollection(id, String(collection, "name"), rule);
         }
     }
@@ -249,7 +254,13 @@ internal sealed class MacBackupReader(string root)
     {
         string pattern = String(item, "pattern");
         string title = String(item, "titleTemplate");
-        return pattern.Length > 0 && title.Length > 0 ? new LinkFallbackRule(pattern, title) : null;
+        if (title.Length == 0) return null;
+        if (pattern.Length > 0) return new(pattern, title);
+        string host = String(item, "hostPattern").Trim().ToLowerInvariant();
+        if (host.Length == 0) return null;
+        string path = Optional(item, "pathTemplate") ?? "/";
+        return new(host + path, title, new(GuidOrNew(item, "id"), String(item, "name"), host, path,
+            Strings(item, "requiredQueryKeys"), Child(item, "enabled").ValueKind != JsonValueKind.False, Int(item, "priority", 100)));
     }
 
     private static Clip ConvertAggregation(JsonElement item)
@@ -311,6 +322,7 @@ internal sealed class MacBackupReader(string root)
     private static string[] Strings(JsonElement item, string key) => Array(item, key).Select(value => value.GetString() ?? "").ToArray();
     private static Guid Id(JsonElement item, string key) => Guid.TryParse(String(item, key), out var id) ? id :
         throw new InvalidDataException("Invalid identifier in Mac backup.");
+    private static Guid GuidOrNew(JsonElement item, string key) => Guid.TryParse(String(item, key), out var id) ? id : Guid.NewGuid();
     private static Guid[] Guids(JsonElement item, string key) => Array(item, key).Select(value => value.GetGuid()).ToArray();
     private static bool Bool(JsonElement item, string key) => Child(item, key).ValueKind == JsonValueKind.True;
     private static int Int(JsonElement item, string key, int fallback = 0) => Child(item, key) is { ValueKind: JsonValueKind.Number } value &&

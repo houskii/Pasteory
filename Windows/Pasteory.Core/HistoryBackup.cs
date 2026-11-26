@@ -13,7 +13,8 @@ public sealed partial class HistoryStore
         LocalJson.WriteFile(destination, file =>
         {
             using var zip = new ZipArchive(file, ZipArchiveMode.Create, leaveOpen: true);
-            int version = Clips.Any(clip => clip.HasImage && clip.ImageFormat != ClipImageFormat.Png) ? 3 : 2;
+            int version = Clips.Any(clip => clip.OriginalItems is not null) ? 4 :
+                Clips.Any(clip => clip.HasImage && clip.ImageFormat != ClipImageFormat.Png) ? 3 : 2;
             using (var index = zip.CreateEntry("pasteory-history.json").Open())
                 JsonSerializer.Serialize(index, new LibraryState(Clips.ToList(), Collections.ToList(), Version: version));
             foreach (var clip in Clips.Where(clip => clip.HasImage))
@@ -21,6 +22,12 @@ public sealed partial class HistoryStore
                 using var image = File.OpenRead(ImagePath(clip));
                 using var exported = zip.CreateEntry($"images/{clip.ImageFileName}", CompressionLevel.NoCompression).Open();
                 image.CopyTo(exported);
+            }
+            foreach (var representation in Clips.SelectMany(clip => clip.OriginalRepresentations)
+                         .DistinctBy(rep => rep.Hash, StringComparer.OrdinalIgnoreCase))
+            {
+                using var target = zip.CreateEntry($"representations/{RepresentationFileName(representation)}").Open();
+                target.Write(ReadRepresentation(representation));
             }
         });
     }
@@ -31,8 +38,9 @@ public sealed partial class HistoryStore
         var entry = zip.GetEntry("pasteory-history.json") ?? throw new InvalidDataException("Missing backup catalog.");
         using var index = entry.Open();
         var state = JsonSerializer.Deserialize<LibraryState>(index) ?? throw new InvalidDataException("Missing backup catalog.");
-        if (state.Version is not (2 or 3) || state.Clips.Any(clip => !Enum.IsDefined(clip.ImageFormat) ||
-                state.Version == 2 && clip.ImageFormat != ClipImageFormat.Png) ||
+        if (state.Version is not (2 or 3 or 4) || state.Clips.Any(clip => !Enum.IsDefined(clip.ImageFormat) ||
+                state.Version == 2 && clip.ImageFormat != ClipImageFormat.Png ||
+                state.Version < 4 && clip.OriginalItems is not null) ||
             state.Clips.Select(clip => clip.Id).Distinct().Count() != state.Clips.Count ||
             state.Collections.Select(group => group.Id).Distinct().Count() != state.Collections.Count)
             throw new InvalidDataException("Unsupported or invalid backup.");
@@ -49,10 +57,17 @@ public sealed partial class HistoryStore
                 !Convert.ToHexString(SHA256.HashData(image)).Equals(hash, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException("Image checksum mismatch.");
             return image;
+        }, representation =>
+        {
+            var entry = zip.GetEntry($"representations/{RepresentationFileName(representation)}");
+            if (entry is null || entry.Length != representation.Size) throw new InvalidDataException("Missing clipboard representation in backup.");
+            using var payload = entry.Open();
+            return ReadRepresentation(payload, representation);
         });
     }
 
-    public int ImportClips(IReadOnlyList<Clip> imported, IReadOnlyList<ClipCollection> importedGroups, Func<Clip, byte[]> readImage)
+    public int ImportClips(IReadOnlyList<Clip> imported, IReadOnlyList<ClipCollection> importedGroups, Func<Clip, byte[]> readImage,
+        Func<ClipboardRepresentation, byte[]>? readRepresentation = null)
     {
         var groups = Collections.ToList();
         var validGroupIds = groups.Select(group => group.Id).ToHashSet();
@@ -73,18 +88,33 @@ public sealed partial class HistoryStore
         var byId = Clips.ToDictionary(clip => clip.Id);
         var mapping = new Dictionary<Guid, Guid>();
         var written = new List<string>();
+        var saved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         int added = 0;
         try
         {
             foreach (var item in imported.OrderBy(clip => clip.Kind == ClipKind.Aggregate))
             {
-                if (byId.ContainsKey(item.Id)) { mapping[item.Id] = item.Id; continue; }
+                if (byId.TryGetValue(item.Id, out var existing))
+                {
+                    mapping[item.Id] = item.Id;
+                    if (existing.OriginalItems is null && item.OriginalItems is not null)
+                    {
+                        StoreRepresentations(item);
+                        var restored = existing with { OriginalItems = item.OriginalItems,
+                            OriginalMacIdentity = item.OriginalMacIdentity,
+                            ExcludeFromAi = existing.ExcludeFromAi || item.ExcludeFromAi };
+                        clips[clips.IndexOf(existing)] = restored;
+                        byId[item.Id] = restored;
+                    }
+                    continue;
+                }
                 if (item.Kind != ClipKind.Aggregate && item.TrashedAt is null &&
                     clips.FirstOrDefault(clip => clip.TrashedAt is null && clip.SameContent(item)) is { } duplicate)
                 {
                     mapping[item.Id] = duplicate.Id;
                     var merged = duplicate with { CollectionIds = duplicate.CollectionIds
-                        .Concat(item.CollectionIds.Where(validGroupIds.Contains)).Distinct().ToArray() };
+                        .Concat(item.CollectionIds.Where(validGroupIds.Contains)).Distinct().ToArray(),
+                        ExcludeFromAi = duplicate.ExcludeFromAi || item.ExcludeFromAi };
                     clips[clips.IndexOf(duplicate)] = merged;
                     byId[duplicate.Id] = merged;
                     continue;
@@ -102,6 +132,7 @@ public sealed partial class HistoryStore
                     LocalJson.WriteFile(path, file => file.Write(image));
                     written.Add(path);
                 }
+                StoreRepresentations(clip);
                 mapping[item.Id] = clip.Id;
                 byId.Add(clip.Id, clip);
                 clips.Add(clip);
@@ -115,5 +146,24 @@ public sealed partial class HistoryStore
             throw;
         }
         return added;
+
+        void StoreRepresentations(Clip item)
+        {
+            foreach (var representation in item.OriginalRepresentations)
+            {
+                string path = RepresentationPath(representation);
+                if (!saved.Add(path)) continue;
+                if (readRepresentation is null) throw new InvalidDataException("Missing clipboard representation reader.");
+                byte[] bytes = readRepresentation(representation);
+                if (!MatchesRepresentation(bytes, representation)) throw new InvalidDataException("Clipboard representation checksum mismatch.");
+                if (File.Exists(path))
+                {
+                    ReadRepresentation(representation);
+                    continue;
+                }
+                LocalJson.WriteFile(path, file => file.Write(bytes));
+                written.Add(path);
+            }
+        }
     }
 }
