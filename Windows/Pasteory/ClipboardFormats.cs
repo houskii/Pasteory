@@ -37,46 +37,56 @@ internal static class ClipboardFormats
         string? text = ReadText(data, DataFormats.UnicodeText) ?? ReadText(data, DataFormats.Text);
         string? html = ReadText(data, DataFormats.Html);
         string? rtf = ReadText(data, DataFormats.Rtf);
+        var image = ReadImage(data);
+        if (image is not null)
+        {
+            using var stream = new MemoryStream(image, writable: false);
+            var frame = BitmapFrame.Create(stream, BitmapCreateOptions.DelayCreation, BitmapCacheOption.None);
+            bool mixed = !string.IsNullOrEmpty(text) || html is not null || rtf is not null;
+            return (new Clip
+            {
+                Kind = mixed ? ClipKind.Mixed : ClipKind.Image, Source = source, Text = text, Html = html, Rtf = rtf,
+                ImageHash = Convert.ToHexString(SHA256.HashData(image)), ImageSize = image.Length,
+                ImageWidth = frame.PixelWidth, ImageHeight = frame.PixelHeight
+            }, image);
+        }
         if (!string.IsNullOrEmpty(text) || html is not null || rtf is not null)
         {
-            var kind = Uri.TryCreate(text?.Trim(), UriKind.Absolute, out var uri) &&
-                uri.Scheme is "http" or "https" ? ClipKind.Link : ClipKind.Text;
-            return (new Clip { Kind = kind, Source = source, Text = text, Html = html, Rtf = rtf }, null);
+            var (kind, language) = TextTools.Classify(text);
+            return (new Clip { Kind = kind, Source = source, Text = text, Html = html, Rtf = rtf, CodeLanguage = language }, null);
         }
-
-        var image = ReadImage(data);
-        return image is null ? null : (new Clip
-        {
-            Kind = ClipKind.Image,
-            Source = source,
-            ImageHash = Convert.ToHexString(SHA256.HashData(image)),
-            ImageSize = image.Length
-        }, image);
+        return null;
     }
 
     internal static DataObject Create(Clip clip, bool plainText, byte[]? png)
     {
         var data = new DataObject();
-        if (plainText || clip.Kind is ClipKind.Text or ClipKind.Link)
+        if (plainText)
         {
             if (clip.PlainText is { } text) data.SetText(text, TextDataFormat.UnicodeText);
-            if (!plainText)
+        }
+        else
+        {
+            if (clip.Text is { } text) data.SetText(text, TextDataFormat.UnicodeText);
+            if (clip.Html is not null) data.SetText(clip.Html, TextDataFormat.Html);
+            if (clip.Rtf is not null) data.SetText(clip.Rtf, TextDataFormat.Rtf);
+            if (clip.Files.Length > 0)
             {
-                if (clip.Html is not null) data.SetText(clip.Html, TextDataFormat.Html);
-                if (clip.Rtf is not null) data.SetText(clip.Rtf, TextDataFormat.Rtf);
+                if (clip.Files.All(Path.IsPathFullyQualified))
+                {
+                    var paths = new StringCollection();
+                    paths.AddRange(clip.Files);
+                    data.SetFileDropList(paths);
+                }
+                else if (clip.Text is null && clip.PlainText is { } references)
+                    data.SetText(references, TextDataFormat.UnicodeText);
             }
-        }
-        else if (clip.Kind == ClipKind.Files)
-        {
-            var paths = new StringCollection();
-            paths.AddRange(clip.Files);
-            data.SetFileDropList(paths);
-        }
-        else if (png is not null)
-        {
-            using var stream = new MemoryStream(png, writable: false);
-            data.SetImage(BitmapFrame.Create(stream, BitmapCreateOptions.None, BitmapCacheOption.OnLoad));
-            data.SetData(Png, new MemoryStream(png, writable: false), false);
+            if (png is not null)
+            {
+                using var stream = new MemoryStream(png, writable: false);
+                data.SetImage(BitmapFrame.Create(stream, BitmapCreateOptions.None, BitmapCacheOption.OnLoad));
+                data.SetData(Png, new MemoryStream(png, writable: false), false);
+            }
         }
 
         data.SetData(Exclude, new MemoryStream(new byte[4], writable: false), false);
@@ -85,17 +95,30 @@ internal static class ClipboardFormats
         return data;
     }
 
-    internal static BitmapSource DecodePreview(byte[] png)
+    internal static BitmapSource DecodePreview(byte[] png, int width = 500)
     {
         using var stream = new MemoryStream(png, writable: false);
         var image = new BitmapImage();
         image.BeginInit();
         image.CacheOption = BitmapCacheOption.OnLoad;
-        image.DecodePixelWidth = 500;
+        image.DecodePixelWidth = width;
         image.StreamSource = stream;
         image.EndInit();
         image.Freeze();
         return image;
+    }
+
+    internal static string WindowsHtml(string html)
+    {
+        if (html.StartsWith("Version:", StringComparison.OrdinalIgnoreCase)) return html;
+        const string headers = "Version:1.0\r\nStartHTML:{0:D10}\r\nEndHTML:{1:D10}\r\nStartFragment:{2:D10}\r\nEndFragment:{3:D10}\r\n";
+        const string start = "<html><body><!--StartFragment-->";
+        const string end = "<!--EndFragment--></body></html>";
+        int offset = string.Format(System.Globalization.CultureInfo.InvariantCulture, headers, 0, 0, 0, 0).Length;
+        int startFragment = offset + start.Length;
+        int endFragment = startFragment + Encoding.UTF8.GetByteCount(html);
+        return string.Format(System.Globalization.CultureInfo.InvariantCulture, headers, offset, endFragment + end.Length,
+            startFragment, endFragment) + start + html + end;
     }
 
     private static string? ReadText(IDataObject data, string format)

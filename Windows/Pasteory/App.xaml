@@ -3,27 +3,6 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              ShutdownMode="OnExplicitShutdown">
     <Application.Resources>
-        <SolidColorBrush x:Key="Canvas" Color="#F3F6FA"/>
-        <SolidColorBrush x:Key="Surface" Color="#FFFFFF"/>
-        <SolidColorBrush x:Key="Ink" Color="#17283F"/>
-        <SolidColorBrush x:Key="Muted" Color="#465D76"/>
-        <SolidColorBrush x:Key="Line" Color="#CBD6E2"/>
-        <SolidColorBrush x:Key="Accent" Color="#1754A2"/>
-        <Style TargetType="Window">
-            <Setter Property="FontFamily" Value="Segoe UI"/>
-            <Setter Property="FontSize" Value="14"/>
-            <Setter Property="Background" Value="{StaticResource Canvas}"/>
-            <Setter Property="Foreground" Value="{StaticResource Ink}"/>
-            <Setter Property="UseLayoutRounding" Value="True"/>
-        </Style>
-        <Style TargetType="Button">
-            <Setter Property="Padding" Value="12,6"/>
-            <Setter Property="MinHeight" Value="32"/>
-            <Setter Property="Margin" Value="0,0,8,0"/>
-        </Style>
-        <Style TargetType="TextBox">
-            <Setter Property="Padding" Value="8,5"/>
-            <Setter Property="BorderBrush" Value="{StaticResource Line}"/>
-        </Style>
+        <ResourceDictionary Source="Theme.xaml"/>
     </Application.Resources>
 </Application>

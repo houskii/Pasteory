@@ -3,44 +3,109 @@ using System.Text.Json.Serialization;
 
 namespace Pasteory.Core;
 
-public enum ClipKind { Text, Link, Image, Files }
+public enum ClipKind { Text, Link, Image, Files, Color, Code, Mixed, Aggregate }
+
+public sealed record CaptureEvent(DateTimeOffset CapturedAt, string Source, string? Context = null, string? Url = null,
+    Dictionary<string, string>? Details = null);
+public sealed record ConversionRecord(TextTool Tool, string Original, string Source);
+public sealed record LinkDetails(string Status, string? Title, DateTimeOffset AttemptedAt, string? Source = null,
+    string? Quality = null);
+
+public enum ClipPriority { None, P1, P2, P3 }
 
 public sealed record Clip
 {
     public Guid Id { get; init; } = Guid.NewGuid();
     public DateTimeOffset CapturedAt { get; init; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? CreatedAt { get; init; }
+    public DateTimeOffset? LastPastedAt { get; init; }
+    public DateTimeOffset? ArchivedAt { get; init; }
+    public DateTimeOffset? TrashedAt { get; init; }
     public ClipKind Kind { get; init; }
     public string Source { get; init; } = "";
+    public string SourceConfidence { get; init; } = "High";
+    public string? SourceIdentifier { get; init; }
+    public string? SourcePath { get; init; }
     public string? Text { get; init; }
     public string? Html { get; init; }
     public string? Rtf { get; init; }
     public string[] Files { get; init; } = [];
+    public string? FileIdentity { get; init; }
     public string? ImageHash { get; init; }
     public int ImageSize { get; init; }
+    public int ImageWidth { get; init; }
+    public int ImageHeight { get; init; }
+    public string? RecognizedText { get; init; }
+    public string? CodeLanguage { get; init; }
+    public LinkDetails? LinkDetails { get; init; }
     public string Title { get; init; } = "";
     public string Note { get; init; } = "";
     public string Group { get; init; } = "";
+    public Guid[] CollectionIds { get; init; } = [];
     public bool Favorite { get; init; }
     public bool Pinned { get; init; }
+    public ClipPriority Priority { get; init; }
+    public int CopyCount { get; init; } = 1;
+    public int PasteCount { get; init; }
+    public CaptureEvent[] Captures { get; init; } = [];
+    public ConversionRecord[] Conversions { get; init; } = [];
+    public Guid[] Members { get; init; } = [];
+    public Guid? LastSelectedMember { get; init; }
+    public string? AggregationOrigin { get; init; }
+    public bool ExcludeFromAi { get; init; }
+    public bool IsManual { get; init; }
+    public ClipUse[] Uses { get; init; } = [];
 
     [JsonIgnore]
-    public string? PlainText => Kind == ClipKind.Files ? string.Join(Environment.NewLine, Files) : Text;
+    public string? PlainText => Text ?? (Files.Length > 0 ? string.Join(Environment.NewLine, Files) : null);
 
-    internal bool SameContent(Clip other) =>
-        Kind == other.Kind && Text == other.Text && Html == other.Html && Rtf == other.Rtf &&
-        ImageHash == other.ImageHash && Files.SequenceEqual(other.Files, StringComparer.OrdinalIgnoreCase);
+    [JsonIgnore]
+    public bool HasImage => ImageSize > 0 || Kind == ClipKind.Image;
+
+    [JsonIgnore]
+    public string DisplayTitle => Title.Length > 0 ? Title : LinkDetails?.Title ?? "";
+
+    internal bool SameContent(Clip other)
+    {
+        if (Kind != other.Kind || Kind == ClipKind.Aggregate) return false;
+        return Kind switch
+        {
+            ClipKind.Link when LinkKey(Text) is { } link => link == LinkKey(other.Text),
+            ClipKind.Image => ImageHash == other.ImageHash,
+            ClipKind.Files when FileIdentity is not null && other.FileIdentity is not null => FileIdentity == other.FileIdentity,
+            ClipKind.Files => SamePaths(other),
+            ClipKind.Text or ClipKind.Color or ClipKind.Code when Text is not null && other.Text is not null =>
+                Text.Trim().Equals(other.Text.Trim(), StringComparison.Ordinal),
+            _ => Text == other.Text && Html == other.Html && Rtf == other.Rtf &&
+                ImageHash == other.ImageHash && SamePaths(other)
+        };
+    }
+
+    internal static string? LinkKey(string? text) => Uri.TryCreate(text?.Trim(), UriKind.Absolute, out var uri) &&
+        uri.Scheme is "http" or "https" ? uri.IdnHost.ToLowerInvariant() + uri.AbsolutePath.TrimEnd('/') : null;
+
+    private bool SamePaths(Clip other) => Files.SequenceEqual(other.Files, StringComparer.OrdinalIgnoreCase);
 
     internal long Size => IndexSize + ImageSize;
 
     internal long IndexSize => 256L + Encoding.UTF8.GetByteCount(Title) + Encoding.UTF8.GetByteCount(Note) +
         Encoding.UTF8.GetByteCount(Group) + Encoding.UTF8.GetByteCount(Source) + Bytes(Text) + Bytes(Html) + Bytes(Rtf) +
-        Files.Sum(path => (long)Encoding.UTF8.GetByteCount(path));
+        Bytes(RecognizedText) + Bytes(LinkDetails?.Title) + Files.Sum(path => (long)Encoding.UTF8.GetByteCount(path)) +
+        Uses.Length * 32L +
+        Captures.Sum(capture => 48L + Bytes(capture.Source) + Bytes(capture.Context) + Bytes(capture.Url) +
+            (capture.Details?.Sum(detail => Bytes(detail.Key) + Bytes(detail.Value)) ?? 0)) +
+        Conversions.Sum(conversion => 32L + Bytes(conversion.Original) + Bytes(conversion.Source));
 
     private static int Bytes(string? text) => text is null ? 0 : Encoding.UTF8.GetByteCount(text);
 
-    public bool Matches(string query) => query.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+    public bool Matches(string query, IEnumerable<string>? collections = null) =>
+        query.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
         .All(term => Contains(Title, term) || Contains(Text, term) || Contains(Note, term) ||
-            Contains(Source, term) || Contains(Group, term) || Files.Any(path => Contains(path, term)));
+            Contains(Source, term) || Contains(Group, term) || Contains(RecognizedText, term) ||
+            Contains(LinkDetails?.Title, term) || Files.Any(path => Contains(path, term)) ||
+            Captures.Any(capture => Contains(capture.Source, term) || Contains(capture.Context, term) || Contains(capture.Url, term) ||
+                capture.Details?.Values.Any(value => Contains(value, term)) == true) ||
+            collections?.Any(name => Contains(name, term)) == true);
 
     private static bool Contains(string? value, string term) =>
         value?.Contains(term, StringComparison.OrdinalIgnoreCase) == true;

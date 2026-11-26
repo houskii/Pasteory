@@ -62,6 +62,7 @@ try
     Check(settings.Paused && settings.UseAlternateShortcut && settings.ShouldIgnore("example") &&
         settings.ShouldIgnore("KEEPASSXC") && settings.ShouldIgnore("") && !settings.ShouldIgnore("Notepad"),
         "Persist settings and honor exclusions");
+    CheckLibrary(root);
     Console.WriteLine("Windows history and settings checks passed.");
 }
 finally
@@ -72,4 +73,70 @@ finally
 static void Check(bool condition, string description)
 {
     if (!condition) throw new InvalidOperationException(description);
+}
+
+static void CheckLibrary(string root)
+{
+    string folder = Path.Combine(root, "legacy library");
+    Directory.CreateDirectory(folder);
+    var text = new Clip { Text = " release notes ", Group = "Design", Source = "Editor", CopyCount = 2 };
+    File.WriteAllText(Path.Combine(folder, "history.json"), JsonSerializer.Serialize(new[] { text }));
+    var store = new HistoryStore(folder, maxClips: 3, archiveOverflow: true);
+    var group = store.Collections.Single();
+    Check(group.Name == "Design" && store.Clips[0].CollectionIds.SequenceEqual([group.Id]), "Migrate legacy groups");
+    var docs = new Clip { Kind = ClipKind.Link, Text = "https://EXAMPLE.com/project/?view=all", Source = "Chrome" };
+    Check(store.Capture(docs) && store.Capture(docs with { Id = Guid.NewGuid(), Text = "https://example.com/project#latest" }),
+        "Capture repeated link with different query and tracking");
+    Check(store.Clips.Count == 2 && store.Clips[0].Id == docs.Id && store.Clips[0].CopyCount == 2 &&
+        store.Clips[0].Captures.Length == 2, "Use logical link identity and keep copy events");
+    store.RecordPaste(docs.Id);
+    var saved = store.Clips[0];
+    Check(saved.PasteCount == 1 && saved.CopyCount == 2 && saved.CapturedAt == docs.CapturedAt, "Pasting preserves capture order");
+
+    var rule = new SmartRules(true, [new(RuleField.Source, RuleComparison.Contains, "chrome")],
+        [new SmartRules(false, [new(RuleField.Kind, RuleComparison.Equals, "Link"),
+            new(RuleField.Text, RuleComparison.Contains, "release")], [])]);
+    var smart = store.SaveCollection(null, "Work links", rule);
+    store.MoveCollection(smart.Id, group.Id);
+    Check(rule.Matches(saved, DateTimeOffset.Now) && !rule.Matches(text, DateTimeOffset.Now), "Nested smart rules");
+    var aggregation = store.SaveAggregation(null, "Release", "", [text.Id, docs.Id, text.Id], "Manual");
+    Check(aggregation.Members.Length == 2, "Aggregate unique members");
+
+    var image = new Clip { Kind = ClipKind.Mixed, Text = "caption", ImageSize = 3, ImageHash = "fixture" };
+    Check(store.Capture(image, [1, 2, 3]), "Capture mixed image payload");
+    var extra = new Clip { Kind = ClipKind.Code, Text = "using System;", CodeLanguage = "cs" };
+    Check(store.Capture(extra) && store.Clips.Count(clip => clip.ArchivedAt is not null) == 1, "Capacity archives instead of deleting");
+    store.Trash(image.Id);
+    Check(store.ReadImage(image).Length == 3 && store.Clips.First(clip => clip.Id == image.Id).TrashedAt is not null, "Trash preserves image");
+    store.Restore(image.Id);
+    Check(store.Clips.First(clip => clip.Id == image.Id).TrashedAt is null, "Restore from Trash");
+
+    var copy = new HistoryStore(folder);
+    Check(copy.Collections[0].Id == smart.Id && copy.Clips.Single(clip => clip.Id == aggregation.Id).Members.Contains(text.Id),
+        "Persist collections, ordering and aggregations");
+    Check(copy.Clips.Single(clip => clip.Id == text.Id).Text == text.Text &&
+        Directory.EnumerateFiles(Path.Combine(folder, "archives"), "*.br").Any(), "Read archived original text losslessly");
+    string backup = Path.Combine(root, "library.zip");
+    copy.ExportBackup(backup);
+    var restored = new HistoryStore(Path.Combine(root, "restored"));
+    Check(restored.ImportBackup(backup) == copy.Clips.Count && restored.ImportBackup(backup) == 0 &&
+        restored.ReadImage(image).SequenceEqual(new byte[] { 1, 2, 3 }), "Backup restores clips, groups and image bytes idempotently");
+    Check(TextTools.ConvertText(TextTool.Base64Decode, "5L2g5aW9") == "你好" &&
+        TextTools.ConvertText(TextTool.UrlDecode, "a+b%20c") == "a+b c" &&
+        TextTools.ConvertText(TextTool.RgbaToHex, "rgba(124, 58, 237, 0.5)") == "#7C3AED80" &&
+        TextTools.ConvertText(TextTool.Md5, "hello") == "5d41402abc4b2a76b9719d911017c592",
+        "Text conversions preserve UTF-8, literal plus and alpha roundoff");
+    int organized = copy.ApplyAiTopics([new("Project topics", "Test topic", [text.Id, docs.Id, image.Id])]);
+    Check(organized == 3 && copy.Collections.Single(group => group.IsAi).Name == "Project topics", "Apply reviewed topic atomically");
+    var withUndo = new HistoryStore(folder);
+    withUndo.Update(text.Id, item => item with { Note = "Keep this later note" });
+    withUndo.UndoAiTopics();
+    Check(!withUndo.Collections.Any(group => group.IsAi) && withUndo.Clips.Single(clip => clip.Id == text.Id).Note == "Keep this later note",
+        "Undo reviewed organization after restart preserves unrelated edits");
+    var now = DateTimeOffset.UtcNow;
+    var idle = new Clip { CreatedAt = now.AddHours(-48), CapturedAt = now.AddHours(-48) };
+    var values = new ActivityPreferences();
+    Check(Math.Abs(ClipActivity.Percentage(idle, values, now) - 50) < .01, "Activity halves after 48 hours");
+    var reused = ClipActivity.Record(idle, ActivityKind.Paste, now.AddHours(-24));
+    Check(ClipActivity.Percentage(reused, values, now) > 75, "Real pasted use resets age and applies the decaying boost");
 }

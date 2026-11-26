@@ -12,6 +12,7 @@ internal static partial class NativeMethods
     internal const uint Control = 0x0002;
     internal const uint Alt = 0x0001;
     internal const uint Shift = 0x0004;
+    internal const uint Win = 0x0008;
     internal const uint NoRepeat = 0x4000;
     internal const ushort V = 0x56;
 
@@ -34,6 +35,38 @@ internal static partial class NativeMethods
     internal static partial int SetForegroundWindow(nint window);
 
     [LibraryImport("user32.dll")]
+    internal static partial int SetWindowPos(nint window, nint after, int x, int y, int width, int height, uint flags);
+
+    [LibraryImport("user32.dll")]
+    internal static partial nint MonitorFromPoint(ScreenPoint point, uint flags);
+
+    [LibraryImport("shcore.dll")]
+    internal static partial int GetDpiForMonitor(nint monitor, int type, out uint x, out uint y);
+
+    [LibraryImport("user32.dll")]
+    internal static partial int GetWindowRect(nint window, out ScreenRect rectangle);
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal readonly record struct ScreenPoint(int X, int Y);
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct ScreenRect
+    {
+        internal int Left, Top, Right, Bottom;
+    }
+
+    [LibraryImport("user32.dll", EntryPoint = "GetWindowTextW", StringMarshalling = StringMarshalling.Utf16)]
+    private static unsafe partial int GetWindowText(nint window, char* value, int capacity);
+
+    internal static unsafe string WindowTitle(nint window)
+    {
+        const int capacity = 512;
+        char* buffer = stackalloc char[capacity];
+        int count = GetWindowText(window, buffer, capacity);
+        return count > 0 ? new string(buffer, 0, count) : "";
+    }
+
+    [LibraryImport("user32.dll")]
     private static partial uint GetWindowThreadProcessId(nint window, out uint processId);
 
     [LibraryImport("user32.dll")]
@@ -44,6 +77,26 @@ internal static partial class NativeMethods
 
     [LibraryImport("user32.dll")]
     private static partial short GetAsyncKeyState(int key);
+
+    [LibraryImport("user32.dll")]
+    private static partial int GetLastInputInfo(ref LastInput data);
+
+    [LibraryImport("kernel32.dll")]
+    private static partial int GetSystemPowerStatus(out PowerStatus data);
+
+    internal static TimeSpan IdleTime()
+    {
+        var state = new LastInput { Size = 8 };
+        return GetLastInputInfo(ref state) == 0 ? TimeSpan.Zero :
+            TimeSpan.FromMilliseconds(unchecked((uint)Environment.TickCount - state.Tick));
+    }
+
+    internal static bool BatterySaver() => GetSystemPowerStatus(out var status) != 0 && status.Saver != 0;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct LastInput { public uint Size, Tick; }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PowerStatus { public byte Ac, Battery, Percent, Saver; public uint Life, FullLife; }
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint count, [In] Input[] inputs, int size);
@@ -56,18 +109,23 @@ internal static partial class NativeMethods
 
     internal static bool OwnsClipboard() => ProcessId(GetClipboardOwner()) == Environment.ProcessId;
 
-    internal static string ClipboardOwnerName()
+    internal static string ClipboardOwnerName() => ClipboardOwner().Name;
+
+    internal static (string Name, string? Path) ClipboardOwner()
     {
         uint id = ProcessId(GetClipboardOwner());
-        if (id == 0) return "";
+        if (id == 0) return ("", null);
         try
         {
             using var process = Process.GetProcessById((int)id);
-            return process.ProcessName;
+            string name = process.ProcessName;
+            try { return (name, process.MainModule?.FileName); }
+            catch (System.ComponentModel.Win32Exception) { return (name, null); }
+            catch (InvalidOperationException) { return (name, null); }
         }
-        catch (ArgumentException) { return ""; }
-        catch (InvalidOperationException) { return ""; }
-        catch (System.ComponentModel.Win32Exception) { return ""; }
+        catch (ArgumentException) { return ("", null); }
+        catch (InvalidOperationException) { return ("", null); }
+        catch (System.ComponentModel.Win32Exception) { return ("", null); }
     }
 
     internal static bool ModifiersHeld() =>

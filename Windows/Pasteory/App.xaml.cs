@@ -2,13 +2,17 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Threading;
+using Microsoft.Win32;
 using Pasteory.Core;
 using Drawing = System.Drawing;
 using Forms = System.Windows.Forms;
@@ -17,7 +21,7 @@ namespace Pasteory.Windows;
 
 public partial class App : Application
 {
-    private readonly string dataDirectory = Path.Combine(
+    private string dataDirectory = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Pasteory");
     private HistoryStore history = null!;
     private HistoryWindow window = null!;
@@ -32,20 +36,61 @@ public partial class App : Application
     private bool ownsInstance;
     private bool listening;
     private bool hotkeyAvailable;
+    private bool disableHotkey;
+    private bool disableCapture;
+    private bool isolated;
+    internal bool AutomationWindow { get; private set; }
     private bool pasting;
     private uint observedSequence;
     private nint pasteTarget;
     private uint pasteTargetProcess;
     internal bool Exiting { get; private set; }
     internal LocalSettings Settings { get; private set; } = new();
-    internal IReadOnlyList<Clip> Clips => history.Clips;
-    private string Shortcut => Settings.UseAlternateShortcut ? "Ctrl+Alt+V" : "Ctrl+Shift+V";
+    internal IReadOnlyList<Clip> Clips => history?.Clips ?? [];
+    internal IReadOnlyList<ClipCollection> Collections => history?.Collections ?? [];
+    internal string DataDirectory => dataDirectory;
+    internal bool ShortcutAvailable => hotkeyAvailable;
+    internal bool CaptureAvailable => listening;
+    private readonly DispatcherTimer maintenance = new() { Interval = TimeSpan.FromHours(1) };
+    private readonly DispatcherTimer aiTimer = new() { Interval = TimeSpan.FromSeconds(30) };
+    private readonly CancellationTokenSource lifetime = new();
 
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        int dataArgument = Array.IndexOf(e.Args, "--data-root");
+        isolated = dataArgument >= 0 && dataArgument + 1 < e.Args.Length && Path.IsPathFullyQualified(e.Args[dataArgument + 1]);
+        if (isolated) dataDirectory = Path.GetFullPath(e.Args[dataArgument + 1]);
+        if (e.Args.Contains(ChromeBridge.Origin, StringComparer.Ordinal) ||
+            e.Args.Contains("--chrome-native-messaging-host", StringComparer.Ordinal))
+        {
+            _ = RunChromeHostAsync();
+            return;
+        }
+        int restartIndex = Array.LastIndexOf(e.Args, "--restart-after");
+        if (restartIndex >= 0 && restartIndex + 1 < e.Args.Length && int.TryParse(e.Args[restartIndex + 1], out int previous))
+        {
+            try
+            {
+                using var process = Process.GetProcessById(previous);
+                if (process.ProcessName.Equals("Pasteory", StringComparison.OrdinalIgnoreCase)) process.WaitForExit(4000);
+            }
+            catch (ArgumentException) { }
+        }
+        disableHotkey = e.Args.Contains("--no-hotkey", StringComparer.Ordinal);
+        disableCapture = e.Args.Contains("--no-capture", StringComparer.Ordinal);
+        AutomationWindow = isolated && e.Args.Contains("--automation-window", StringComparer.Ordinal);
+        Updates = new WindowsUpdates(dataDirectory);
+        if (Updates.InstalledNewer() is { } newer && TryLaunchReplacement(newer, waitForExit: false))
+        {
+            Shutdown();
+            return;
+        }
         using var identity = WindowsIdentity.GetCurrent();
         string user = identity.User?.Value ?? Environment.UserName;
+        if (isolated)
+            user += "." + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(dataDirectory.ToUpperInvariant())))[..20];
         openRequest = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\Pasteory.Open." + user);
         instance = new Mutex(false, "Global\\Pasteory.History." + user);
         ownsInstance = Acquire(instance);
@@ -60,9 +105,13 @@ public partial class App : Application
         {
             Directory.CreateDirectory(dataDirectory);
             Settings = LocalSettings.Load(dataDirectory);
-            history = new HistoryStore(dataDirectory);
+            Labels.Language = Settings.Language;
+            Theme.Apply(Resources, Settings);
+            history = new HistoryStore(dataDirectory, maxClips: 20_000, maxBytes: 1024L * 1024 * 1024, archiveOverflow: true);
+            history.RunMaintenance(DateTimeOffset.Now, Settings.ArchiveAfterDays);
+            Ai = new AiTasks(dataDirectory);
         }
-        catch (Exception error) when (IsLocalError(error) || error is JsonException)
+        catch (Exception error) when (IsLocalError(error) || error is JsonException or InvalidDataException)
         {
             MessageBox.Show(Labels.Format("Local data could not be opened at {0}.", dataDirectory) +
                 Environment.NewLine + error.Message, "Pasteory", MessageBoxButton.OK, MessageBoxImage.Error);
@@ -71,18 +120,42 @@ public partial class App : Application
         }
 
         window = new HistoryWindow(this);
+        if (AutomationWindow) window.ShowInTaskbar = true;
         MainWindow = window;
+        SystemEvents.UserPreferenceChanged += OnSystemPreferenceChanged;
         CreateTray();
         messages = new HwndSource(new HwndSourceParameters("Pasteory clipboard messages") { ParentWindow = new nint(-3) });
         messages.AddHook(ReceiveMessage);
         observedSequence = NativeMethods.GetClipboardSequenceNumber();
-        listening = NativeMethods.AddClipboardFormatListener(messages.Handle) != 0;
+        listening = !disableCapture && NativeMethods.AddClipboardFormatListener(messages.Handle) != 0;
         RegisterShortcut();
+        maintenance.Tick += (_, _) =>
+        {
+            ChangeHistory(() => history.RunMaintenance(DateTimeOffset.Now, Settings.ArchiveAfterDays));
+            CheckUpdateIfDue();
+        };
+        maintenance.Start();
+        aiTimer.Tick += (_, _) => AiTick();
+        aiTimer.Start();
+        _ = ChromeBridge.ReceiveAsync(dataDirectory, ChromeEventAsync, lifetime.Token);
 
         openRegistration = ThreadPool.RegisterWaitForSingleObject(openRequest, (_, _) =>
             Dispatcher.BeginInvoke(new Action(OpenFromTray)), null, Timeout.Infinite, executeOnlyOnce: false);
 
-        OpenFromTray();
+        if (e.Args.Contains("--show-library")) OpenSettings(SettingsPage.Library);
+        else if (!e.Args.Contains("--tray")) window.Present(keepVisibleForAutomation: isolated && e.Args.Contains("--show-panel"));
+        CheckUpdateIfDue();
+    }
+
+    private async Task RunChromeHostAsync()
+    {
+        await ChromeBridge.RunHostAsync(dataDirectory);
+        Shutdown();
+    }
+
+    private void OnSystemPreferenceChanged(object sender, UserPreferenceChangedEventArgs e)
+    {
+        if (!Exiting && Settings.Appearance == "System") Dispatcher.BeginInvoke(() => Theme.Apply(Resources, Settings));
     }
 
     private static bool Acquire(Mutex mutex)
@@ -96,18 +169,15 @@ public partial class App : Application
         using var iconStream = GetResourceStream(new Uri("Assets/Pasteory.ico", UriKind.Relative)).Stream;
         icon = new Drawing.Icon(iconStream);
         var menu = new Forms.ContextMenuStrip();
-        menu.Items.Add(Labels.Get("Open history"), null, (_, _) => OpenFromTray());
+        menu.Items.Add(Labels.Get("Open quick panel"), null, (_, _) => OpenFromTray());
+        menu.Items.Add(Labels.Get("Open library"), null, (_, _) => OpenSettings(SettingsPage.Library));
         pauseMenuItem = (Forms.ToolStripMenuItem)menu.Items.Add("", null, (_, _) =>
             SaveSettings(Settings with { Paused = !Settings.Paused }));
-        menu.Items.Add(Labels.Get("Settings"), null, (_, _) =>
-        {
-            OpenFromTray();
-            OpenSettings();
-        });
+        menu.Items.Add(Labels.Get("Settings"), null, (_, _) => OpenSettings());
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add(Labels.Get("Quit"), null, (_, _) => Shutdown());
         tray = new Forms.NotifyIcon { Icon = icon, Text = "Pasteory", ContextMenuStrip = menu, Visible = true };
-        tray.MouseDoubleClick += (_, _) => OpenFromTray();
+        tray.MouseClick += (_, e) => { if (e.Button == Forms.MouseButtons.Left) OpenFromTray(); };
     }
 
     private nint ReceiveMessage(nint handle, int message, nint wParam, nint lParam, ref bool handled)
@@ -119,22 +189,24 @@ public partial class App : Application
         }
         else if (message == NativeMethods.HotKeyPressed && wParam == NativeMethods.HotKeyId)
         {
-            if (settingsWindow is not null)
+            if (window.IsActive)
             {
-                settingsWindow.Activate();
-            }
-            else if (window.IsActive)
-            {
-                window.Hide();
+                window.Dismiss(restoreTarget: true);
             }
             else
             {
                 RememberPasteTarget();
-                window.Present();
+                _ = ShowAfterCaptureAsync();
             }
             handled = true;
         }
         return 0;
+    }
+
+    private async Task ShowAfterCaptureAsync()
+    {
+        await CaptureAsync();
+        if (!Exiting) window.Present();
     }
 
     private async Task CaptureAsync()
@@ -142,9 +214,9 @@ public partial class App : Application
         uint sequence = NativeMethods.GetClipboardSequenceNumber();
         if (sequence == 0 || sequence == observedSequence) return;
         observedSequence = sequence;
-        if (Settings.Paused) return;
+        if (Settings.Paused || disableCapture) return;
 
-        string source = NativeMethods.ClipboardOwnerName();
+        var (source, path) = NativeMethods.ClipboardOwner();
         if (Settings.ShouldIgnore(source)) return;
 
         for (int attempt = 0; attempt < 5; attempt++)
@@ -169,11 +241,18 @@ public partial class App : Application
 
             if (capture is { } item && sequence == NativeMethods.GetClipboardSequenceNumber())
             {
+                Clip clip = item.Clip with { SourcePath = path };
+                if (clip.Kind == ClipKind.Files)
+                    clip = clip with { FileIdentity = await Task.Run(() => FileFingerprint(clip.Files)) };
+                if (Exiting || Settings.Paused || Settings.ShouldIgnore(source)) return;
+                clip = clip with { Captures = [ReadSourceContext(clip)] };
+                Clip? saved = null;
                 ChangeHistory(() =>
                 {
-                    if (!history.Capture(item.Clip, item.Image))
+                    if (!history.Capture(clip, item.Image, out saved))
                         Notify("The history limit was reached. Unpin or unfavorite a clip to make room.");
                 });
+                if (saved is not null) _ = EnrichAsync(saved, item.Image);
             }
             return;
         }
@@ -181,31 +260,34 @@ public partial class App : Application
 
     private void RememberPasteTarget()
     {
-        pasteTarget = NativeMethods.GetForegroundWindow();
-        pasteTargetProcess = NativeMethods.ProcessId(pasteTarget);
-        if (pasteTargetProcess == 0 || pasteTargetProcess == Environment.ProcessId) pasteTarget = 0;
+        nint current = NativeMethods.GetForegroundWindow();
+        uint process = NativeMethods.ProcessId(current);
+        if (process == 0 || process == Environment.ProcessId) return;
+        pasteTarget = current;
+        pasteTargetProcess = process;
+    }
+
+    internal void RestoreFocus()
+    {
+        if (pasteTarget != 0 && NativeMethods.ProcessId(pasteTarget) == pasteTargetProcess)
+            NativeMethods.SetForegroundWindow(pasteTarget);
     }
 
     private void OpenFromTray()
     {
         if (Exiting) return;
-        if (settingsWindow is not null)
-        {
-            settingsWindow.Activate();
-            return;
-        }
-        if (!window.IsActive) pasteTarget = 0;
-        window.Present();
+        if (!window.IsActive) RememberPasteTarget();
+        _ = ShowAfterCaptureAsync();
     }
 
     internal async Task UseClipAsync(Clip clip, bool paste, bool plainText)
     {
-        if (pasting) return;
+        if (pasting || clip.Kind == ClipKind.Aggregate || clip.TrashedAt is not null) return;
         if (plainText && string.IsNullOrEmpty(clip.PlainText)) return;
         uint writtenSequence;
         try
         {
-            byte[]? image = clip.Kind == ClipKind.Image && !plainText ? history.ReadImage(clip) : null;
+            byte[]? image = clip.HasImage && !plainText ? history.ReadImage(clip) : null;
             Clipboard.SetDataObject(ClipboardFormats.Create(clip, plainText, image), copy: true);
             writtenSequence = NativeMethods.GetClipboardSequenceNumber();
             if (!NativeMethods.OwnsClipboard())
@@ -222,7 +304,7 @@ public partial class App : Application
         }
         catch (Exception error) when (IsLocalError(error) || error is ArgumentException or NotSupportedException)
         {
-            Notify(clip.Kind == ClipKind.Image ? "The saved image could not be opened." : error.Message);
+            Notify(clip.HasImage ? "The saved image could not be opened." : error.Message);
             return;
         }
 
@@ -243,7 +325,8 @@ public partial class App : Application
         pasting = true;
         try
         {
-            window.Hide();
+            window.Dismiss(restoreTarget: false);
+            settingsWindow?.Hide();
             NativeMethods.SetForegroundWindow(target);
             for (int attempt = 0; attempt < 20; attempt++)
             {
@@ -256,7 +339,11 @@ public partial class App : Application
                 if (target == NativeMethods.GetForegroundWindow() && process == NativeMethods.ProcessId(target) &&
                     !NativeMethods.ModifiersHeld())
                 {
-                    if (NativeMethods.SendPaste()) return;
+                    if (NativeMethods.SendPaste())
+                    {
+                        ChangeHistory(() => history.RecordPaste(clip.Id));
+                        return;
+                    }
                     break;
                 }
                 await Task.Delay(25);
@@ -267,34 +354,28 @@ public partial class App : Application
     }
 
     internal byte[] ReadImage(Clip clip) => history.ReadImage(clip);
-    internal void EditClip(Clip clip, string title, string note, string group, bool pinned, bool favorite) =>
-        ChangeHistory(() =>
-        {
-            if (!history.Edit(clip, title, note, group, pinned, favorite))
-                Notify("The history limit was reached. Shorten the title, group, or note.");
-        });
-    internal void DeleteClip(Clip clip) => ChangeHistory(() => history.Delete(clip));
-    internal void ClearUnprotected() => ChangeHistory(history.ClearUnprotected);
-
-    private void ChangeHistory(Action change)
+    private bool ChangeHistory(Action change)
     {
         try
         {
             change();
             if (window.IsVisible) window.Refresh();
+            if (settingsWindow?.IsVisible == true) settingsWindow.RefreshLibrary();
+            return true;
         }
-        catch (Exception error) when (IsLocalError(error))
+        catch (Exception error) when (IsLocalError(error) || error is ArgumentException)
         {
             Notify(error.Message);
+            return false;
         }
     }
 
-    internal void OpenSettings()
+    internal void OpenSettings(SettingsPage? page = null)
     {
-        if (settingsWindow is not null) return;
-        settingsWindow = new SettingsWindow(this) { Owner = window };
-        try { settingsWindow.ShowDialog(); }
-        finally { settingsWindow = null; }
+        if (Exiting) return;
+        if (settingsWindow?.IsActive != true) RememberPasteTarget();
+        settingsWindow ??= new SettingsWindow(this);
+        settingsWindow.Present(page);
     }
 
     internal void OpenDataFolder()
@@ -308,16 +389,30 @@ public partial class App : Application
 
     internal bool SaveSettings(LocalSettings next)
     {
-        try { next.Save(dataDirectory); }
-        catch (Exception error) when (IsLocalError(error))
+        bool shortcutChanged = Shortcuts.Text(Settings, Command.ShowPanel) != Shortcuts.Text(next, Command.ShowPanel);
+        bool pausedChanged = Settings.Paused != next.Paused;
+        bool themeChanged = Settings.Theme != next.Theme || Settings.Appearance != next.Appearance;
+        bool aiScopeChanged = Settings.Ai.Enabled != next.Ai.Enabled || Settings.Ai.ShareNotes != next.Ai.ShareNotes ||
+            Settings.Ai.ShareOcr != next.Ai.ShareOcr || Settings.Ai.ShareSource != next.Ai.ShareSource ||
+            Settings.Ai.ShareResources != next.Ai.ShareResources || Settings.Ai.Endpoint != next.Ai.Endpoint ||
+            Settings.Ai.Model != next.Ai.Model;
+        bool startupChanged = Settings.StartAtLogin != next.StartAtLogin && !isolated;
+        try
         {
+            if (startupChanged) SetStartAtLogin(next.StartAtLogin);
+            next.Save(dataDirectory);
+        }
+        catch (Exception error) when (IsLocalError(error) || error is System.Security.SecurityException)
+        {
+            if (startupChanged) TryRestoreStartAtLogin();
             Notify(error.Message);
             return false;
         }
-        bool shortcutChanged = Settings.UseAlternateShortcut != next.UseAlternateShortcut;
-        bool pausedChanged = Settings.Paused != next.Paused;
         Settings = next;
+        if (aiScopeChanged) Ai?.Pause();
+        if (themeChanged) Theme.Apply(Resources, Settings);
         if (pausedChanged) observedSequence = NativeMethods.GetClipboardSequenceNumber();
+        if (window.IsVisible) window.Refresh();
         if (shortcutChanged) RegisterShortcut();
         else RefreshStatus();
         return true;
@@ -327,9 +422,17 @@ public partial class App : Application
     {
         if (messages is null) return;
         if (hotkeyAvailable) NativeMethods.UnregisterHotKey(messages.Handle, NativeMethods.HotKeyId);
-        uint modifier = Settings.UseAlternateShortcut ? NativeMethods.Alt : NativeMethods.Shift;
-        hotkeyAvailable = NativeMethods.RegisterHotKey(messages.Handle, NativeMethods.HotKeyId,
-            NativeMethods.Control | modifier | NativeMethods.NoRepeat, NativeMethods.V) != 0;
+        hotkeyAvailable = false;
+        if (!disableHotkey && Shortcut.TryParse(Shortcuts.Text(Settings, Command.ShowPanel), out var binding))
+        {
+            uint modifiers = NativeMethods.NoRepeat;
+            if (binding.Modifiers.HasFlag(ModifierKeys.Control)) modifiers |= NativeMethods.Control;
+            if (binding.Modifiers.HasFlag(ModifierKeys.Shift)) modifiers |= NativeMethods.Shift;
+            if (binding.Modifiers.HasFlag(ModifierKeys.Alt)) modifiers |= NativeMethods.Alt;
+            if (binding.Modifiers.HasFlag(ModifierKeys.Windows)) modifiers |= NativeMethods.Win;
+            hotkeyAvailable = NativeMethods.RegisterHotKey(messages.Handle, NativeMethods.HotKeyId, modifiers,
+                (uint)KeyInterop.VirtualKeyFromKey(binding.Key)) != 0;
+        }
         RefreshStatus();
     }
 
@@ -338,15 +441,19 @@ public partial class App : Application
         if (tray is not null) tray.Text = Settings.Paused ? $"Pasteory · {Labels.Get("Capture paused")}" : "Pasteory";
         if (pauseMenuItem is not null)
             pauseMenuItem.Text = Labels.Get(Settings.Paused ? "Resume clipboard capture" : "Pause clipboard capture");
-        window.SetStatus(!listening ? Labels.Get("Clipboard monitoring could not start. Restart Pasteory to retry.") :
-            hotkeyAvailable ? Labels.Format(Settings.Paused ? "Capture paused · {0}" : "Capture active · {0}", Shortcut) :
-            Labels.Get("The global shortcut is unavailable. Open history from the tray or change the shortcut in Settings."));
+        if (window.IsVisible && !listening && !disableCapture)
+            window.SetStatus(Labels.Get("Clipboard monitoring could not start. Restart Pasteory to retry."));
+        else if (window.IsVisible && Settings.Paused)
+            window.SetStatus(Labels.Get("Capture paused"));
+        else if (window.IsVisible && !hotkeyAvailable && !disableHotkey && Shortcuts.Text(Settings, Command.ShowPanel).Length > 0)
+            window.SetStatus(Labels.Get("The global shortcut is unavailable. Open history from the tray or change the shortcut in Settings."));
     }
 
-    private void Notify(string message)
+    internal void Notify(string message)
     {
         window.SetStatus(Labels.Get(message));
-        if (!window.IsVisible && tray is not null)
+        if (settingsWindow?.IsVisible == true) settingsWindow.SetStatus(Labels.Get(message));
+        else if (!window.IsVisible && tray is not null)
             tray.ShowBalloonTip(2500, "Pasteory", Labels.Get(message), Forms.ToolTipIcon.Info);
     }
 
@@ -355,6 +462,10 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         Exiting = true;
+        maintenance.Stop();
+        aiTimer.Stop();
+        lifetime.Cancel();
+        SystemEvents.UserPreferenceChanged -= OnSystemPreferenceChanged;
         openRegistration?.Unregister(null);
         openRequest?.Dispose();
         if (messages is not null)
