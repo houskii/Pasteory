@@ -184,7 +184,10 @@ public sealed partial class HistoryStore
             Group = existing.Group,
             Captures = [.. events.Concat(previous).Take(100)],
             Conversions = existing.Conversions,
-            RecognizedText = latest.RecognizedText ?? existing.RecognizedText,
+            RecognizedText = existing.RecognizedText ?? latest.RecognizedText,
+            RecognizedAt = existing.RecognizedAt ?? latest.RecognizedAt,
+            OcrInNote = existing.OcrInNote,
+            OcrPending = existing.RecognizedText is null && latest.RecognizedText is null && (existing.OcrPending || latest.OcrPending),
             LinkDetails = latest.LinkDetails is { Status: "Not attempted" } fallback && existing.LinkDetails is { } known
                 ? known with { FallbackTitle = fallback.FallbackTitle, FallbackSource = fallback.FallbackSource, Route = fallback.Route }
                 : latest.LinkDetails ?? existing.LinkDetails

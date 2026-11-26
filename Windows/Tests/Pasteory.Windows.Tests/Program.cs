@@ -21,6 +21,7 @@ internal static partial class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        int pathIndex = Array.IndexOf(args, "--packaged-app");
         int fixture = Array.IndexOf(args, "--prepare-ui");
         if (fixture >= 0)
         {
@@ -29,7 +30,7 @@ internal static partial class Program
         }
         if (args.Contains("--link-engine"))
         {
-            CheckLinkEngine();
+            CheckLinkEngine(pathIndex >= 0 ? args[pathIndex + 1] : null);
             return;
         }
         if (args.Contains("--chat-context"))
@@ -117,6 +118,7 @@ internal static partial class Program
         var mixedReplay = ClipboardFormats.Create(mixed.Clip, false, mixed.Image);
         Check(mixed.Clip.Kind == ClipKind.Mixed && mixedReplay.GetText() == "Image caption" &&
             mixedReplay.GetImage().PixelHeight == 1, "Preserve both text and image in a mixed copy");
+        CheckImagePlainText(mixed.Clip, mixed.Image!);
         var originalImage = CheckOriginalImages();
 
         app.InitializeComponent();
@@ -148,10 +150,10 @@ internal static partial class Program
                 RestoreClipboard(previous);
             }
         }
-        int pathIndex = Array.IndexOf(args, "--packaged-app");
         if (pathIndex >= 0)
         {
             CheckPackagedApp(args[pathIndex + 1]);
+            if (args.Contains("--ocr")) CheckPackagedOcr(args[pathIndex + 1]);
             System.Threading.Tasks.Task.Run(() => CheckChromeBridgeAsync(args[pathIndex + 1])).GetAwaiter().GetResult();
         }
         Console.WriteLine("Windows clipboard format and WPF checks passed.");
@@ -424,13 +426,14 @@ internal static partial class Program
         jpeg.Frames.Add(BitmapFrame.Create(bitmap));
         jpeg.Save(stream);
         byte[] bytes = stream.ToArray();
-        store.Capture(new Clip
+        var paletteClip = new Clip
         {
             Kind = ClipKind.Image, Source = "Paint", SourcePath = sourceIcons["Paint"], CapturedAt = now.AddMinutes(-3),
-            ImageFormat = ClipImageFormat.Jpeg, ImageSize = bytes.Length, ImageWidth = 360, ImageHeight = 160, RecognizedText = "Pasteory · 配色灵感",
+            ImageFormat = ClipImageFormat.Jpeg, ImageSize = bytes.Length, ImageWidth = 360, ImageHeight = 160,
             Title = "主题预览", Note = "保留原图，方便回看",
             ImageHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes))
-        }, bytes);
+        }.WithImageRecognition("Pasteory · 配色灵感", now);
+        store.Capture(paletteClip, bytes);
         store.Capture(new Clip { Kind = ClipKind.Files, Source = "Explorer", SourcePath = sourceIcons["Explorer"], Files = [filename], CapturedAt = now.AddMinutes(-4) });
         store.Capture(new Clip { Kind = ClipKind.Color, Source = "Figma", Text = "hsla(265deg, 76%, 54%, .85)",
             CollectionIds = [design.Id], CapturedAt = now.AddMinutes(-5) });

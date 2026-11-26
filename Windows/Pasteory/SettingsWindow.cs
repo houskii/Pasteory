@@ -425,7 +425,7 @@ internal sealed partial class SettingsWindow : Window
         Switch(capture, "Pause clipboard capture", app.Settings.Paused, (settings, value) => settings with { Paused = value });
         capture.Children.Add(Ui.Text(Labels.Get("Windows clipboard changes are recorded as they happen."), 11, "Muted"));
         Switch(capture, "Recognize image text", app.Settings.RecognizeImages, (settings, value) => settings with { RecognizeImages = value },
-            "Recognition runs on this device, and the text is searchable.");
+            "Recognition runs on this device and appends [OCR:…] to the note. You can edit the result, search it or copy it as plain text.");
         var sources = SettingsCard(layout, "Source details");
         Switch(sources, "Chrome page context", app.Settings.IncludeBrowserContext, (settings, value) => settings with { IncludeBrowserContext = value },
             "Uses the Pasteory Chrome extension.");

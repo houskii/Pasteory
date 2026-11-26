@@ -73,6 +73,11 @@ internal sealed class MacBackupReader(string root)
         var source = Child(item, "source");
         var created = Date(item, "createdAt") ?? DateTimeOffset.Now;
         var copiedAt = Date(item, "lastCopiedAt") ?? created;
+        var ocr = Child(item, "localOCR");
+        string? contentHash = Optional(item, "contentHash");
+        string? recognized = Int(ocr, "version", 1) == 1 && (Optional(ocr, "contentHash") is not { } ocrHash ||
+            string.Equals(ocrHash, contentHash, StringComparison.OrdinalIgnoreCase)) ? Optional(ocr, "text") : null;
+        var pending = Optional(Child(item, "localOCRRequest"), "contentHash");
         var clip = new Clip
         {
             Id = id, Kind = kind, CreatedAt = created, CapturedAt = copiedAt, LastPastedAt = Date(item, "lastPastedAt"),
@@ -83,7 +88,9 @@ internal sealed class MacBackupReader(string root)
             CopyCount = Math.Max(0, Int(item, "copyCount", 1)), PasteCount = Math.Max(0, Int(item, "pasteCount")),
             CollectionIds = Guids(item, "collectionIDs"), Captures = events.GetValueOrDefault(id, []),
             ExcludeFromAi = Bool(item, "aiAnalysisExcluded"),
-            CodeLanguage = CodeExtension(Optional(Child(item, "codeMetadata"), "language")), RecognizedText = Optional(Child(item, "localOCR"), "text"),
+            CodeLanguage = CodeExtension(Optional(Child(item, "codeMetadata"), "language")), RecognizedText = recognized,
+            RecognizedAt = recognized is null ? null : Date(ocr, "recognizedAt"),
+            OcrInNote = recognized is not null && Optional(ocr, "appendedNote") is not null,
             Conversions = Array(item, "quickTextTransformations").Select(ToConversion).OfType<ConversionRecord>().ToArray()
         };
         if (Optional(item, "automaticTitle") is { } title)
@@ -130,7 +137,8 @@ internal sealed class MacBackupReader(string root)
             clip = clip with
             {
                 ImageFormat = image.Format, ImageSize = image.Bytes.Length, ImageWidth = image.Width, ImageHeight = image.Height,
-                ImageHash = Convert.ToHexString(SHA256.HashData(image.Bytes))
+                ImageHash = Convert.ToHexString(SHA256.HashData(image.Bytes)),
+                OcrPending = recognized is null && pending is not null && string.Equals(pending, contentHash, StringComparison.OrdinalIgnoreCase)
             };
             File.WriteAllBytes(Path.Combine(staging, clip.ImageFileName), image.Bytes);
         }

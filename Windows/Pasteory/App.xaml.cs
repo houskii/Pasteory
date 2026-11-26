@@ -126,7 +126,7 @@ public partial class App : Application
         if (AutomationWindow) window.ShowInTaskbar = true;
         MainWindow = window;
         SystemEvents.UserPreferenceChanged += OnSystemPreferenceChanged;
-        SystemEvents.PowerModeChanged += OnAiPowerModeChanged;
+        SystemEvents.PowerModeChanged += OnPowerModeChanged;
         CreateTray();
         messages = new HwndSource(new HwndSourceParameters("Pasteory clipboard messages") { ParentWindow = new nint(-3) });
         messages.AddHook(ReceiveMessage);
@@ -138,9 +138,11 @@ public partial class App : Application
             ChangeHistory(() => history.RunMaintenance(DateTimeOffset.Now, Settings.ArchiveAfterDays));
             CheckUpdateIfDue();
             ScheduleWebCacheCheck();
+            _ = CheckDueLinkSessionsAsync();
         };
         maintenance.Start();
         StartWebCache();
+        _ = RecognizePendingImagesAsync();
         aiTimer.Tick += (_, _) => AiTick();
         aiTimer.Start();
         _ = ChromeBridge.ReceiveAsync(dataDirectory, ChromeEventAsync, lifetime.Token);
@@ -154,6 +156,7 @@ public partial class App : Application
             new WelcomeWindow(this, () => window.Present(keepVisibleForAutomation: previewOnboarding)).Show();
         else if (!e.Args.Contains("--tray")) window.Present(keepVisibleForAutomation: isolated && e.Args.Contains("--show-panel"));
         CheckUpdateIfDue();
+        StartLinkSessionRefresh();
     }
 
     private async Task RunChromeHostAsync()
@@ -255,7 +258,7 @@ public partial class App : Application
                     clip = clip with { FileIdentity = await Task.Run(() => FileFingerprint(clip.Files)) };
                 if (Exiting || Settings.Paused || Settings.ShouldIgnore(source)) return;
                 var sourceContext = ReadSourceContext(clip, out nint chatWindow);
-                clip = clip with { Captures = [sourceContext] };
+                clip = clip with { Captures = [sourceContext], OcrPending = item.Image is not null && Settings.RecognizeImages };
                 if (clip.Kind == ClipKind.Link) clip = clip with { LinkDetails = LinkFallback(clip) };
                 Clip? saved = null;
                 ChangeHistory(() =>
@@ -265,7 +268,8 @@ public partial class App : Application
                 });
                 if (saved is not null)
                 {
-                    _ = EnrichAsync(saved, item.Image);
+                    _ = EnrichLinkAsync(saved);
+                    if (saved.OcrPending) _ = RecognizePendingImagesAsync();
                     if (chatWindow != 0) _ = EnrichChatAsync(saved.Id, sourceContext, chatWindow);
                 }
             }
@@ -298,7 +302,11 @@ public partial class App : Application
     internal async Task UseClipAsync(Clip clip, bool paste, bool plainText, ClipboardItem? original = null)
     {
         if (pasting || clip.Kind == ClipKind.Aggregate || clip.TrashedAt is not null) return;
-        if (plainText && string.IsNullOrEmpty(clip.PlainText)) return;
+        if (plainText && original is null && string.IsNullOrEmpty(clip.PlainClipboardText))
+        {
+            Notify("This clip has no plain text.");
+            return;
+        }
         uint writtenSequence;
         try
         {
@@ -319,8 +327,14 @@ public partial class App : Application
                 data = ClipboardFormats.Create(clip with
                 {
                     Text = item.Text, Html = item.Html, Rtf = item.Rtf, Files = item.Files,
+                    Note = "", RecognizedText = null, OcrInNote = false,
                     ImageFormat = item.Image?.Format ?? ClipImageFormat.Png
                 }, plainText, item.Image?.Bytes);
+                if (plainText && !data.GetDataPresent(DataFormats.UnicodeText, false))
+                {
+                    Notify("This clip has no plain text.");
+                    return;
+                }
             }
             Clipboard.SetDataObject(data, copy: true);
             writtenSequence = NativeMethods.GetClipboardSequenceNumber();
@@ -433,6 +447,8 @@ public partial class App : Application
         bool themeChanged = Settings.Theme != next.Theme || Settings.Appearance != next.Appearance;
         bool linkRulesChanged = !Settings.LinkFallbacks.SequenceEqual(next.LinkFallbacks);
         bool enableWebCacheCleanup = !Settings.AutomaticWebCacheCleanup && next.AutomaticWebCacheCleanup;
+        bool enableImageOcr = !Settings.RecognizeImages && next.RecognizeImages;
+        bool linkRefreshChanged = Settings.ResolveLinks != next.ResolveLinks;
         bool aiScopeChanged = Settings.Ai.Enabled != next.Ai.Enabled || Settings.Ai.ShareNotes != next.Ai.ShareNotes ||
             Settings.Ai.ShareOcr != next.Ai.ShareOcr || Settings.Ai.ShareSource != next.Ai.ShareSource ||
             Settings.Ai.ShareResources != next.Ai.ShareResources || Settings.Ai.Endpoint != next.Ai.Endpoint ||
@@ -451,6 +467,12 @@ public partial class App : Application
         }
         Settings = next;
         if (enableWebCacheCleanup) ScheduleWebCacheCheck();
+        if (enableImageOcr) _ = RecognizePendingImagesAsync();
+        if (linkRefreshChanged)
+        {
+            settingsWindow?.UpdateLinkSessionRows();
+            if (next.ResolveLinks) _ = CheckDueLinkSessionsAsync();
+        }
         if (linkRulesChanged) ChangeHistory(() => history.UpdateLinkDetails(LinkFallback));
         if (aiScopeChanged) Ai?.Pause();
         if (themeChanged) Theme.Apply(Resources, Settings);
@@ -514,7 +536,7 @@ public partial class App : Application
         aiTimer.Stop();
         lifetime.Cancel();
         SystemEvents.UserPreferenceChanged -= OnSystemPreferenceChanged;
-        SystemEvents.PowerModeChanged -= OnAiPowerModeChanged;
+        SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         openRegistration?.Unregister(null);
         openRequest?.Dispose();
         if (messages is not null)

@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using Pasteory.Core;
@@ -10,58 +12,18 @@ namespace Pasteory.Windows;
 
 internal sealed partial class SettingsWindow
 {
+    private readonly Dictionary<Guid, Action> linkSessionRows = [];
+
     private void BuildLinkRules(Panel layout)
     {
         var sessions = SettingsCard(layout, "Pasteory sign-in sessions");
+        linkSessionRows.Clear();
         foreach (var rule in LinkTitles.BuiltInSignIns.Select(preset =>
             app.Settings.LinkSignIns.FirstOrDefault(item => item.Id == preset.Id) ?? preset)
             .Concat(app.Settings.LinkSignIns.Where(rule => !LinkTitles.IsBuiltInSignIn(rule))))
-        {
-            var actions = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
-            AddAction(actions, rule.Enabled ? "Sign in again…" : "Sign in…", async () =>
-            {
-                if (!await app.LinkSessions.ShowAsync(app.DataDirectory, rule, this)) return;
-                var next = app.Settings with
-                {
-                    LinkSignIns = [.. app.Settings.LinkSignIns.Where(item => item.Id != rule.Id), rule with { Enabled = true }]
-                };
-                if (!app.SaveSettings(next)) return;
-                Select(SettingsPage.Links, rebuild: true);
-                int count = await app.ResolveMatchingLinksAsync(rule.Pattern);
-                SetStatus(Labels.Format("Retried {0} links.", count));
-            });
-            if (!LinkTitles.IsBuiltInSignIn(rule)) AddAction(actions, "Edit", () => EditSignIn(rule));
-            if (rule.Enabled)
-            {
-                AddAction(actions, "Clear session", async () =>
-                {
-                    if (!ClipMenus.Confirm(this, "Clear this Pasteory sign-in session?")) return;
-                    try
-                    {
-                        await app.LinkSessions.ClearAsync(app.DataDirectory, rule, new WindowInteropHelper(this).Handle);
-                        if (app.SaveSettings(app.Settings with { LinkSignIns = app.Settings.LinkSignIns.Select(item =>
-                            item.Id == rule.Id ? item with { Enabled = false } : item).ToArray() }))
-                            Select(SettingsPage.Links, rebuild: true);
-                    }
-                    catch (Exception error) when (LinkSignIn.WebError(error)) { SetStatus(error.Message); }
-                });
-            }
-            if (!LinkTitles.IsBuiltInSignIn(rule)) actions.Children.Add(Ui.IconButton(Glyph.Close, "Remove sign-in rule", async () =>
-            {
-                if (!ClipMenus.Confirm(this, "Remove this sign-in rule and clear its session?")) return;
-                try
-                {
-                    await app.LinkSessions.ClearAsync(app.DataDirectory, rule, new WindowInteropHelper(this).Handle);
-                    if (app.SaveSettings(app.Settings with { LinkSignIns = app.Settings.LinkSignIns.Where(item => item.Id != rule.Id).ToArray() }))
-                        Select(SettingsPage.Links, rebuild: true);
-                }
-                catch (Exception error) when (LinkSignIn.WebError(error)) { SetStatus(error.Message); }
-            }));
-            sessions.Children.Add(Row(rule.Name, actions, Labels.Get(rule.Enabled ? "Session ready" : "Sign-in required") +
-                " · " + (LinkTitles.IsBuiltInSignIn(rule) ? new Uri(rule.SignInUrl).Host : rule.Pattern)));
-        }
+            sessions.Children.Add(BuildLinkSessionRow(rule));
         sessions.Children.Add(Row("Site rules", Ui.Button("Add sign-in rule…", () => EditSignIn(null), "PrimaryButton"),
-            "Pasteory uses a separate browser profile for each sign-in rule."));
+            "Each rule uses a separate browser profile. Automatic refresh runs when link resolution is enabled."));
 
         var fallbacks = SettingsCard(layout, "Fallback rules");
         foreach (var rule in app.Settings.LinkFallbacks)
@@ -147,6 +109,144 @@ internal sealed partial class SettingsWindow
         }
     }
 
+    internal void UpdateLinkSessionRows()
+    {
+        if (current != SettingsPage.Links || !IsVisible) return;
+        foreach (var update in linkSessionRows.Values) update();
+    }
+
+    private FrameworkElement BuildLinkSessionRow(LinkSignInRule rule)
+    {
+        LinkSignInRule Current() => app.FindLinkSignInRule(rule.Id) ?? rule;
+        var row = new StackPanel { Margin = new Thickness(0, 3, 0, 12) };
+        var actions = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right, MaxWidth = 440 };
+        var refresh = Ui.Button("Refresh now", async () => await app.RefreshLinkSessionAsync(rule.Id));
+        refresh.Margin = new Thickness(5, 0, 0, 2);
+        actions.Children.Add(refresh);
+        var signIn = Ui.Button("Sign in…", async () =>
+        {
+            var requested = Current();
+            if (!await app.LinkSessions.ShowAsync(app.DataDirectory, requested, this)) return;
+            if (app.FindLinkSignInRule(rule.Id) is not { } latest || latest.SignInUrl != requested.SignInUrl) return;
+            if (!app.SaveLinkSignInRule(latest with { Enabled = true, Refresh = latest.Refresh.Reset(DateTimeOffset.UtcNow) })) return;
+            UpdateLinkSessionRows();
+            int count = await app.ResolveMatchingLinksAsync(latest.Pattern);
+            SetStatus(Labels.Format("Retried {0} links.", count));
+            if (current == SettingsPage.Links) Select(SettingsPage.Links, rebuild: true);
+        });
+        signIn.Margin = new Thickness(5, 0, 0, 2);
+        actions.Children.Add(signIn);
+        var clear = Ui.Button("Clear session", async () =>
+        {
+            if (!ClipMenus.Confirm(this, "Clear this Pasteory sign-in session?")) return;
+            try
+            {
+                var requested = Current();
+                await app.LinkSessions.ClearAsync(app.DataDirectory, requested, new WindowInteropHelper(this).Handle);
+                if (app.FindLinkSignInRule(rule.Id) is not { } latest || latest.SignInUrl != requested.SignInUrl) return;
+                if (app.SaveLinkSignInRule(latest with { Enabled = false, Refresh = latest.Refresh.Reset(null) })) UpdateLinkSessionRows();
+            }
+            catch (Exception error) when (LinkSignIn.WebError(error)) { SetStatus(error.Message); }
+        });
+        clear.Margin = new Thickness(5, 0, 0, 2);
+        actions.Children.Add(clear);
+        if (!LinkTitles.IsBuiltInSignIn(rule))
+        {
+            AddAction(actions, "Edit", () => EditSignIn(Current()));
+            actions.Children.Add(Ui.IconButton(Glyph.Close, "Remove sign-in rule", async () =>
+            {
+                if (!ClipMenus.Confirm(this, "Remove this sign-in rule and clear its session?")) return;
+                try
+                {
+                    await app.LinkSessions.ClearAsync(app.DataDirectory, Current(), new WindowInteropHelper(this).Handle);
+                    if (app.SaveSettings(app.Settings with { LinkSignIns = app.Settings.LinkSignIns.Where(item => item.Id != rule.Id).ToArray() }) &&
+                        current == SettingsPage.Links) Select(SettingsPage.Links, rebuild: true);
+                }
+                catch (Exception error) when (LinkSignIn.WebError(error)) { SetStatus(error.Message); }
+            }));
+        }
+        string address = LinkTitles.IsBuiltInSignIn(rule) && Uri.TryCreate(rule.SignInUrl, UriKind.Absolute, out var uri) ? uri.Host : rule.Pattern;
+        row.Children.Add(Row(rule.Name, actions, address));
+
+        var schedule = new WrapPanel { Margin = new Thickness(0, 0, 0, 5) };
+        var automaticLabel = Ui.Text(Labels.Get("Automatic session refresh"), 11);
+        automaticLabel.VerticalAlignment = VerticalAlignment.Center;
+        schedule.Children.Add(automaticLabel);
+        var automatic = new CheckBox { Margin = new Thickness(8, 0, 18, 0), VerticalAlignment = VerticalAlignment.Center };
+        automatic.SetResourceReference(StyleProperty, "SettingsSwitch");
+        AutomationProperties.SetName(automatic, Labels.Get("Automatic session refresh"));
+        schedule.Children.Add(automatic);
+        var intervalLabel = Ui.Text(Labels.Get("Refresh interval"), 11);
+        intervalLabel.VerticalAlignment = VerticalAlignment.Center;
+        schedule.Children.Add(intervalLabel);
+        var interval = new ComboBox
+        {
+            ItemsSource = LinkSessionRefresh.Intervals.Select(days => new SessionIntervalOption(days, Labels.Format("{0} days", days))).ToArray(),
+            DisplayMemberPath = nameof(SessionIntervalOption.Name), SelectedValuePath = nameof(SessionIntervalOption.Days),
+            Margin = new Thickness(8, 0, 0, 0), MinHeight = 24, MinWidth = 86
+        };
+        AutomationProperties.SetName(interval, Labels.Get("Refresh interval"));
+        schedule.Children.Add(interval);
+        row.Children.Add(schedule);
+        var status = Ui.Text("", 11, "Muted");
+        AutomationProperties.SetLiveSetting(status, AutomationLiveSetting.Polite);
+        row.Children.Add(status);
+
+        void UpdateVisuals()
+        {
+            var latest = Current();
+            var state = latest.Refresh;
+            bool running = app.IsRefreshingLinkSession(rule.Id);
+            signIn.Content = Labels.Get(latest.Enabled ? "Sign in again…" : "Sign in…");
+            clear.Visibility = latest.Enabled ? Visibility.Visible : Visibility.Collapsed;
+            refresh.IsEnabled = latest.Enabled && !running;
+            automatic.IsChecked = state.Automatic;
+            interval.SelectedValue = LinkSessionRefresh.Intervals.Contains(state.IntervalDays) ? state.IntervalDays : 14;
+            var lines = new List<string>();
+            if (state.LastSignedInAt is { } signed)
+                lines.Add(Labels.Format("Last sign-in {0}", signed.ToLocalTime().ToString("g")));
+            else lines.Add(Labels.Get(latest.Enabled ? "Session ready" : "Sign-in required"));
+            if (state.LastAttemptAt is { } attempted)
+            {
+                string result = running ? "Refreshing session…" : state.Outcome switch
+                {
+                    LinkSessionOutcome.PageLoaded => "Session page loaded",
+                    LinkSessionOutcome.NeedsSignIn => "Sign in again to resume refresh",
+                    LinkSessionOutcome.Blocked => "Session refresh blocked",
+                    LinkSessionOutcome.Failed => "Session refresh failed",
+                    _ => "Session refresh unfinished"
+                };
+                lines.Add(Labels.Format("Last refresh {0} · {1}", attempted.ToLocalTime().ToString("g"), Labels.Get(result)));
+            }
+            if (app.Settings.ResolveLinks && latest.Enabled && state.NextRefreshAt() is { } next)
+                lines.Add(Labels.Format("Next refresh {0}", next.ToLocalTime().ToString("g")));
+            status.Text = string.Join(Environment.NewLine, lines);
+        }
+        linkSessionRows[rule.Id] = UpdateVisuals;
+        UpdateVisuals();
+        automatic.Click += (_, _) =>
+        {
+            var latest = Current();
+            if (app.SaveLinkSignInRule(latest with { Refresh = latest.Refresh with { Automatic = automatic.IsChecked == true } }))
+                _ = app.CheckDueLinkSessionsAsync();
+            UpdateVisuals();
+        };
+        interval.SelectionChanged += (_, _) =>
+        {
+            var latest = Current();
+            if (interval.SelectedValue is not int days || days == latest.Refresh.IntervalDays) return;
+            if (app.SaveLinkSignInRule(latest with { Refresh = latest.Refresh with { IntervalDays = days } }))
+                _ = app.CheckDueLinkSessionsAsync();
+            UpdateVisuals();
+        };
+        return row;
+    }
+
+    private sealed record SessionIntervalOption(int Days, string Name)
+    {
+        public override string ToString() => Name;
+    }
+
     private static void AddAction(Panel target, string name, Action act)
     {
         var button = Ui.Button(name, act);
@@ -189,12 +289,14 @@ internal sealed partial class SettingsWindow
                 matches.Text = Labels.Get("Enter a name, valid rule and web address.");
                 return false;
             }
+            var latest = rule is null ? null : app.FindLinkSignInRule(rule.Id);
+            bool sameAddress = latest?.SignInUrl == uri.AbsoluteUri;
             var next = new LinkSignInRule(rule?.Id ?? Guid.NewGuid(), name.Text.Trim(), expression, uri.AbsoluteUri,
-                rule is { Enabled: true } && rule.SignInUrl == uri.AbsoluteUri);
-            var rules = app.Settings.LinkSignIns.ToList();
-            int position = rules.FindIndex(item => item.Id == next.Id);
-            if (position < 0) rules.Add(next); else rules[position] = next;
-            if (!app.SaveSettings(app.Settings with { LinkSignIns = rules.ToArray() })) return false;
+                sameAddress && latest is { Enabled: true })
+            {
+                Refresh = latest is null ? new() : sameAddress ? latest.Refresh : latest.Refresh.Reset(null)
+            };
+            if (!app.SaveLinkSignInRule(next)) return false;
             Select(SettingsPage.Links, rebuild: true);
             return true;
         }, close);

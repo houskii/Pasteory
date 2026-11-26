@@ -45,6 +45,12 @@ public sealed record Clip
     public int ImageWidth { get; init; }
     public int ImageHeight { get; init; }
     public string? RecognizedText { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool OcrInNote { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool OcrPending { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? RecognizedAt { get; init; }
     public string? CodeLanguage { get; init; }
     public LinkDetails? LinkDetails { get; init; }
     public string Title { get; init; } = "";
@@ -81,7 +87,50 @@ public sealed record Clip
     public string? PlainText => Text ?? (Files.Length > 0 ? string.Join(Environment.NewLine, Files) : null);
 
     [JsonIgnore]
+    public string? PlainClipboardText
+    {
+        get
+        {
+            if (Kind is ClipKind.Image or ClipKind.Files or ClipKind.Mixed)
+            {
+                string note = OcrInNote && ImageNotes.Find(Note, RecognizedText) is { } block
+                    ? ImageNotes.Unwrap(Note[..block.Start]) + block.Text + ImageNotes.Unwrap(Note[block.End..])
+                    : ImageNotes.Unwrap(Note);
+                if (!string.IsNullOrWhiteSpace(note)) return note;
+                if (RecognizedImageText is { } recognized && !string.IsNullOrWhiteSpace(recognized)) return recognized;
+            }
+            return PlainText;
+        }
+    }
+
+    [JsonIgnore]
     public bool HasImage => ImageSize > 0 || Kind == ClipKind.Image;
+
+    [JsonIgnore]
+    public string? RecognizedImageText => HasImage
+        ? ImageNotes.Find(Note, OcrInNote ? RecognizedText : null)?.Text ?? (OcrInNote ? "" : RecognizedText)
+        : null;
+
+    [JsonIgnore]
+    public string NoteWithoutImageOcr => (HasImage || OcrInNote) && ImageNotes.Find(Note, OcrInNote ? RecognizedText : null) is { } block
+        ? Note.Remove(block.Start, block.End - block.Start).Trim() : Note;
+
+    public Clip WithImageRecognition(string result, DateTimeOffset recognizedAt)
+    {
+        string text = result.Trim();
+        string note = OcrInNote ? NoteWithoutImageOcr : Note;
+        if (text.Length > 0) note = ImageNotes.Append(note, ImageNotes.Wrap(text));
+        return this with { Note = note, RecognizedText = text, RecognizedAt = recognizedAt, OcrInNote = text.Length > 0, OcrPending = false };
+    }
+
+    public Clip WithNoteEdit(Clip opened, string editedNote)
+    {
+        if (editedNote == opened.Note) return this;
+        if (!opened.OcrInNote && OcrInNote && ImageNotes.Find(editedNote, null) is null &&
+            ImageNotes.Find(Note, RecognizedText) is { } newBlock)
+            editedNote = ImageNotes.Append(editedNote, Note[newBlock.Start..newBlock.End]);
+        return this with { Note = editedNote };
+    }
 
     [JsonIgnore]
     public string ImageExtension => ImageFormat switch
@@ -140,7 +189,7 @@ public sealed record Clip
     public bool Matches(string query, IEnumerable<string>? collections = null) =>
         query.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
         .All(term => Contains(Title, term) || Contains(Text, term) || Contains(Note, term) ||
-            Contains(Source, term) || Contains(Group, term) || Contains(RecognizedText, term) ||
+            Contains(Source, term) || Contains(Group, term) || Contains(RecognizedImageText, term) ||
             Contains(LinkDetails?.Title, term) || Contains(LinkDetails?.FallbackTitle, term) || Files.Any(path => Contains(path, term)) ||
             Captures.Any(capture => Contains(capture.Source, term) || Contains(capture.Context, term) || Contains(capture.Url, term) ||
                 capture.Details?.Values.Any(value => Contains(value, term)) == true) ||

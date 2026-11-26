@@ -223,8 +223,8 @@ internal sealed class ClipCard : INotifyPropertyChanged
     public string Chevron => Clip.Kind == ClipKind.Aggregate ? row.Expanded ? "⌄" : "›" : "";
     public bool HasTitle => !IsChild && Clip.DisplayTitle.Length > 0 && Clip.Kind != ClipKind.Aggregate;
     public string Title => "◆  " + Clip.DisplayTitle;
-    public string Note => row.MatchSummary ?? ("▫  " + Short(Clip.Note, 100, 1));
-    public bool HasNote => IsChild ? row.MatchSummary is not null : Clip.Note.Length > 0;
+    public string Note => row.MatchSummary ?? ("▫  " + Short(Clip.NoteWithoutImageOcr, 100, 1));
+    public bool HasNote => IsChild ? row.MatchSummary is not null : Clip.NoteWithoutImageOcr.Length > 0;
     public bool IsEditedChild => IsChild && (Clip.Title.Length > 0 || Clip.Note.Length > 0);
     public bool HasGroups => Clip.CollectionIds.Length > 0;
     public bool IsFile => Clip.Files.Length > 0 && !Clip.HasImage;
@@ -247,10 +247,11 @@ internal sealed class ClipCard : INotifyPropertyChanged
     public bool NeedsImageFallback => HasImage && Thumbnail is null;
     public ImageSource? Thumbnail => HasImage ? app.ClipThumbnail(Clip).Bitmap : null;
     public string ImageDetails => HasImage ? app.ClipThumbnail(Clip).Details : "";
-    public string ImageText => !HasImage ? "" : Clip.RecognizedText switch
+    public string ImageText => !HasImage ? "" : Clip.RecognizedImageText switch
     {
+        null when Clip.OcrPending => Labels.Get("Waiting for image recognition…"),
         null => Labels.Get("No recognized text yet"),
-        "" => Labels.Get("No text detected"),
+        "" => Labels.Get(Clip.RecognizedText is "" ? "No text detected" : "No recognized text yet"),
         var value => Short(value.Trim(), 1200, 3)
     };
     public ImageSource? AppIcon => app.SourceIcon(Clip.SourcePath);

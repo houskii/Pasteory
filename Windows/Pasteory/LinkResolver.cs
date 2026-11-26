@@ -107,9 +107,9 @@ internal sealed partial class LinkResolver
     internal static LinkDetails AssessTitle(string? candidate, Uri finalUrl, string source)
     {
         string? title = NormalizeTitle(candidate);
-        if (string.IsNullOrEmpty(title)) return Failure("No page title");
-        if (LoginTitle().IsMatch(title) || LoginRoute().IsMatch(finalUrl.AbsolutePath))
+        if (IsSignInPage(title, finalUrl))
             return new("Sign-in required", null, DateTimeOffset.UtcNow, source, "Login or error page");
+        if (string.IsNullOrEmpty(title)) return Failure("No page title");
         string brand = finalUrl.Host.StartsWith("www.", StringComparison.OrdinalIgnoreCase) ? finalUrl.Host[4..] : finalUrl.Host;
         bool shell = title.Equals(brand, StringComparison.OrdinalIgnoreCase) ||
             title.Equals(brand.Split('.')[0], StringComparison.OrdinalIgnoreCase) ||
@@ -119,6 +119,9 @@ internal sealed partial class LinkResolver
             return new("Generic page title", null, DateTimeOffset.UtcNow, source, "Generic");
         return new("Resolved", title, DateTimeOffset.UtcNow, source, "Distinctive");
     }
+
+    internal static bool IsSignInPage(string? title, Uri url) =>
+        LoginRoute().IsMatch(url.AbsolutePath) || title is not null && LoginTitle().IsMatch(title);
 
     internal static Match? MatchRule(string pattern, Uri link)
     {
@@ -139,9 +142,9 @@ internal sealed partial class LinkResolver
     private static partial Regex MetaTags();
     [GeneratedRegex(@"([-\w]+)\s*=\s*(?:""([^""]*)""|'([^']*)')", RegexOptions.IgnoreCase)]
     private static partial Regex Attributes();
-    [GeneratedRegex(@"^\s*(?:sign in|log in|login|access denied|forbidden|just a moment|请登录|登录|访问受限)(?:\s|$|[|·–—-])",
+    [GeneratedRegex(@"^\s*(?:sign in|log in|login|authentication required|access denied|forbidden|just a moment|请登录|登录|访问受限|统一身份认证|安全验证)(?:\s|$|[|·–—-])",
         RegexOptions.IgnoreCase)]
     private static partial Regex LoginTitle();
-    [GeneratedRegex(@"(?:^|/)(?:login|signin|sign-in|oauth/authorize)(?:/|$)", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?:^|/)(?:login|login\.html|log-in|signin|sign-in|oauth/authorize)(?:/|$)", RegexOptions.IgnoreCase)]
     private static partial Regex LoginRoute();
 }

@@ -5,7 +5,10 @@ namespace Pasteory.Core;
 public sealed record FileOpenRule(string Extension, string? ApplicationPath = null, string? Command = null,
     bool ShowTerminal = false);
 
-public sealed record LinkSignInRule(Guid Id, string Name, string Pattern, string SignInUrl, bool Enabled = false);
+public sealed record LinkSignInRule(Guid Id, string Name, string Pattern, string SignInUrl, bool Enabled = false)
+{
+    public LinkSessionRefresh Refresh { get; init; } = new();
+}
 public sealed record LinkFallbackRule(string Pattern, string Title, LinkFallbackRoute? Route = null);
 public sealed record LinkFallbackRoute(Guid Id, string Name, string Host, string Path, string[] RequiredQueryKeys,
     bool Enabled = true, int Priority = 100);

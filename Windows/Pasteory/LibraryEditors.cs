@@ -19,7 +19,7 @@ internal static class LibraryEditors
     {
         var form = new StackPanel();
         var title = Ui.Field("Title", clip.Title, 160);
-        var note = Ui.Field("Note", clip.Note, 16000);
+        var note = Ui.Field("Note", clip.Note, 64_000);
         note.AcceptsReturn = true;
         note.TextWrapping = TextWrapping.Wrap;
         note.MinHeight = 76;
@@ -28,6 +28,7 @@ internal static class LibraryEditors
         note.VerticalContentAlignment = VerticalAlignment.Top;
         Ui.AddField(form, "Title", title);
         Ui.AddField(form, "Note", note);
+        if (clip.OcrInNote) form.Children.Add(Ui.Text(Labels.Get("Edit the text in [OCR:…] to update the recognized text and search."), 11, "Muted"));
         var checks = GroupChecks(app, clip, form);
         WireGroupKeys(checks.Select(entry => entry.Check).ToArray());
         if (clip.Kind != ClipKind.Aggregate)
@@ -36,9 +37,9 @@ internal static class LibraryEditors
             ClipDetails.AddSources(source, clip);
             Ui.AddField(form, "Capture source", source);
         }
-        bool Save() => app.EditClip(clip.Id, next => next with
+        bool Save() => app.EditClip(clip.Id, next => next.WithNoteEdit(clip, note.Text) with
         {
-            Title = title.Text.Trim(), Note = note.Text.Trim(), Group = "",
+            Title = title.Text == clip.Title ? next.Title : title.Text.Trim(), Group = "",
             CollectionIds = [.. checks.Where(entry => entry.Check.IsChecked == true).Select(entry => entry.Id),
                 .. next.CollectionIds.Where(id => app.Collections.Any(group => group.Id == id && group.IsAi))]
         });

@@ -2,6 +2,7 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Collections.Specialized;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -24,6 +25,22 @@ using Pasteory.Windows;
 
 internal static partial class Program
 {
+    private static void CheckImagePlainText(Clip mixed, byte[] image)
+    {
+        var withOcr = (mixed with { Note = " Image note [tag] " }).WithImageRecognition("Sample [PDF]", DateTimeOffset.UtcNow);
+        var plainCopy = ClipboardFormats.Create(withOcr, true, null);
+        Check(plainCopy.GetText() == " Image note [tag] \n\nSample [PDF]" && !plainCopy.ContainsImage(),
+            "Plain copy of mixed image content contains the editable note and recognition only");
+        var richCopy = ClipboardFormats.Create(withOcr, false, image);
+        Check(richCopy.GetText() == mixed.Text && richCopy.ContainsImage(), "Ordinary mixed copy retains the captured image and text");
+        var corrected = withOcr with { Note = "Caption\n\n[OCR:User correction]" };
+        var withoutSharing = AiTasks.Project(corrected, new AiPreferences { ShareNotes = true })!;
+        var withSharing = AiTasks.Project(corrected, new AiPreferences { ShareNotes = true, ShareOcr = true })!;
+        Check(withoutSharing.Note == "Caption" && withoutSharing.Text == mixed.Text &&
+            withSharing.Text.Contains("User correction", StringComparison.Ordinal) &&
+            !withSharing.Text.Contains("Sample [PDF]", StringComparison.Ordinal), "OCR sharing uses current edits and remains separate from sharing notes");
+    }
+
     private const string MarkdownSample = """
         # 剪贴板试读
 
@@ -170,10 +187,18 @@ internal static partial class Program
             };
             byte[] jpeg = SampleImage(new JpegBitmapEncoder());
             Guid pictureId = Guid.NewGuid(), referenceId = Guid.NewGuid();
+            var recognizedAt = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            string pictureHash = Convert.ToHexString(SHA256.HashData(jpeg));
             object ImageClip(Guid clipId, string kind) => new
             {
                 id = clipId, createdAt = DateTimeOffset.UtcNow, primaryKind = kind,
                 source = new { appName = "Finder" },
+                contentHash = pictureHash,
+                note = kind == "image" ? "Image caption\n\n[OCR:Corrected Mac OCR]" : "",
+                localOCR = kind == "image" ? new
+                {
+                    version = 1, contentHash = pictureHash, text = "Raw Mac OCR", recognizedAt, appendedNote = "[OCR:Raw Mac OCR]"
+                } : null,
                 items = new[]
                 {
                     new
@@ -211,6 +236,8 @@ internal static partial class Program
             Check(picture is { ImageFormat: ClipImageFormat.Jpeg, ImageWidth: 13, ImageHeight: 7 } &&
                 store.ReadImage(picture).SequenceEqual(jpeg) && reference.Kind == ClipKind.Files &&
                 !reference.HasImage && reference.Files.Length == 1, "Keep Mac image bytes and leave file references as files");
+            Check(picture.OcrInNote && picture.RecognizedAt == recognizedAt && picture.RecognizedImageText == "Corrected Mac OCR" &&
+                picture.PlainClipboardText == "Image caption\n\nCorrected Mac OCR", "Import the Mac editable OCR block and recognition timestamp");
             string zip = Path.Combine(root, "windows.zip");
             store.ExportBackup(zip);
             var restored = new HistoryStore(Path.Combine(root, "restored"));
@@ -239,6 +266,9 @@ internal static partial class Program
             var returnedClip = returned.Clips.Single(item => item.Id == id);
             Check(returnedClip.ExcludeFromAi && returned.ReadRepresentation(returnedClip.OriginalItems![1].Representations[1]).SequenceEqual(opaque),
                 "Cross-platform backup round trips preserve per-clip AI privacy and exact clipboard bytes");
+            var returnedImage = returned.Clips.Single(item => item.Id == pictureId);
+            Check(returnedImage.OcrInNote && returnedImage.RecognizedAt == recognizedAt && returnedImage.RecognizedImageText == "Corrected Mac OCR" &&
+                returnedImage.RecognizedText == "Raw Mac OCR", "Round-trip editable OCR metadata in Mac v5 format");
             var ticket = new Clip { Kind = ClipKind.Link, Text = "https://test.example.com/issues/42?view=summary" };
             Check(exportedArchive.Fallbacks.Single().Route?.Id == route.Route!.Id &&
                 LinkTitles.UpdateFallback(ticket, exportedArchive.Fallbacks)?.FallbackTitle == "Ticket 42 · summary",
@@ -464,7 +494,7 @@ internal static partial class Program
         catch (InvalidDataException) { }
     }
 
-    private static void CheckOcr()
+    private static byte[] OcrSampleImage()
     {
         var visual = new DrawingVisual();
         using (var draw = visual.RenderOpen())
@@ -480,14 +510,63 @@ internal static partial class Program
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
         using var bytes = new MemoryStream();
         encoder.Save(bytes);
+        return bytes.ToArray();
+    }
+
+    private static void CheckOcr()
+    {
         using var trace = new System.Diagnostics.TextWriterTraceListener(Console.Out);
         System.Diagnostics.Trace.Listeners.Add(trace);
-        string? result = ImageOcr.ReadAsync(bytes.ToArray(), "English", CancellationToken.None).GetAwaiter().GetResult();
+        string? result = ImageOcr.ReadAsync(OcrSampleImage(), "English", CancellationToken.None).GetAwaiter().GetResult();
         System.Diagnostics.Trace.Flush();
         System.Diagnostics.Trace.Listeners.Remove(trace);
         Console.WriteLine("Windows OCR languages: " + string.Join(", ",
             global::Windows.Media.Ocr.OcrEngine.AvailableRecognizerLanguages.Select(language => language.LanguageTag)));
         Check(result?.Contains("PASTEORY", StringComparison.OrdinalIgnoreCase) == true,
             $"Recognize synthetic text with Windows OCR. Observed: {result ?? "(none)"}");
+    }
+
+    private static void CheckPackagedOcr(string executable)
+    {
+        string root = Directory.CreateTempSubdirectory("Pasteory-OCR-QA-").FullName;
+        try
+        {
+            byte[] image = OcrSampleImage();
+            var clip = new Clip
+            {
+                Kind = ClipKind.Image, Source = "Test fixture", ImageSize = image.Length, ImageHash = Convert.ToHexString(SHA256.HashData(image)),
+                ImageWidth = 800, ImageHeight = 190, OcrPending = true, Note = "Saved caption"
+            };
+            Check(new HistoryStore(root).Capture(clip, image), "Seed a pending image recognition job");
+            new LocalSettings { Language = "English", RecognizeImages = true }.Save(root);
+            var start = new ProcessStartInfo(Path.GetFullPath(executable)) { UseShellExecute = false, CreateNoWindow = true };
+            foreach (string arg in new[] { "--data-root", root, "--no-hotkey", "--no-capture", "--tray" }) start.ArgumentList.Add(arg);
+            using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not launch the OCR fixture.");
+            try
+            {
+                var timeout = Stopwatch.StartNew();
+                while (timeout.Elapsed < TimeSpan.FromSeconds(12))
+                {
+                    Check(!process.HasExited, "The packaged app stays running while processing an OCR job");
+                    var store = new HistoryStore(root);
+                    var current = store.Clips.Single();
+                    if (!current.OcrPending)
+                    {
+                        Check(current.OcrInNote && current.Note.StartsWith("Saved caption\n\n[OCR:", StringComparison.Ordinal) &&
+                            current.RecognizedImageText?.Contains("PASTEORY", StringComparison.OrdinalIgnoreCase) == true &&
+                            store.SearchIds("local ocr").SequenceEqual([clip.Id]), "The packaged app resumes OCR and commits a searchable note");
+                        Console.WriteLine("The portable app resumed a saved OCR job and indexed the editable note.");
+                        return;
+                    }
+                    Thread.Sleep(150);
+                }
+                throw new InvalidOperationException("The packaged image recognition did not finish.");
+            }
+            finally
+            {
+                if (!process.HasExited) { process.Kill(); process.WaitForExit(3000); }
+            }
+        }
+        finally { Directory.Delete(root, recursive: true); }
     }
 }

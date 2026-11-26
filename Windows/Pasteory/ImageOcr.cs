@@ -55,7 +55,10 @@ internal static class ImageOcr
                 .AsTask(cancellation).ConfigureAwait(false);
             stage = "recognition";
             var result = await engine.RecognizeAsync(bitmap).AsTask(cancellation).ConfigureAwait(false);
-            return string.IsNullOrWhiteSpace(result.Text) ? null : result.Text[..Math.Min(result.Text.Length, 64_000)];
+            string text = string.Join('\n', result.Lines.Select(line => line.Text));
+            int length = Math.Min(text.Length, 32_000);
+            if (length < text.Length && char.IsHighSurrogate(text[length - 1])) length--;
+            return text[..length];
         }
         catch (Exception error) when (error is COMException or ArgumentException or NotSupportedException)
         {

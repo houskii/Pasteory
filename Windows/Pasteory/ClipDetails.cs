@@ -14,6 +14,7 @@ internal sealed class ClipDetails : DockPanel
     private readonly App app;
     private readonly Clip? clip;
     private readonly StackPanel cards = new() { Margin = new Thickness(13, 13, 13, 4) };
+    internal bool HasDraft { get; private set; }
 
     internal ClipDetails(App app, Clip? clip, Func<bool> expand)
     {
@@ -126,7 +127,12 @@ internal sealed class ClipDetails : DockPanel
             }
             else body.Children.Add(Ui.WithIcon(Glyph.Image, Labels.Get("The saved image could not be opened."), "Muted"));
             body.Children.Add(Ui.Text(preview.Details, 11, "Muted"));
-            if (clip.RecognizedText is { Length: > 0 } recognized) body.Children.Add(ContentPreview.TextBoxFor(recognized));
+            if (clip.RecognizedImageText is { Length: > 0 } recognized)
+            {
+                var text = ContentPreview.TextBoxFor(recognized);
+                text.MaxHeight = 160;
+                body.Children.Add(text);
+            }
         }
         if (clip.Files.Length > 0)
             body.Children.Add(new FilePreviewPanel { DataContext = clip });
@@ -221,7 +227,7 @@ internal sealed class ClipDetails : DockPanel
     {
         var body = Card("Edit");
         var title = Ui.Field("Title", clip!.Title, 160);
-        var note = Ui.Field("Note", clip.Note, 16000);
+        var note = Ui.Field("Note", clip.Note, 64_000);
         note.AcceptsReturn = true;
         note.TextWrapping = TextWrapping.Wrap;
         note.MinHeight = 72;
@@ -230,13 +236,23 @@ internal sealed class ClipDetails : DockPanel
         note.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
         Ui.AddField(body, "Title", title);
         Ui.AddField(body, "Note", note);
-        var save = Ui.Button("Save", () => app.EditClip(clip.Id, item => item with { Title = title.Text.Trim(), Note = note.Text.Trim() }),
-            "PrimaryButton");
+        if (clip.OcrInNote) body.Children.Add(Ui.Text(Labels.Get("Edit the text in [OCR:…] to update the recognized text and search."), 11, "Muted"));
+        var save = Ui.Button("Save", () =>
+        {
+            HasDraft = false;
+            if (!app.EditClip(clip.Id, item => item.WithNoteEdit(clip, note.Text) with
+                { Title = title.Text == clip.Title ? item.Title : title.Text.Trim() })) HasDraft = true;
+        }, "PrimaryButton");
         save.Margin = new Thickness(0, 6, 0, 0);
         save.HorizontalAlignment = HorizontalAlignment.Right;
         save.Visibility = Visibility.Collapsed;
-        title.TextChanged += (_, _) => save.Visibility = Visibility.Visible;
-        note.TextChanged += (_, _) => save.Visibility = Visibility.Visible;
+        void TrackDraft()
+        {
+            HasDraft = title.Text != clip.Title || note.Text != clip.Note;
+            save.Visibility = HasDraft ? Visibility.Visible : Visibility.Collapsed;
+        }
+        title.TextChanged += (_, _) => TrackDraft();
+        note.TextChanged += (_, _) => TrackDraft();
         body.Children.Add(save);
 
         var priorities = new StackPanel { Orientation = Orientation.Horizontal };

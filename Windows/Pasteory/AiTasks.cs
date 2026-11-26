@@ -589,7 +589,7 @@ internal sealed partial class AiTasks
             if (!prefs.AutoOrganize || !NeedsAnalysis(clip, prefs)) continue;
             if (old is not null && clip.Text == old.Text && clip.Html == old.Html && clip.Rtf == old.Rtf &&
                 clip.ImageHash == old.ImageHash && clip.ExcludeFromAi == old.ExcludeFromAi &&
-                (!prefs.ShareOcr || clip.RecognizedText == old.RecognizedText) &&
+                (!prefs.ShareOcr || clip.RecognizedImageText == old.RecognizedImageText) &&
                 clip.Files.SequenceEqual(old.Files, StringComparer.OrdinalIgnoreCase)) continue;
             newContent[clip.Id] = now;
             changed = true;
@@ -621,19 +621,21 @@ internal sealed partial class AiTasks
 
     internal static AiInput? Project(Clip clip, AiPreferences prefs)
     {
+        string note = prefs.ShareNotes ? clip.NoteWithoutImageOcr : "";
         if (clip.TrashedAt is not null || clip.ExcludeFromAi || clip.Kind == ClipKind.Aggregate ||
-            MightBeSecret(clip.Text) || MightBeSecret(clip.DisplayTitle) || prefs.ShareNotes && MightBeSecret(clip.Note)) return null;
+            MightBeSecret(clip.Text) || MightBeSecret(clip.DisplayTitle) || MightBeSecret(note)) return null;
+        string? recognized = prefs.ShareOcr ? clip.RecognizedImageText ?? "" : null;
+        if (MightBeSecret(recognized)) recognized = null;
         string text = clip.Kind switch
         {
             ClipKind.Files => string.Join("\n", clip.Files.Select(Path.GetFileName)),
-            ClipKind.Image => prefs.ShareOcr && !MightBeSecret(clip.RecognizedText) ? clip.RecognizedText ?? "" :
-                $"{clip.ImageWidth} × {clip.ImageHeight} {clip.ImageExtension.ToUpperInvariant()}",
+            ClipKind.Image => recognized ?? $"{clip.ImageWidth} × {clip.ImageHeight} {clip.ImageExtension.ToUpperInvariant()}",
             ClipKind.Link when Uri.TryCreate(clip.Text?.Trim(), UriKind.Absolute, out var url) => url.GetLeftPart(UriPartial.Path),
             _ => clip.Text ?? ""
         };
+        if (clip.Kind == ClipKind.Mixed && recognized is { Length: > 0 }) text += "\n\n[Local image OCR]\n" + recognized;
         if (MightBeSecret(text)) return null;
         string title = clip.DisplayTitle;
-        string note = prefs.ShareNotes ? clip.Note : "";
         string source = prefs.ShareSource ? clip.Source : "";
         string content = text.TrimEnd();
         string version = Hash(JsonSerializer.Serialize(new
@@ -649,7 +651,7 @@ internal sealed partial class AiTasks
         if (Project(clip, prefs) is not { } current) return false;
         if (current.Version == expected) return true;
         if (!legacy) return false;
-        string content = clip.Kind == ClipKind.Image && (!prefs.ShareOcr || MightBeSecret(clip.RecognizedText)) ?
+        string content = clip.Kind == ClipKind.Image && (!prefs.ShareOcr || MightBeSecret(clip.RecognizedImageText)) ?
             $"{clip.ImageWidth} × {clip.ImageHeight} PNG" : Compact(current.Text, 60_000);
         return Hash(JsonSerializer.Serialize(new { clip.Kind, title = current.Title, note = current.Note, source = current.Source, content })) == expected;
     }

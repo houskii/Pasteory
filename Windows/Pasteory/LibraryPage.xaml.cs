@@ -341,6 +341,7 @@ public partial class LibraryPage : UserControl
     {
         var clip = results.Selected?.Clip;
         if (ReferenceEquals(detailsClip, clip) && DetailsHost.Content is not null) return;
+        if (clip is not null && detailsClip?.Id == clip.Id && DetailsHost.Content is ClipDetails { HasDraft: true }) return;
         detailsClip = clip;
         DetailsHost.Content = new ClipDetails(app, clip, () => results.Selected is { } row && ToggleAggregation(row));
     }

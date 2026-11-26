@@ -71,7 +71,7 @@ internal static class ClipboardFormats
         var data = new DataObject();
         if (plainText)
         {
-            if (clip.PlainText is { } text) data.SetText(text, TextDataFormat.UnicodeText);
+            if (clip.PlainClipboardText is { Length: > 0 } text) data.SetText(text, TextDataFormat.UnicodeText);
         }
         else
         {

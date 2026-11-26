@@ -88,7 +88,7 @@ internal sealed record ClipListing(ClipListRow[] Rows, Guid[] SearchMembers, int
 
     private static int Score(Clip clip, string query, string[] words)
     {
-        int score = Field(clip.DisplayTitle, 8) + Field(clip.Text, 5) + Field(clip.RecognizedText, 5) +
+        int score = Field(clip.DisplayTitle, 8) + Field(clip.Text, 5) + Field(clip.RecognizedImageText, 5) +
             Field(clip.Note, 4) + Field(clip.Source, 2);
         return score + (clip.Favorite ? 5 : 0) + (int)clip.Priority * 2 + Math.Min(5, (int)Math.Log2(Math.Max(1, clip.CopyCount)));
 

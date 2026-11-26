@@ -217,10 +217,14 @@ public partial class App
         return Clips.Where(clip => clip.CollectionIds.Any(eligible.Contains)).Select(clip => clip.Id).ToHashSet();
     }
 
-    private void OnAiPowerModeChanged(object sender, Microsoft.Win32.PowerModeChangedEventArgs args) =>
+    private void OnPowerModeChanged(object sender, Microsoft.Win32.PowerModeChangedEventArgs args) =>
         _ = Dispatcher.BeginInvoke(new Action(() =>
         {
-            if (args.Mode == Microsoft.Win32.PowerModes.Resume) systemSuspended = false;
+            if (args.Mode == Microsoft.Win32.PowerModes.Resume)
+            {
+                systemSuspended = false;
+                _ = CheckDueLinkSessionsAsync();
+            }
             if (args.Mode != Microsoft.Win32.PowerModes.Suspend) return;
             systemSuspended = true;
             if (Ai.ActiveJob?.Trigger is "weekly" or "first story" or "idle" or "review" or "incremental") Ai.SuspendBackground();

@@ -82,10 +82,12 @@ internal sealed partial class MacBackupWriter(HistoryStore store, AiTasks ai, IR
                 action = conversion.Tool == TextTool.HexToRgba ? "hexToRGBA" : Camel(conversion.Tool.ToString()),
                 originalText = conversion.Original, source = Source(conversion.Source, null, "unknown")
             }).ToArray(),
-            localOCR = clip.RecognizedText is { Length: > 0 } text ? new
+            localOCR = clip.RecognizedText is { } text ? new
             {
-                version = 1, contentHash, text, recognizedAt = Date(ClipActivity.LastUsed(clip))
+                version = 1, contentHash, text, recognizedAt = Date(clip.RecognizedAt ?? ClipActivity.LastUsed(clip)),
+                appendedNote = clip.OcrInNote ? "[OCR:" + text + "]" : null
             } : null,
+            localOCRRequest = clip.OcrPending ? new { contentHash, method = "visionAccurate" } : null,
             items = items.Select(item => new
             {
                 item.Id, item.Order, representations = item.Representations.Select(rep => new

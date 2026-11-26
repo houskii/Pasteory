@@ -259,7 +259,7 @@ public sealed partial class HistoryStore
 
     private static string SearchText(Clip clip, Dictionary<Guid, string> groups)
     {
-        var fields = new List<string?> { clip.Title, clip.Note, clip.Text, clip.RecognizedText, clip.LinkDetails?.Title, clip.LinkDetails?.FallbackTitle,
+        var fields = new List<string?> { clip.Title, clip.Note, clip.Text, clip.RecognizedImageText, clip.LinkDetails?.Title, clip.LinkDetails?.FallbackTitle,
             clip.Source, clip.SourceIdentifier, clip.Group };
         fields.AddRange(clip.Files);
         fields.AddRange(clip.CollectionIds.Select(id => groups.GetValueOrDefault(id)));

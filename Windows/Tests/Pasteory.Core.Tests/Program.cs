@@ -70,6 +70,8 @@ try
         settings.ShouldIgnore("KEEPASSXC") && settings.ShouldIgnore("") && !settings.ShouldIgnore("Notepad"),
         "Persist settings and honor exclusions");
     CheckLibrary(root);
+    CheckOcrNotes(root);
+    CheckLinkSessionSchedule(root);
     await CheckCleanup(root);
     Console.WriteLine("Windows history and settings checks passed.");
 }
@@ -81,6 +83,63 @@ finally
 static void Check(bool condition, string description)
 {
     if (!condition) throw new InvalidOperationException(description);
+}
+
+static void CheckOcrNotes(string root)
+{
+    string folder = Path.Combine(root, "ocr-notes");
+    var store = new HistoryStore(folder);
+    byte[] bytes = [1, 2, 3];
+    var image = new Clip { Kind = ClipKind.Image, ImageSize = bytes.Length, ImageHash = "ocr-fixture", OcrPending = true, Note = "Caption [ref]" };
+    Check(store.Capture(image, bytes) && new HistoryStore(folder).Clips.Single().OcrPending, "Keep queued image recognition across restarts");
+    var now = DateTimeOffset.UtcNow;
+    const string original = "Original transcription\nAn unbalanced [ bracket and a ] here]";
+    Check(store.Update(image.Id, clip => clip.WithImageRecognition(original, now)), "Save recognition on the existing image");
+    var saved = store.Clips.Single();
+    Check(saved.RecognizedImageText == original && saved.NoteWithoutImageOcr == "Caption [ref]" && saved.RecognizedAt == now &&
+        !saved.OcrPending && saved.PlainClipboardText == "Caption [ref]\n\n" + original, "Keep literal brackets and line breaks in the plain clipboard");
+    Check(saved.CapturedAt == image.CapturedAt && saved.CopyCount == image.CopyCount, "Recognition preserves capture activity");
+    Check(saved.WithNoteEdit(image, image.Note) == saved && saved.WithNoteEdit(image, "Caption edited during OCR").PlainClipboardText ==
+        "Caption edited during OCR\n\n" + original, "A recognition result arriving during an edit survives saving the draft");
+    Check(store.Update(image.Id, clip => clip with { Note = " Caption [ref]\n[OCR:Corrected [example]]\nTail [link] " }), "Edit an OCR note");
+    var edited = new HistoryStore(folder).Clips.Single();
+    Check(edited.RecognizedImageText == "Corrected [example]" && edited.NoteWithoutImageOcr == "Caption [ref]\n\nTail [link]" &&
+        edited.PlainClipboardText == " Caption [ref]\nCorrected [example]\nTail [link] " &&
+        store.SearchIds("corrected").SequenceEqual([image.Id]) && store.SearchIds("transcription").Count == 0,
+        "Edits drive display, plain text and the search index without exposing stale OCR");
+    Check(store.Update(image.Id, clip => clip with { Note = "" }) && store.Capture(image with { Id = Guid.NewGuid() }, bytes) &&
+        store.Clips.Single() is { OcrInNote: true, OcrPending: false, PlainClipboardText: null } &&
+        store.SearchIds("corrected").Count == 0, "Removing the OCR block survives another copy of the same image");
+
+    var legacy = new Clip { Kind = ClipKind.Image, RecognizedText = "Legacy recognized text" };
+    Check(legacy.PlainClipboardText == "Legacy recognized text" &&
+        (new Clip { Kind = ClipKind.Files, Note = "[OCR:File [ref]", Files = ["C:\\report.txt"] }).PlainClipboardText == "File [ref]" &&
+        (new Clip { Kind = ClipKind.Files, Files = ["C:\\report.txt"] }).PlainClipboardText == "C:\\report.txt" &&
+        (new Clip { Kind = ClipKind.Text, Text = "  Original text  ", Note = "Separate note" }).PlainClipboardText == "  Original text  ",
+        "Preserve plain copy for legacy images, files and ordinary text");
+}
+
+static void CheckLinkSessionSchedule(string root)
+{
+    var signedIn = DateTimeOffset.UtcNow;
+    var schedule = new LinkSessionRefresh().Reset(signedIn);
+    Check(schedule.NextRefreshAt() == signedIn.AddDays(14) && new LinkSessionRefresh().NextRefreshAt() is null,
+        "Refresh only established sessions, every fourteen days by default");
+    foreach (int days in LinkSessionRefresh.Intervals)
+        Check((schedule with { IntervalDays = days }).NextRefreshAt() == signedIn.AddDays(days), "Use each available per-site interval");
+    var attempted = signedIn.AddDays(15);
+    var failure = schedule with { LastAttemptAt = attempted, Outcome = LinkSessionOutcome.Failed };
+    Check(failure.NextRefreshAt() == attempted.AddHours(1) &&
+        (failure with { Outcome = LinkSessionOutcome.PageLoaded, LastRefreshedAt = attempted }).NextRefreshAt() == attempted.AddDays(14),
+        "Retry a failed page in one hour and restart the interval after a successful load");
+    Check((failure with { Outcome = LinkSessionOutcome.NeedsSignIn }).NextRefreshAt() is null &&
+        (failure with { Outcome = LinkSessionOutcome.Blocked }).NextRefreshAt() is null &&
+        (schedule with { Automatic = false }).NextRefreshAt() is null, "Pause automation for expired, blocked or manually disabled sessions");
+    var rule = new LinkSignInRule(Guid.NewGuid(), "Test", "example", "https://example.com/", true) { Refresh = failure };
+    string folder = Path.Combine(root, "web-session-schedule");
+    new LocalSettings { LinkSignIns = [rule] }.Save(folder);
+    Check(LocalSettings.Load(folder).LinkSignIns.Single() == rule && failure.Reset(attempted).NextRefreshAt() == attempted.AddDays(14),
+        "Persist site refresh state and reset failed attempts after reauthentication");
 }
 
 static async Task CheckCleanup(string root)

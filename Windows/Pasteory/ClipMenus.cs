@@ -60,9 +60,9 @@ internal static class ClipMenus
             Add(menu, "Paste", () => _ = app.UseClipAsync(clip, true, false), Shortcuts.Text(app.Settings, Command.Paste));
             Add(menu, "Copy", () => _ = app.UseClipAsync(clip, false, false), Shortcuts.Text(app.Settings, Command.Copy));
             Add(menu, "Paste as plain text", () => _ = app.UseClipAsync(clip, true, true),
-                Shortcuts.Text(app.Settings, Command.PastePlain), clip.PlainText is { Length: > 0 });
+                Shortcuts.Text(app.Settings, Command.PastePlain), clip.PlainClipboardText is { Length: > 0 });
             Add(menu, "Copy as text", () => _ = app.UseClipAsync(clip, false, true),
-                Shortcuts.Text(app.Settings, Command.CopyPlain), clip.PlainText is { Length: > 0 });
+                Shortcuts.Text(app.Settings, Command.CopyPlain), clip.PlainClipboardText is { Length: > 0 });
             var tools = new MenuItem { Header = Labels.Get("Quick actions"), IsEnabled = clip.PlainText is { Length: > 0 } };
             AddTools(tools, app, clip);
             menu.Items.Add(tools);

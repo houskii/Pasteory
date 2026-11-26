@@ -40,7 +40,10 @@ public partial class App
     internal void ToggleFavorite(Clip clip) => UpdateClip(clip.Id, current => current with { Favorite = !current.Favorite });
     internal void TogglePin(Clip clip) => UpdateClip(clip.Id, current => current with { Pinned = !current.Pinned });
     internal void TrashClip(Clip clip) => ChangeHistory(() => history.Trash(clip.Id));
-    internal void RestoreClip(Clip clip) => ChangeHistory(() => history.Restore(clip.Id));
+    internal void RestoreClip(Clip clip)
+    {
+        if (ChangeHistory(() => history.Restore(clip.Id)) && clip.OcrPending) _ = RecognizePendingImagesAsync();
+    }
     internal void EraseClip(Clip clip) => ChangeHistory(() => history.Delete(clip));
     internal void EmptyTrash() => ChangeHistory(history.EmptyTrash);
     internal void ToggleArchive(Clip clip) => ChangeHistory(() => history.SetArchived(clip.Id, clip.ArchivedAt is null));
@@ -78,7 +81,10 @@ public partial class App
         try
         {
             if (ChangeHistory(() => count = history.ImportBackup(path)))
+            {
                 Notify(Labels.Format("Imported {0} clips.", count));
+                if (count != 0) _ = RecognizePendingImagesAsync();
+            }
         }
         catch (Exception error) when (error is InvalidDataException or System.Text.Json.JsonException) { Notify(error.Message); }
     }
@@ -93,6 +99,7 @@ public partial class App
                 SaveSettings(Settings with { LinkFallbacks = Settings.LinkFallbacks.Concat(result.Fallbacks)
                     .DistinctBy(rule => (rule.Route?.Id, rule.Pattern, rule.Title)).ToArray() });
             Notify(Labels.Format("Imported {0} clips.", result.Count));
+            if (result.Count != 0) _ = RecognizePendingImagesAsync();
         }
         catch (Exception error) when (AiTasks.Expected(error) || error is FormatException or
             NotSupportedException or System.Runtime.InteropServices.COMException)
@@ -149,7 +156,7 @@ public partial class App
         };
         if (kind == ClipKind.Link) clip = clip with { LinkDetails = LinkFallback(clip) };
         if (!string.IsNullOrWhiteSpace(text) && ChangeHistory(() => history.Capture(clip, null, out saved)) && saved is not null)
-            _ = EnrichAsync(saved, null);
+            _ = EnrichLinkAsync(saved);
         return saved;
     }
 
@@ -429,23 +436,12 @@ public partial class App
         catch (Exception error) when (IsLocalError(error) || error is ArgumentException or NotSupportedException) { return null; }
     }
 
-    private async Task EnrichAsync(Clip clip, byte[]? image)
+    private async Task EnrichLinkAsync(Clip clip)
     {
         if (clip.Kind == ClipKind.Link && Settings.ResolveLinks &&
             (clip.LinkDetails is null or { Status: "Not attempted" } ||
                 DateTimeOffset.UtcNow - clip.LinkDetails.AttemptedAt >= TimeSpan.FromMinutes(clip.LinkDetails.Status == "Resolved" ? 1440 : 5)))
             await ResolveLinkAsync(clip);
-        if (image is not null && Settings.RecognizeImages && string.IsNullOrEmpty(clip.RecognizedText))
-        {
-            try
-            {
-                var recognized = await ImageOcr.ReadAsync(image, Settings.Language, lifetime.Token);
-                if (!Exiting && recognized is not null && Settings.RecognizeImages)
-                    UpdateClip(clip.Id, current => current.ImageHash == clip.ImageHash ?
-                        current with { RecognizedText = recognized } : current);
-            }
-            catch (OperationCanceledException) when (Exiting) { }
-        }
     }
 
     internal async Task ResolveLinkAsync(Clip clip)

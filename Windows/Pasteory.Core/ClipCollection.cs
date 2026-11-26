@@ -54,7 +54,7 @@ public sealed record SmartCondition(RuleField Field, RuleComparison Comparison, 
             RuleField.Priority => [clip.Priority.ToString()],
             RuleField.Conversion => clip.Conversions.Length == 0 ? ["None"]
                 : clip.Conversions.Select(conversion => conversion.Tool.ToString()).Prepend("Any"),
-            _ => [clip.PlainText ?? "", clip.RecognizedText ?? ""],
+            _ => [clip.PlainText ?? "", clip.RecognizedImageText ?? ""],
         };
         const StringComparison ignoreCase = StringComparison.OrdinalIgnoreCase;
         return Comparison switch
