@@ -46,7 +46,7 @@ public static class ClipActivity
         }
         double age = Math.Max(0, (now - LastUsed(clip)).TotalHours);
         double coefficient = 1 + boost * Math.Pow(2, -Math.Max(0, (now - boostAt).TotalDays) / 7);
-        return 100 * Math.Pow(2, -age / (Math.Clamp(preferences.HalfLifeHours, 1, 720) * coefficient));
+        return 100 * Math.Pow(2, -age / (Math.Clamp(preferences.HalfLifeHours, 1, 8760) * coefficient));
     }
 
     public static string Stage(Clip clip, ActivityPreferences settings, DateTimeOffset now)

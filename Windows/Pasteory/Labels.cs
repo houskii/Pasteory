@@ -706,6 +706,7 @@ internal static class Labels
         ["Share locally recognized image text"] = "发送本地识别的图片文字",
         ["Organization preferences"] = "整理偏好",
         ["Save preferences"] = "保存偏好",
+        ["Use default prompt"] = "恢复默认 Prompt",
         ["Organization policy"] = "整理策略",
         ["Organize newly copied content"] = "自动整理新增内容",
         ["Organize while idle"] = "闲时整理",

@@ -35,7 +35,8 @@ internal sealed partial class SettingsWindow
         };
         layout.Children.Add(tabs);
         BuildModel(analysis);
-        BuildAiPolicy(life);
+        BuildAiPolicy(analysis);
+        BuildActivityPreferences(life, app.Settings.Ai.Activity);
         BuildAiUsage(usage);
         BuildTaskStatus(tasks, false);
         BuildAiHistory(tasks);
@@ -180,10 +181,14 @@ internal sealed partial class SettingsWindow
         prompt.TextWrapping = TextWrapping.Wrap;
         prompt.VerticalContentAlignment = VerticalAlignment.Top;
         Ui.AddField(share, "Organization preferences", prompt);
+        var promptActions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 6, 0, 0) };
+        var restorePrompt = Ui.Button("Use default prompt", prompt.Clear);
+        restorePrompt.Margin = new Thickness(0, 0, 6, 0);
+        promptActions.Children.Add(restorePrompt);
         var savePrompt = Ui.Button("Save preferences", () => app.SaveSettings(app.Settings with { Ai = app.Settings.Ai with { Prompt = prompt.Text } }));
-        savePrompt.HorizontalAlignment = HorizontalAlignment.Right;
-        savePrompt.Margin = new Thickness(0, 6, 0, 0);
-        share.Children.Add(savePrompt);
+        promptActions.Children.Add(savePrompt);
+        share.Children.Add(promptActions);
     }
 
     private void BuildAiPolicy(Panel layout)
@@ -243,7 +248,6 @@ internal sealed partial class SettingsWindow
             });
             SetStatus(Labels.Get("Settings saved."));
         }, "PrimaryButton")));
-        BuildActivityPreferences(layout, prefs.Activity);
     }
 
     private void BuildActivityPreferences(Panel layout, ActivityPreferences activity)
@@ -281,10 +285,10 @@ internal sealed partial class SettingsWindow
         {
             if (!int.TryParse(retain.Text, out int a) || !int.TryParse(compress.Text, out int b) ||
                 !int.TryParse(archive.Text, out int c) || a < 1 || b < a || c < b || c > 3650 ||
-                !double.TryParse(halfLife.Text, out double hours) || !double.IsFinite(hours) || hours is < 1 or > 720 ||
+                !double.TryParse(halfLife.Text, out double hours) || !double.IsFinite(hours) || hours is < 1 or > 8760 ||
                 !double.TryParse(copy.Text, out double copied) || !double.IsFinite(copied) || copied is < 0 or > 3 ||
                 !double.TryParse(paste.Text, out double pasted) || !double.IsFinite(pasted) || pasted is < 0 or > 3 ||
-                !int.TryParse(top.Text, out int members) || members is < 1 or > 50 ||
+                !int.TryParse(top.Text, out int members) || members is < 1 or > 100 ||
                 !double.TryParse(weight.Text, out double portion) || !double.IsFinite(portion) || portion is < 0 or > 1)
             { SetStatus(Labels.Get("Enter valid lifecycle parameters.")); return; }
             app.SaveSettings(app.Settings with { Ai = app.Settings.Ai with
