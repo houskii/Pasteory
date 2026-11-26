@@ -302,7 +302,10 @@ internal sealed partial class SettingsWindow
         Switch(compression, "Automatically compress eligible content", app.Settings.Ai.AutomaticCompression,
             (settings, flag) => settings with { Ai = settings.Ai with { AutomaticCompression = flag } },
             "Uses the saved compression threshold and content activity. Favorites and pins are excluded.");
-        compression.Children.Add(Row("Local history", Ui.Button("Compress eligible content", async () => await app.CompressEligibleContentAsync(manual: true))));
+        var compressNow = Ui.Button("Compress eligible content", async () => await app.CompressEligibleContentAsync(manual: true));
+        compressNow.HorizontalAlignment = HorizontalAlignment.Right;
+        compressNow.Margin = new Thickness(0, 8, 0, 0);
+        compression.Children.Add(compressNow);
     }
 
     private void BuildAiUsage(Panel layout)
