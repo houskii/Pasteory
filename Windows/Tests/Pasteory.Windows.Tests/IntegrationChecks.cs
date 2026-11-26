@@ -1,5 +1,6 @@
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -114,23 +115,26 @@ internal static partial class Program
         int cacheRequests = 0;
         int requests = 0;
         int blockedRequests = 0;
-        var serve = Task.Run(async () =>
+
+        async Task RespondAsync(TcpClient connection)
         {
-            try
+            using (connection)
+            using (var requestDeadline = CancellationTokenSource.CreateLinkedTokenSource(stop.Token))
             {
-                while (!stop.IsCancellationRequested)
+                requestDeadline.CancelAfter(TimeSpan.FromSeconds(5));
+                var token = requestDeadline.Token;
+                try
                 {
-                    using var connection = await server.AcceptTcpClientAsync(stop.Token);
                     await using var stream = connection.GetStream();
                     using var reader = new StreamReader(stream, Encoding.ASCII, leaveOpen: true);
-                    string? first = await reader.ReadLineAsync(stop.Token);
-                    if (first is null) continue;
+                    string? first = await reader.ReadLineAsync(token);
+                    if (first?.Split(' ', 3) is not { Length: 3 } request) return;
                     Interlocked.Increment(ref requests);
                     string? line;
                     bool hasSession = false;
-                    while (!string.IsNullOrEmpty(line = await reader.ReadLineAsync(stop.Token)))
+                    while (!string.IsNullOrEmpty(line = await reader.ReadLineAsync(token)))
                         hasSession |= line.Contains("pasteory_qa=1", StringComparison.Ordinal);
-                    string path = first.Split(' ', 3)[1];
+                    string path = request[1];
                     bool signin = path == "/session";
                     bool cacheable = path == "/cache";
                     if (path == "/logout") Interlocked.Increment(ref blockedRequests);
@@ -152,11 +156,23 @@ internal static partial class Program
                     string cache = cacheable ? "Cache-Control: public, max-age=3600\r\n" : "Cache-Control: no-store\r\n";
                     string location = status == 302 ? "Location: /logout\r\n" : "";
                     var head = Encoding.ASCII.GetBytes($"HTTP/1.1 {status} {(status == 200 ? "OK" : "Fixture")}\r\n{type}{cookie}{cache}{location}Content-Length: {body.Length}\r\nConnection: close\r\n\r\n");
-                    await stream.WriteAsync(head, stop.Token);
-                    await stream.WriteAsync(body, stop.Token);
+                    await stream.WriteAsync(head, token);
+                    await stream.WriteAsync(body, token);
                 }
+                catch (Exception error) when (error is OperationCanceledException or IOException) { }
             }
-            catch (Exception error) when (error is OperationCanceledException or IOException) { }
+        }
+        var serve = Task.Run(async () =>
+        {
+            // Chromium can open a connection before it is ready to send a request.
+            var connections = new List<Task>();
+            try
+            {
+                while (!stop.IsCancellationRequested)
+                    connections.Add(RespondAsync(await server.AcceptTcpClientAsync(stop.Token)));
+            }
+            catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
+            await Task.WhenAll(connections);
         });
         var host = new Window { Width = 1, Height = 1, ShowInTaskbar = false, ShowActivated = false, Opacity = 0 };
         try
@@ -207,11 +223,14 @@ internal static partial class Program
             Check((await anonymous.ResolveAsync(url + "/private", stop.Token)).Status == "Sign-in required", "Separate anonymous link requests from WebView2 cookies");
             Check(await sessions.RefreshAsync(root, rule, cacheUrl, hwnd, stop.Token) == LinkSessionOutcome.PageLoaded &&
                 Volatile.Read(ref cacheRequests) == 3, "Contact the site for session refresh even when its page is cached");
-            Check(await sessions.RefreshAsync(root, rule, new Uri(url + "/private"), hwnd, stop.Token) == LinkSessionOutcome.PageLoaded &&
-                await sessions.RefreshAsync(root, rule, new Uri(url + "/account"), hwnd, stop.Token) == LinkSessionOutcome.NeedsSignIn &&
-                await sessions.RefreshAsync(root, rule, new Uri(url + "/unavailable"), hwnd, stop.Token) == LinkSessionOutcome.Failed &&
-                await sessions.RefreshAsync(root, rule, new Uri("file:///test.html"), hwnd, stop.Token) == LinkSessionOutcome.Blocked,
-                "Distinguish a reusable session, a login form, a failed request and a blocked URL");
+            (Uri Address, LinkSessionOutcome Expected)[] refreshes = [(new(url + "/private"), LinkSessionOutcome.PageLoaded),
+                (new(url + "/account"), LinkSessionOutcome.NeedsSignIn), (new(url + "/unavailable"), LinkSessionOutcome.Failed),
+                (new("file:///test.html"), LinkSessionOutcome.Blocked)];
+            foreach (var (address, expected) in refreshes)
+            {
+                var actual = await sessions.RefreshAsync(root, rule, address, hwnd, stop.Token);
+                Check(actual == expected, $"Refresh {address.AbsolutePath}: expected {expected}, got {actual}");
+            }
             Console.WriteLine("Anonymous title resolution, WebView2 login, cache clearance and session refresh checks passed.");
             if (executable is not null) await CheckPackagedLinkRefreshAsync(executable, root, url, rule, stop.Token);
         }
