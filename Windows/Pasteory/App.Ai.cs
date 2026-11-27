@@ -54,9 +54,9 @@ public partial class App
             return;
         }
         var selected = names.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (regroup && !review.Proposal.Groups.All(group => selected.Contains(group.Name)))
+        if ((regroup || Ai.HasSavedPlan(review)) && !review.Proposal.Groups.All(group => selected.Contains(group.Name)))
         {
-            showError("Regrouping plans are applied together.");
+            showError("Apply the whole AI plan together.");
             return;
         }
         var (approved, stale) = ValidateAiClips(review, review.Proposal.Groups.Where(group => selected.Contains(group.Name)));
@@ -81,6 +81,25 @@ public partial class App
             }
             catch (Exception error) when (AiTasks.Expected(error)) { showError(error.Message); return false; }
         }
+    }
+
+    internal async Task ReviseAiPlanAsync(AiReviewedPlan review, Action close, Action<string> showError)
+    {
+        if (Exiting || compressingContent)
+        {
+            showError("Wait for the current task to finish.");
+            return;
+        }
+        try
+        {
+            await Ai.RevisePlanAsync(Settings.Ai, Clips, Collections, review, Labels.Chinese, lifetime.Token, () =>
+            {
+                close();
+                OpenAiTaskPage();
+            });
+            if (settingsWindow?.IsActive == true && Ai.Review is not null) settingsWindow.ShowReview();
+        }
+        catch (Exception error) when (AiTasks.Expected(error)) { showError(error.Message); }
     }
 
     private void AppendToExistingThemes(AiReviewedPlan review)

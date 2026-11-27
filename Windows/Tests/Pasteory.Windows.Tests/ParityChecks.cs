@@ -515,10 +515,37 @@ internal static partial class Program
             Check(resumed.Review is null && resumed.Job(false) is { Status: "Paused", PausedByUser: true } && resumed.Usage.Count == 1,
                 "Reject a changed replacement scope before sending a resumed request");
             await resumed.ResumeAsync(settings, clips, catalog, false, false, CancellationToken.None);
-            var review = new AiTasks(root).Review;
-            Check(review?.Id == paused.Id && review.Replacing is { } savedSelection && AiGroupSnapshot.IsCurrent(catalog, clips, savedSelection) &&
+            var review = new AiTasks(root).Review ?? throw new InvalidOperationException("Missing regrouping review");
+            Check(review.Id == paused.Id && review.Replacing is { } savedSelection && AiGroupSnapshot.IsCurrent(catalog, clips, savedSelection) &&
                 review.Versions.Keys.ToHashSet().SetEquals(recent.EligibleIds) && review.Proposal.Groups.Single().Members.Length == 3,
                 "Resume grouping and recover the complete reviewed plan after another restart");
+
+            using var unavailable = new HttpClient(new MockAiResponses([alpha, beta, gamma], failRevision: true));
+            var revision = new AiTasks(root, new AiModelClient(unavailable));
+            string original = File.ReadAllText(workspace.FilePath("output/validated-changes.json"));
+            try
+            {
+                await revision.RevisePlanAsync(settings with { ShareNotes = true }, clips, catalog, review, false,
+                    CancellationToken.None, () => throw new InvalidOperationException("A changed sharing scope should not start refining"));
+                throw new InvalidOperationException("Expected a changed sharing scope to reject revision");
+            }
+            catch (ArgumentException) { }
+            Check(revision.Review?.Id == review.Id && revision.Usage.Count == 2, "Keep the review pending when sharing settings change");
+
+            bool started = false;
+            await revision.RevisePlanAsync(settings, clips, catalog, review, false, CancellationToken.None, () => started = true);
+            var recoveredRevision = new AiTasks(root, new AiModelClient(transport));
+            var retry = recoveredRevision.Job(false);
+            Check(started && recoveredRevision.Review is null && retry is { Revises: { } prior, Error: "Model API HTTP 503", Status: "Paused" } &&
+                prior == review.Id && recoveredRevision.RecentHistory().Any(job => job.Id == review.Id && job.Status == "Revision requested") &&
+                File.ReadAllText(workspace.FilePath("output/validated-changes.json")) == original,
+                "Keep the original files and reopen a failed revision at its saved checkpoint");
+            await recoveredRevision.ResumeAsync(settings, clips, catalog, false, false, CancellationToken.None);
+            var amended = new AiTasks(root).Review;
+            Check(amended?.Id == retry!.Id && amended?.Proposal.Groups.Single().Name == "Revised project" &&
+                amended?.Replacing is { } replacement && AiGroupSnapshot.IsCurrent(catalog, clips, replacement) &&
+                amended.Versions.Keys.ToHashSet().SetEquals(recent.EligibleIds),
+                "Recover the revised plan with the original scope and replacement transaction");
         }
         finally { Directory.Delete(root, recursive: true); }
     }
@@ -543,7 +570,7 @@ internal static partial class Program
             "Count the full request, omit earlier exchanges intact and retain the latest tool call and its reply");
     }
 
-    private sealed class MockAiResponses(Clip[] clips, bool wide = false, int outputLimit = 4_000) : HttpMessageHandler
+    private sealed class MockAiResponses(Clip[] clips, bool wide = false, int outputLimit = 4_000, bool failRevision = false) : HttpMessageHandler
     {
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -561,7 +588,15 @@ internal static partial class Program
                 string args = messages[1].GetProperty("content").GetString()!;
                 JsonElement input = JsonSerializer.Deserialize<JsonElement>(args);
                 bool story = input.GetProperty("task").GetString() == "story";
+                bool revising = input.GetProperty("trigger").GetString() == "manual-revise";
                 Guid taskId = input.GetProperty("taskId").GetGuid();
+                if (revising)
+                {
+                    Check(messages.EnumerateArray().Any(message => message.GetProperty("role").GetString() == "assistant" &&
+                        message.TryGetProperty("content", out var draft) && draft.GetString()?.Contains("Test project") == true),
+                        "Reuse the prior result in the revision conversation");
+                    if (failRevision) return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+                }
                 var replies = messages.EnumerateArray().Where(message => message.GetProperty("role").GetString() == "tool").ToArray();
                 var assignments = clips.Select((_, index) => new AiAssignment(AiTaskWorkspace.ItemKey(index),
                     index < 3 ? ["topic"] : [], index < 3 ? null : "Unrelated")).ToArray();
@@ -590,7 +625,8 @@ internal static partial class Program
                             [new("Alpha", "First task", [new(clips[0].Id, "alpha task")])],
                             [new("Unsupported", "Missing evidence", [new(clips[0].Id, "invented text")])])), AiFile.Json)
                     : JsonSerializer.Serialize(new AiOrganizationResult(taskId,
-                        [new("topic", "Test project", "Fictional clips", null, "Test summary", ["i1"])], wide ? [] : assignments),
+                        [new("topic", revising ? "Revised project" : "Test project", "Fictional clips", null, "Test summary", ["i1"])],
+                        wide ? [] : assignments),
                         AiFile.Json);
                 json = JsonSerializer.Serialize(new
                 {

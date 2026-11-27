@@ -499,6 +499,11 @@ internal sealed partial class SettingsWindow
             var body = new StackPanel();
             var clips = app.Clips.ToDictionary(clip => clip.Id);
             bool regroup = review.Replacing is not null;
+            bool hasTaskFiles = app.Ai.HasSavedPlan(review);
+            bool whole = regroup || hasTaskFiles;
+            if (whole) body.Children.Add(Ui.Text(Labels.Format("{0} groups in this plan", review.Proposal.Groups.Length), 14, strong: true));
+            body.Children.Add(Ui.Text(Labels.Format("{0} analyzed · {1} grouped · {2} unassigned", review.Versions.Count,
+                review.Proposal.Groups.SelectMany(group => group.Members).Distinct().Count(), review.Proposal.Unassigned.Length), 12, "Muted"));
             if (review.Replacing is { Length: > 0 } replacing)
             {
                 var summary = SettingsCard(body, "AI groups to replace");
@@ -507,19 +512,28 @@ internal sealed partial class SettingsWindow
                 if (outside > 0) summary.Children.Add(Ui.Text(Labels.Format("{0} clips outside the analysis scope will leave the replaced groups.", outside),
                     11, "Muted"));
             }
-            body.Children.Add(Ui.Text(Labels.Format("{0} topics · {1} clips · {2} unassigned", review.Proposal.Groups.Length,
-                review.Proposal.Groups.SelectMany(group => group.Members).Distinct().Count(), review.Proposal.Unassigned.Length), 12, "Muted"));
             var checks = new List<CheckBox>();
             foreach (var topic in review.Proposal.Groups)
             {
-                var card = SettingsCard(body, topic.Name);
-                var check = new CheckBox { Content = Labels.Format("Organize {0} clips", topic.Members.Length), IsChecked = true, Tag = topic.Name,
-                    IsEnabled = !regroup };
-                checks.Add(check);
-                card.Children.Add(check);
-                if (topic.Definition.Length > 0) card.Children.Add(Ui.Text(topic.Definition, 12));
-                if (topic.Overview.Length > 0) card.Children.Add(Ui.Text(topic.Overview, 12, "Muted"));
-                var sources = new Expander { Header = Labels.Get("Clips"), Margin = new Thickness(0, 8, 0, 0) };
+                var card = new StackPanel();
+                var header = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
+                var disposition = Ui.Text(Labels.Get(topic.ExistingGroupId is null ? "New group" : "Reuse existing group"), 11, "Muted");
+                disposition.Margin = new Thickness(8, 0, 0, 0);
+                DockPanel.SetDock(disposition, Dock.Right);
+                header.Children.Add(disposition);
+                header.Children.Add(Ui.Text(topic.Name, 13, strong: true));
+                card.Children.Add(header);
+                if (!whole)
+                {
+                    var check = new CheckBox { Content = Labels.Format("Organize {0} clips", topic.Members.Length), IsChecked = true, Tag = topic.Name };
+                    checks.Add(check);
+                    card.Children.Add(check);
+                }
+                string definition = topic.ExistingGroupId is { } existing ?
+                    app.Collections.FirstOrDefault(group => group.Id == existing)?.Definition ?? topic.Definition : topic.Definition;
+                if (definition.Length > 0) card.Children.Add(Ui.Text(definition, 12, "Muted"));
+                if (topic.Overview.Length > 0 && topic.Overview != definition) card.Children.Add(Ui.Text(topic.Overview, 12));
+                var sources = new Expander { Header = Labels.Format("{0} clips", topic.Members.Length), Margin = new Thickness(0, 8, 0, 0) };
                 sources.Expanded += (_, _) =>
                 {
                     if (sources.Content is not null) return;
@@ -529,6 +543,7 @@ internal sealed partial class SettingsWindow
                     sources.Content = entries;
                 };
                 card.Children.Add(sources);
+                body.Children.Add(Ui.Section(card));
             }
             if (review.Proposal.Unassigned.Length > 0)
             {
@@ -543,31 +558,41 @@ internal sealed partial class SettingsWindow
                 };
                 body.Children.Add(unassigned);
             }
+            var errorMessage = Ui.Text("", 12, "Danger");
+            body.Children.Add(errorMessage);
+            void ShowError(string error) => errorMessage.Text = Labels.Get(error);
+            var actions = new WrapPanel { Margin = new Thickness(0, 5, 0, 0) };
             var discard = Ui.Button("Discard proposal", () =>
             {
                 if (!ClipMenus.Confirm(Window.GetWindow(body) ?? this, "Discard these AI suggestions?")) return;
                 try { app.Ai.ClearReview(); close(); }
-                catch (Exception error) when (AiTasks.Expected(error)) { SetStatus(Labels.Get(error.Message)); }
+                catch (Exception error) when (AiTasks.Expected(error)) { ShowError(error.Message); }
             });
-            discard.HorizontalAlignment = HorizontalAlignment.Left;
-            discard.Margin = new Thickness(0, 5, 0, 0);
-            body.Children.Add(discard);
-            var errorMessage = Ui.Text("", 12, "Danger");
-            body.Children.Add(errorMessage);
-            IInputElement focus = regroup ? discard : (IInputElement?)checks.FirstOrDefault() ?? body;
+            discard.Margin = new Thickness(0, 0, 6, 4);
+            actions.Children.Add(discard);
+            if (hasTaskFiles)
+            {
+                var revise = Ui.Button("Continue revising this plan", async () => await app.ReviseAiPlanAsync(review, close, ShowError));
+                revise.IsEnabled = !app.Ai.Running && app.Settings.Ai.Enabled && app.Ai.CanConnect(app.Settings.Ai);
+                revise.Margin = new Thickness(0, 0, 6, 4);
+                actions.Children.Add(revise);
+            }
+            body.Children.Add(actions);
+            IInputElement focus = (IInputElement?)checks.FirstOrDefault() ?? discard;
             var editor = LibraryEditors.Wrap("Review suggestions", body, focus,
                 () =>
                 {
-                    app.ApplyAiPlan(review, checks.Where(check => check.IsChecked == true).Select(check => (string)check.Tag),
-                        error => errorMessage.Text = Labels.Get(error));
+                    var names = whole ? review.Proposal.Groups.Select(group => group.Name) :
+                        checks.Where(check => check.IsChecked == true).Select(check => (string)check.Tag);
+                    app.ApplyAiPlan(review, names, ShowError);
                     return app.Ai.Review is null;
-                }, close, regroup ? "Apply regrouping" : "Apply selected groups");
-            return regroup ? editor with { Submit = null } : editor;
+                }, close, regroup ? "Apply regrouping" : whole ? "Apply whole plan" : "Apply selected groups");
+            return whole ? editor with { Submit = null } : editor;
 
             string ClipLabel(Guid id) => clips.TryGetValue(id, out var clip) ?
                 ClipCard.Short(clip.DisplayTitle.Length > 0 ? clip.DisplayTitle : clip.PlainText ?? Labels.Get(clip.Kind.ToString()), 95, 1) :
                 Labels.Get("Source no longer matches");
-        }, 640, 670);
+        }, 800, 650);
     }
 
     private void BuildStory(Panel layout)

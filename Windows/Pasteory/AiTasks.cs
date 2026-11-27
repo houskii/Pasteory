@@ -30,7 +30,8 @@ internal sealed record AiProposal(AiTopicProposal[] Groups, AiUnassigned[] Unass
 internal sealed record AiReviewedPlan(Guid Id, AiProposal Proposal, Dictionary<Guid, string> Versions, AiGroupSnapshot[]? Replacing = null);
 internal sealed record AiJob(Guid Id, string Kind, string Trigger, string Configuration, DateTimeOffset Started,
     DateOnly From, DateOnly Through, int Total, int Cursor = 0, string Status = "Paused", string? Error = null,
-    bool PausedByUser = false, int Format = 0, DateTimeOffset? UpdatedAt = null, AiGroupSnapshot[]? Replacing = null);
+    bool PausedByUser = false, int Format = 0, DateTimeOffset? UpdatedAt = null, AiGroupSnapshot[]? Replacing = null,
+    Guid? Revises = null);
 internal enum AiRegroupScope { Recent, Selected, Library }
 internal sealed record AiRegroupInput(HashSet<Guid> EligibleIds, int ExcludedCount);
 
@@ -93,7 +94,8 @@ internal sealed partial class AiTasks
         Review = Load<AiReviewedPlan>(Path.Combine(dataRoot, "ai-review.json"));
         storyJob = Recover("story");
         organizationJob = Recover("organization");
-        if (Review is not null && organizationJob?.Id == Review.Id && organizationJob.Status is "Applied" or "Discarded" or "Undone")
+        if (Review is not null && organizationJob is { } current &&
+            (current.Id != Review.Id || current.Status is "Applied" or "Discarded" or "Undone"))
             Review = null;
         job = new[] { storyJob, organizationJob }.OfType<AiJob>().OrderByDescending(item => item.Started).FirstOrDefault();
     }
@@ -121,9 +123,12 @@ internal sealed partial class AiTasks
     internal AiJob[] RecentHistory()
     {
         if (!Directory.Exists(folder)) return [];
-        return Directory.EnumerateDirectories(folder, "*.agent", SearchOption.TopDirectoryOnly)
-            .Select(path => Load<AiJob>(Path.Combine(path, "history.json"))).OfType<AiJob>()
-            .Select(entry => Job(entry.Kind == "story") is { } current && current.Id == entry.Id ? current : entry)
+        var entries = Directory.EnumerateDirectories(folder, "*.agent", SearchOption.TopDirectoryOnly)
+            .Select(path => Load<AiJob>(Path.Combine(path, "history.json"))).OfType<AiJob>().ToArray();
+        var revised = entries.Select(entry => entry.Revises).OfType<Guid>().ToHashSet();
+        return entries.Select(entry => Job(entry.Kind == "story") is { } current && current.Id == entry.Id ? current : entry)
+            .Select(entry => entry.Id != Review?.Id && entry.Status == "Awaiting review" && revised.Contains(entry.Id) ?
+                entry with { Status = "Revision requested" } : entry)
             .OrderByDescending(entry => entry.Started).Take(30).ToArray();
     }
 
@@ -234,6 +239,52 @@ internal sealed partial class AiTasks
         await ExecuteAsync(prefs, previous, workspace, items, appToken);
     }
 
+    internal bool HasSavedPlan(AiReviewedPlan review) => organizationJob is { Format: > 0 } task && task.Id == review.Id;
+
+    internal async Task RevisePlanAsync(AiPreferences prefs, IReadOnlyList<Clip> clips, IReadOnlyList<ClipCollection> collections,
+        AiReviewedPlan review, bool chinese, CancellationToken appToken, Action started)
+    {
+        if (!CanStart(prefs, story: false) || Review?.Id != review.Id || !HasSavedPlan(review))
+            throw new ArgumentException("The AI plan is unavailable. Open the latest task to continue.");
+        var previous = organizationJob!;
+        if (previous.Configuration != SharingFingerprint(prefs))
+            throw new ArgumentException("Sharing settings changed. Generate a new plan to use them.");
+        if (review.Replacing is { } replacing && !AiGroupSnapshot.IsCurrent(collections, clips, replacing))
+            throw new ArgumentException("The selected AI groups changed. Generate a new regrouping plan.");
+
+        var source = new AiTaskWorkspace(DirectoryFor(previous.Id));
+        var originalItems = Load<AiInput[]>(source.FilePath("items.json"));
+        var previousState = source.LoadState();
+        if (originalItems is not { Length: > 0 } || string.IsNullOrWhiteSpace(previousState.Result))
+            throw new InvalidDataException("The saved plan files are incomplete. Generate a new plan.");
+        var current = clips.ToDictionary(clip => clip.Id);
+        foreach (var input in originalItems)
+        {
+            if (!current.TryGetValue(input.Id, out var clip) || !MatchesVersion(clip, prefs, input.Version, legacy: false))
+                throw new ArgumentException("The content in this plan changed. Generate a new organization plan.");
+        }
+
+        var now = DateTimeOffset.Now;
+        var next = previous with
+        {
+            Id = Guid.NewGuid(), Trigger = "manual-revise", Started = now, Cursor = 0, Status = "Paused", Error = null,
+            PausedByUser = false, Format = CurrentFormat, UpdatedAt = now, Replacing = review.Replacing, Revises = previous.Id
+        };
+        var workspace = new AiTaskWorkspace(DirectoryFor(next.Id));
+        var items = Prepare(workspace, next, prefs, originalItems, clips, collections, chinese);
+        JsonElement[] revision =
+        [
+            AiTaskWorkspace.Message("assistant", Compact(previousState.Result, 8000)),
+            AiTaskWorkspace.Message("user", "Revise this previous organization plan using the current catalog and preferences. " +
+                "Use the new taskId. Reassess the theme definitions and return a complete plan covering every saved item.")
+        ];
+        workspace.SaveState(new AiAgentState(0, [.. previousState.Exchanges, revision], []), new { revisionOf = previous.Id });
+        SetJob(next);
+        Review = null;
+        started();
+        await ExecuteAsync(prefs, next, workspace, items, appToken);
+    }
+
     private bool CanStart(AiPreferences prefs, bool story) =>
         !Running && prefs.Enabled && (!story || prefs.Story) && CanConnect(prefs);
 
@@ -242,14 +293,15 @@ internal sealed partial class AiTasks
     {
         var eligible = items.Select(item => item.Id).ToHashSet();
         var resources = prefs.ShareResources ? AiTaskResources.Build(dataRoot, clips.Where(clip => eligible.Contains(clip.Id))) : [];
-        items = items.Select(item => resources.TryGetValue(item.Id, out var files) ?
-            item with { LocalResources = files.Select(file => file.Name).ToArray() } : item).ToArray();
+        items = items.Select(item => item with { LocalResources = resources.TryGetValue(item.Id, out var files) ?
+            files.Select(file => file.Name).ToArray() : null }).ToArray();
         var replaced = (task.Replacing ?? []).Select(item => item.Group.Id).ToHashSet();
         var existing = collections.Where(group => group.IsAi && !replaced.Contains(group.Id)).ToArray();
         string[] reserved = collections.Where(group => !group.IsAi).Select(group => group.Name).ToArray();
         bool story = task.Kind == "story";
         string language = chinese ? "Respond in Simplified Chinese." : "Respond in English.";
         string prompt = story ? StoryPrompt + "\n" + language : BuildOrganizationPrompt(prefs, chinese, task.Replacing is not null);
+        if (task.Revises is not null) prompt += "\nRefine the previous plan for these same items. Use the current taskId, rules and group catalog.";
         var encouragements = story ? PreviousEncouragements(prefs, clips) : [];
         workspace.Prepare(task, prefs, prompt, items, existing, reserved, resources, encouragements);
         return items;
