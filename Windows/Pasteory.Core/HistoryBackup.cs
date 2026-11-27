@@ -94,6 +94,8 @@ public sealed partial class HistoryStore
         {
             foreach (var item in imported.OrderBy(clip => clip.Kind == ClipKind.Aggregate))
             {
+                var summary = item.Kind == ClipKind.Aggregate && item.Summary is { HasReferences: true } originalSummary
+                    ? originalSummary.RemapSources(mapping) : null;
                 if (byId.TryGetValue(item.Id, out var existing))
                 {
                     mapping[item.Id] = item.Id;
@@ -103,6 +105,12 @@ public sealed partial class HistoryStore
                         var restored = existing with { OriginalItems = item.OriginalItems,
                             OriginalMacIdentity = item.OriginalMacIdentity,
                             ExcludeFromAi = existing.ExcludeFromAi || item.ExcludeFromAi };
+                        clips[clips.IndexOf(existing)] = restored;
+                        byId[item.Id] = restored;
+                    }
+                    else if (existing.Kind == ClipKind.Aggregate && existing.Summary is null && summary is not null)
+                    {
+                        var restored = existing with { Summary = summary };
                         clips[clips.IndexOf(existing)] = restored;
                         byId[item.Id] = restored;
                     }
@@ -123,7 +131,8 @@ public sealed partial class HistoryStore
                 {
                     CollectionIds = item.CollectionIds.Where(validGroupIds.Contains).Distinct().ToArray(),
                     Members = item.Members.Where(mapping.ContainsKey).Select(id => mapping[id]).Distinct().ToArray(),
-                    LastSelectedMember = item.LastSelectedMember is { } selected && mapping.TryGetValue(selected, out var mapped) ? mapped : null
+                    LastSelectedMember = item.LastSelectedMember is { } selected && mapping.TryGetValue(selected, out var mapped) ? mapped : null,
+                    Summary = summary
                 };
                 if (clip.HasImage)
                 {

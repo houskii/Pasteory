@@ -7,7 +7,8 @@ using Pasteory.Core;
 
 namespace Pasteory.Windows;
 
-internal sealed record MacBackupAiArchive(Dictionary<Guid, MacBackupAiGroup> Groups, SavedStory[] Stories, AiUse[] Usage)
+internal sealed record MacBackupAiArchive(Dictionary<Guid, MacBackupAiGroup> Groups, SavedStory[] Stories, AiUse[] Usage,
+    Dictionary<Guid, AggregationSummary>? Summaries = null)
 {
     internal static MacBackupAiArchive Empty { get; } = new([], [], []);
 }
@@ -17,6 +18,8 @@ internal sealed record MacBackupAiGroup(Guid Id, string Definition, string Overv
 internal static class MacBackupAiState
 {
     private sealed record Evidence(Guid ClipId, string Quote);
+    private sealed record Claim(string Kind, string Text, Evidence[] Evidence);
+    private sealed record Summary(Guid TargetId, Claim[] Claims, JsonElement SourceRevisions, DateTimeOffset GeneratedAt);
     private sealed record Section(string Title, string Text, Evidence[] Evidence);
     private sealed record Report(Guid Id, string Title, string Introduction, Section[] RecentWork, Section[] Observations,
         string Encouragement, DateTimeOffset PeriodStart, DateTimeOffset PeriodEnd, DateTimeOffset GeneratedAt, int SourceCount);
@@ -41,10 +44,39 @@ internal static class MacBackupAiState
         }
         var stories = state.TryGetProperty("stories", out var reports) ? reports.Deserialize<Report[]>(AiFile.Wire) ?? [] : [];
         var usage = state.TryGetProperty("usage", out var calls) ? calls.Deserialize<Usage[]>(AiFile.Wire) ?? [] : [];
-        return new(groups, stories.Select(ToStory).ToArray(), usage.Select(ToUse).ToArray());
+        var summaries = new Dictionary<Guid, AggregationSummary>();
+        if (state.TryGetProperty("summaries", out var encoded))
+        {
+            foreach (var (id, data) in UuidEntries(encoded))
+            {
+                var value = data.Deserialize<Summary>(AiFile.Wire);
+                if (value?.TargetId != id || value.Claims is not { Length: > 0 } || value.Claims.Any(claim =>
+                    claim is null || claim.Kind is not ("fact" or "inference" or "action") || claim.Evidence is not { Length: > 0 } ||
+                    claim.Evidence.Any(evidence => evidence is null))) continue;
+                var sources = UuidEntries(value.SourceRevisions)
+                    .Select(entry => new AggregationSourceRevision(entry.Id,
+                        entry.Value.ValueKind == JsonValueKind.String ? entry.Value.GetString() ?? "" : "")).ToArray();
+                var claims = value.Claims.Select(claim => new AggregationClaim(Enum.Parse<AggregationClaimKind>(claim.Kind, ignoreCase: true),
+                    claim.Text, claim.Evidence.Select(evidence => new AggregationEvidence(evidence.ClipId, evidence.Quote)).ToArray())).ToArray();
+                var summary = new AggregationSummary(claims, sources, value.GeneratedAt);
+                if (summary.HasReferences && sources.DistinctBy(source => source.ClipId).Count() == sources.Length)
+                    summaries.TryAdd(id, summary);
+            }
+        }
+        return new(groups, stories.Select(ToStory).ToArray(), usage.Select(ToUse).ToArray(), summaries);
     }
 
-    internal static object Export(HistoryStore store, AiTasks ai)
+    private static IEnumerable<(Guid Id, JsonElement Value)> UuidEntries(JsonElement entries)
+    {
+        if (entries.ValueKind != JsonValueKind.Array) yield break;
+        var values = entries.EnumerateArray().ToArray();
+        for (int index = 0; index + 1 < values.Length; index += 2)
+            if (values[index].ValueKind == JsonValueKind.String && values[index].TryGetGuid(out Guid id))
+                yield return (id, values[index + 1]);
+    }
+
+    internal static object Export(HistoryStore store, AiTasks ai, IReadOnlyList<Clip> summarized,
+        IReadOnlyDictionary<Guid, string> exportedRevisions)
     {
         var groups = new List<object>();
         var memberships = store.Clips.Where(clip => clip.Kind != ClipKind.Aggregate)
@@ -63,7 +95,8 @@ internal static class MacBackupAiState
         }
         return new
         {
-            schemaVersion = 1, groups, summaries = Array.Empty<object>(), changes = Array.Empty<object>(),
+            schemaVersion = 1, groups, summaries = summarized.SelectMany(clip => ExportSummary(clip, exportedRevisions)).ToArray(),
+            changes = Array.Empty<object>(),
             usage = ai.Usage.Select(call => new
             {
                 id = StableUseId(call), runID = call.Task, date = MacBackupWriter.Date(call.At), requestedModel = call.Model,
@@ -73,6 +106,22 @@ internal static class MacBackupAiState
             }).ToArray(),
             payloadHolders = new Dictionary<string, string>(), stories = ai.Stories.Select(ExportStory).ToArray()
         };
+    }
+
+    private static object[] ExportSummary(Clip clip, IReadOnlyDictionary<Guid, string> exportedRevisions)
+    {
+        var summary = clip.Summary!;
+        return [clip.Id, new
+        {
+            targetID = clip.Id, generatedAt = MacBackupWriter.Date(summary.GeneratedAt),
+            claims = summary.Claims.Select(claim => new
+            {
+                kind = claim.Kind.ToString().ToLowerInvariant(), claim.Text,
+                evidence = claim.Evidence.Select(evidence => new { clipID = evidence.ClipId, evidence.Quote }).ToArray()
+            }).ToArray(),
+            sourceRevisions = summary.Sources.DistinctBy(source => source.ClipId)
+                .SelectMany(source => new object[] { source.ClipId, exportedRevisions[source.ClipId] }).ToArray()
+        }];
     }
 
     internal static Guid StableUseId(AiUse call) => call.RecordId ??

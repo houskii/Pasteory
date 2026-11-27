@@ -80,11 +80,12 @@ internal sealed class ClipResults
         var current = list.SelectedItem as ClipCard;
         Guid? clipId = select ?? position?.Clip ?? (reset ? null : current?.Clip.Id);
         Guid? parentId = select is not null ? null : position?.Parent ?? (reset ? null : current?.Parent);
+        Guid? reveal = parentId is null ? clipId : null;
         double? offset = position?.Offset ?? (reset || select is not null || focusChildren is not null ? null : scroll?.VerticalOffset);
         var aiGroups = scope == Scope.Ungrouped ? collections.Where(group => group.IsAi).Select(group => group.Id).ToHashSet() : null;
 
         ClipListing Load() => ClipListing.Build(source, query, query.Length == 0 ? null : app.SearchClipIds(query, request.Token),
-            scope, kind, collection, open, closed, select, request.Token, aiGroups);
+            scope, kind, collection, open, closed, reveal, request.Token, aiGroups);
 
         ClipListing next;
         try

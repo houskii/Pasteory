@@ -369,10 +369,25 @@ public partial class LibraryPage : UserControl
     private void UpdateDetails()
     {
         var clip = results.Selected?.Clip;
-        if (ReferenceEquals(detailsClip, clip) && DetailsHost.Content is not null) return;
-        if (clip is not null && detailsClip?.Id == clip.Id && DetailsHost.Content is ClipDetails { HasDraft: true }) return;
+        if (DetailsHost.Content is ClipDetails details && (ReferenceEquals(detailsClip, clip) ||
+            clip is not null && detailsClip?.Id == clip.Id && details.HasDraft))
+        {
+            details.RefreshSummary();
+            return;
+        }
         detailsClip = clip;
-        DetailsHost.Content = new ClipDetails(app, clip, () => results.Selected is { } row && ToggleAggregation(row));
+        DetailsHost.Content = new ClipDetails(app, clip, () => results.Selected is { } row && ToggleAggregation(row), id => RevealEvidence(id));
+    }
+
+    private void RevealEvidence(Guid id, Action<Clip>? showDetails = null)
+    {
+        if (app.Clips.FirstOrDefault(clip => clip.Id == id && clip.TrashedAt is null && clip.Kind != ClipKind.Aggregate) is not { } source)
+        {
+            app.Notify("Source clip unavailable");
+            return;
+        }
+        Reveal(source);
+        showDetails?.Invoke(source);
     }
 
     private void SelectedChanged(object sender, SelectionChangedEventArgs e)
@@ -523,10 +538,16 @@ public partial class LibraryPage : UserControl
         if (results.Selected is not { } row) return;
         var window = new Window
         {
-            Owner = Owner, Title = Labels.Get("Clip details"), Width = 440, Height = 660,
+            Owner = Owner, Width = 440, Height = 660,
             MinWidth = 330, MinHeight = 330, WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            ShowInTaskbar = false, Content = new ClipDetails(app, row.Clip, () => ToggleAggregation(row))
+            ShowInTaskbar = app.AutomationWindow
         };
+        void Inspect(Clip clip, Func<bool> expand)
+        {
+            window.Title = Labels.Get(clip.Kind == ClipKind.Aggregate ? "Aggregation details" : "Clip details");
+            window.Content = new ClipDetails(app, clip, expand, id => RevealEvidence(id, source => Inspect(source, () => false)));
+        }
+        Inspect(row.Clip, () => ToggleAggregation(row));
         window.PreviewKeyDown += (_, args) => { if (args.Key == Key.Escape) window.Close(); };
         window.ShowDialog();
     }

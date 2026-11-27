@@ -31,14 +31,18 @@ internal sealed partial class MacBackupWriter(HistoryStore store, AiTasks ai, IR
             checksums.Clear();
             var clips = store.Clips.Where(clip => clip.Kind != ClipKind.Aggregate).ToArray();
             var aggregations = store.Clips.Where(clip => clip.Kind == ClipKind.Aggregate).ToArray();
+            var originals = clips.ToDictionary(clip => clip.Id);
+            var summarized = aggregations.Where(clip => clip.TrashedAt is null && clip.Summary?.IsCurrent(originals) == true).ToArray();
+            var summarySourceIds = summarized.SelectMany(clip => clip.Summary!.Sources.Select(source => source.ClipId)).ToHashSet();
+            var exportedRevisions = new Dictionary<Guid, string>();
             var events = clips.SelectMany(CaptureEvents).ToArray();
             var routes = RouteRules();
-            WriteLines("clips.jsonl", clips.Select(ExportClip));
+            WriteLines("clips.jsonl", clips.Select(clip => ExportClip(clip, summarySourceIds.Contains(clip.Id) ? exportedRevisions : null)));
             WriteLines("capture-events.jsonl", events);
             WriteLines("url-fallback-rules.jsonl", routes);
             WriteLines("aggregations.jsonl", aggregations.Select(Aggregation));
             WriteJson("collections.json", store.Collections.Select(Collection).ToArray());
-            WriteJson("ai-state.json", MacBackupAiState.Export(store, ai));
+            WriteJson("ai-state.json", MacBackupAiState.Export(store, ai, summarized, exportedRevisions));
             AiFile.Save(Path.Combine(staging, "manifest.json"), new
             {
                 formatVersion = 5, appVersion = WindowsUpdates.CurrentVersion.ToString(3), exportedAt = Date(DateTimeOffset.UtcNow),
@@ -54,13 +58,23 @@ internal sealed partial class MacBackupWriter(HistoryStore store, AiTasks ai, IR
         }
     }
 
-    private object ExportClip(Clip clip)
+    private object ExportClip(Clip clip, Dictionary<Guid, string>? exportedRevisions)
     {
         var items = clip.OriginalItems ?? CreateItems(clip);
         string contentHash = clip.OriginalMacIdentity?.ContentHash ??
             Hash(JsonSerializer.SerializeToUtf8Bytes(items.OrderBy(item => item.Order).Select(item =>
                 item.Representations.Select(rep => new { rep.Uti, rep.Hash })), Json));
         var original = clip.OriginalMacIdentity;
+        string kind = original is { Kind.Length: > 0 } ? original.Kind : Kind(clip.Kind);
+        string preview = AiTasks.Compact(clip.PlainText ?? "", 600);
+        string? automaticTitle = clip.LinkDetails?.Title ?? clip.LinkDetails?.FallbackTitle;
+        if (exportedRevisions is not null)
+        {
+            string recognized = MacSummaryRevision.RecognizedText(clip.Note, clip.RecognizedText,
+                clip.RecognizedText is not null && clip.OcrInNote);
+            exportedRevisions.Add(clip.Id, MacSummaryRevision.Compute(clip.Id, contentHash, clip.Title, automaticTitle ?? "",
+                clip.Note, kind, preview, clip.TrashedAt is not null, recognized));
+        }
         string? ocrMethod = clip.OcrMode switch
         {
             ImageOcrMode.Fast => "visionFast",
@@ -71,17 +85,17 @@ internal sealed partial class MacBackupWriter(HistoryStore store, AiTasks ai, IR
         {
             id = clip.Id, createdAt = Date(clip.CreatedAt ?? clip.CapturedAt), updatedAt = Date(ClipActivity.LastUsed(clip)),
             lastCopiedAt = Date(clip.CapturedAt), lastPastedAt = Date(clip.LastPastedAt),
-            primaryKind = original is { Kind.Length: > 0 } ? original.Kind : Kind(clip.Kind),
+            primaryKind = kind,
             secondaryKinds = original?.SecondaryKinds ?? (clip.Kind == ClipKind.Mixed ?
                 new[] { clip.HasImage ? "image" : null, clip.Text is not null ? "text" : null, clip.Files.Length > 0 ? "file" : null }
                     .OfType<string>().ToArray() : []),
             title = clip.Title, note = clip.Note, priority = (int)clip.Priority,
             isFavorite = clip.Favorite, isPinned = clip.Pinned, isArchived = clip.ArchivedAt is not null,
             source = Source(clip.Source, clip.SourceIdentifier, clip.SourceConfidence),
-            previewText = AiTasks.Compact(clip.PlainText ?? "", 600), contentHash, identityKey = original?.IdentityKey,
+            previewText = preview, contentHash, identityKey = original?.IdentityKey,
             byteSize = items.Sum(item => item.Representations.Sum(rep => (long)rep.Size)), clip.CopyCount, clip.PasteCount,
             deletedAt = Date(clip.TrashedAt), collectionIDs = clip.CollectionIds, aiAnalysisExcluded = clip.ExcludeFromAi,
-            automaticTitle = clip.LinkDetails?.Title ?? clip.LinkDetails?.FallbackTitle, codeMetadata = Code(clip),
+            automaticTitle, codeMetadata = Code(clip),
             fileMetadata = clip.Files.Length == 0 ? null : new { fileNames = clip.Files.Select(Path.GetFileName), filePaths = clip.Files },
             quickTextTransformations = clip.Conversions.Select(conversion => new
             {

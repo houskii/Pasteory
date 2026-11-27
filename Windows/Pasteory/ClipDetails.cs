@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
@@ -13,13 +15,17 @@ internal sealed class ClipDetails : DockPanel
 {
     private readonly App app;
     private readonly Clip? clip;
+    private readonly Action<Guid> revealSource;
     private readonly StackPanel cards = new() { Margin = new Thickness(13, 13, 13, 4) };
+    private readonly StackPanel? summaryContent;
+    private IReadOnlyList<Clip>? summarySnapshot;
     internal bool HasDraft { get; private set; }
 
-    internal ClipDetails(App app, Clip? clip, Func<bool> expand)
+    internal ClipDetails(App app, Clip? clip, Func<bool> expand, Action<Guid> revealSource)
     {
         this.app = app;
         this.clip = clip;
+        this.revealSource = revealSource;
         var heading = Header(clip);
         SetDock(heading, Dock.Top);
         Children.Add(heading);
@@ -28,6 +34,12 @@ internal sealed class ClipDetails : DockPanel
         {
             Card("Preview").Children.Add(Ui.Text(Labels.Get("Select a clip to preview it."), 12, "Muted"));
             return;
+        }
+        if (clip is { Kind: ClipKind.Aggregate, Summary.HasReferences: true })
+        {
+            summaryContent = new StackPanel();
+            Card("AI summary").Children.Add(summaryContent);
+            RefreshSummary();
         }
         Preview(expand);
         OriginalItems();
@@ -45,6 +57,54 @@ internal sealed class ClipDetails : DockPanel
             body.Children.Add(Ui.Button("Restore", () => app.RestoreClip(clip), "PrimaryButton"));
         }
         Metadata();
+    }
+
+    internal void RefreshSummary()
+    {
+        if (summaryContent is null || clip?.Summary is not { } summary || ReferenceEquals(summarySnapshot, app.Clips)) return;
+        summarySnapshot = app.Clips;
+        var ids = summary.Sources.Select(source => source.ClipId).ToHashSet();
+        var originals = app.Clips.Where(source => source.TrashedAt is null && source.Kind != ClipKind.Aggregate && ids.Contains(source.Id))
+            .ToDictionary(source => source.Id);
+        summaryContent.Children.Clear();
+        if (!summary.IsCurrent(originals))
+            summaryContent.Children.Add(Ui.Text(Labels.Get("Some source clips have changed. Review this summary."), 11, "WarningInk"));
+
+        foreach (var claim in summary.Claims)
+        {
+            var row = new StackPanel { Margin = new Thickness(0, 0, 0, 9) };
+            string heading = claim.Kind switch
+            {
+                AggregationClaimKind.Fact => "Fact excerpt",
+                AggregationClaimKind.Inference => "Inference",
+                _ => "Suggested action"
+            };
+            row.Children.Add(Ui.SectionTitle(heading));
+            var text = ContentPreview.TextBoxFor(claim.Text);
+            text.MaxHeight = 160;
+            text.MinHeight = 0;
+            text.Padding = new Thickness(0, 3, 0, 2);
+            text.BorderThickness = new Thickness(0);
+            text.Background = Brushes.Transparent;
+            AutomationProperties.SetName(text, Labels.Get(heading));
+            row.Children.Add(text);
+            foreach (var evidence in claim.Evidence)
+            {
+                var quote = Ui.Text("“" + ClipCard.Short(evidence.Quote, 300, 3) + "” ↗", 11, "AccentInk");
+                var source = Ui.Button("View source clip", () => revealSource(evidence.ClipId));
+                source.Content = quote;
+                source.HorizontalContentAlignment = HorizontalAlignment.Left;
+                source.Padding = new Thickness(0, 2, 0, 2);
+                source.MinHeight = 19;
+                source.SetResourceReference(Control.BackgroundProperty, "TransparentBrush");
+                source.IsEnabled = originals.TryGetValue(evidence.ClipId, out var original);
+                source.ToolTip = original is null ? Labels.Get("Source clip unavailable") : original.DisplayTitle;
+                AutomationProperties.SetName(source, Labels.Format("View source clip · {0}", ClipCard.Short(evidence.Quote, 120, 1)));
+                ToolTipService.SetShowOnDisabled(source, true);
+                row.Children.Add(source);
+            }
+            summaryContent.Children.Add(row);
+        }
     }
 
     private void OriginalItems()
@@ -83,8 +143,10 @@ internal sealed class ClipDetails : DockPanel
             layout.Children.Add(kind);
         }
         var headings = new StackPanel();
-        headings.Children.Add(Ui.Text(Labels.Get("Clip details"), 17, strong: true));
-        if (clip is not null) headings.Children.Add(Ui.Text(Labels.Get(clip.Kind.ToString()), 10, "Muted"));
+        bool aggregation = clip?.Kind == ClipKind.Aggregate;
+        headings.Children.Add(Ui.Text(Labels.Get(aggregation ? "Aggregation details" : "Clip details"), 17, strong: true));
+        if (clip is not null) headings.Children.Add(Ui.Text(aggregation ? Labels.Format("{0} items", clip.Members.Length) :
+            Labels.Get(clip.Kind.ToString()), 10, "Muted"));
         layout.Children.Add(headings);
         var border = new Border { Padding = new Thickness(15, 14, 15, 12), Child = layout, BorderThickness = new Thickness(0, 0, 0, 1) };
         border.SetResourceReference(Border.BorderBrushProperty, "Line");
@@ -107,8 +169,8 @@ internal sealed class ClipDetails : DockPanel
         body.MinHeight = 185;
         if (clip!.Kind == ClipKind.Aggregate)
         {
+            body.MinHeight = 0;
             body.Children.Add(Ui.Text(clip.Title.Length > 0 ? clip.Title : Labels.Get("Aggregation"), 15, strong: true));
-            body.Children.Add(Ui.Text(Labels.Format("{0} items", clip.Members.Length), 12, "Muted"));
             body.Children.Add(Ui.Text(LibraryEditors.AggregationSource(clip.AggregationOrigin, clip.AggregationFromSearch), 11, "Muted"));
             body.Children.Add(Ui.Text(Labels.Format("Created {0:g}", (clip.CreatedAt ?? clip.CapturedAt).ToLocalTime()), 11, "Muted"));
             if (clip.AggregationUpdatedAt is { } updated)
@@ -226,8 +288,9 @@ internal sealed class ClipDetails : DockPanel
     private void Edit()
     {
         var body = Card("Edit");
-        var title = Ui.Field("Title", clip!.Title, 160);
-        var note = Ui.Field("Note", clip.Note, 64_000);
+        var opened = clip!;
+        var title = Ui.Field("Title", opened.Title, 160);
+        var note = Ui.Field("Note", opened.Note, 64_000);
         note.AcceptsReturn = true;
         note.TextWrapping = TextWrapping.Wrap;
         note.MinHeight = 72;
@@ -236,21 +299,30 @@ internal sealed class ClipDetails : DockPanel
         note.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
         Ui.AddField(body, "Title", title);
         Ui.AddField(body, "Note", note);
-        if (clip.OcrInNote) body.Children.Add(Ui.Text(Labels.Get("Edit the text in [OCR:…] to update the recognized text and search."), 11, "Muted"));
-        var save = Ui.Button("Save", () =>
-        {
-            HasDraft = false;
-            if (!app.EditClip(clip.Id, item => item.WithNoteEdit(clip, note.Text) with
-                { Title = title.Text == clip.Title ? item.Title : title.Text.Trim() })) HasDraft = true;
-        }, "PrimaryButton");
+        if (opened.OcrInNote) body.Children.Add(Ui.Text(Labels.Get("Edit the text in [OCR:…] to update the recognized text and search."), 11, "Muted"));
+        var save = Ui.Button("Save", style: "PrimaryButton");
         save.Margin = new Thickness(0, 6, 0, 0);
         save.HorizontalAlignment = HorizontalAlignment.Right;
         save.Visibility = Visibility.Collapsed;
         void TrackDraft()
         {
-            HasDraft = title.Text != clip.Title || note.Text != clip.Note;
+            HasDraft = title.Text != opened.Title || note.Text != opened.Note;
             save.Visibility = HasDraft ? Visibility.Visible : Visibility.Collapsed;
         }
+        save.Click += (_, _) =>
+        {
+            HasDraft = false;
+            if (!app.EditClip(opened.Id, item => item.WithNoteEdit(opened, note.Text) with
+                { Title = title.Text == opened.Title ? item.Title : title.Text.Trim() }))
+            {
+                TrackDraft();
+                return;
+            }
+            opened = app.Clips.First(item => item.Id == opened.Id);
+            title.Text = opened.Title;
+            note.Text = opened.Note;
+            TrackDraft();
+        };
         title.TextChanged += (_, _) => TrackDraft();
         note.TextChanged += (_, _) => TrackDraft();
         body.Children.Add(save);
@@ -258,8 +330,8 @@ internal sealed class ClipDetails : DockPanel
         var priorities = new StackPanel { Orientation = Orientation.Horizontal };
         foreach (var priority in Enum.GetValues<ClipPriority>())
         {
-            var button = Ui.Button(priority.ToString(), () => app.UpdateClip(clip.Id, item => item with { Priority = priority }),
-                clip.Priority == priority ? "PrimaryButton" : null);
+            var button = Ui.Button(priority.ToString(), () => app.UpdateClip(opened.Id, item => item with { Priority = priority }),
+                opened.Priority == priority ? "PrimaryButton" : null);
             button.Margin = new Thickness(0, 0, 3, 0);
             button.Padding = new Thickness(10, 3, 10, 3);
             button.MinHeight = 23;
@@ -268,9 +340,9 @@ internal sealed class ClipDetails : DockPanel
         Ui.AddField(body, "Priority", priorities);
 
         var flags = new UniformGrid { Columns = 2, Margin = new Thickness(0, 11, 0, 0) };
-        var favorite = Ui.Button(clip.Favorite ? "Remove favorite" : "Favorite", () => app.ToggleFavorite(clip));
+        var favorite = Ui.Button(opened.Favorite ? "Remove favorite" : "Favorite", () => app.ToggleFavorite(opened));
         favorite.Margin = new Thickness(0, 0, 4, 0);
-        var pinned = Ui.Button(clip.Pinned ? "Unpin" : "Pin", () => app.TogglePin(clip));
+        var pinned = Ui.Button(opened.Pinned ? "Unpin" : "Pin", () => app.TogglePin(opened));
         pinned.Margin = new Thickness(4, 0, 0, 0);
         foreach (var button in new[] { favorite, pinned })
         {

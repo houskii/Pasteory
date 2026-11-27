@@ -23,6 +23,12 @@ internal static partial class Program
     private static void Main(string[] args)
     {
         int pathIndex = Array.IndexOf(args, "--packaged-app");
+        int summaryFixture = Array.IndexOf(args, "--prepare-summary-ui");
+        if (summaryFixture >= 0)
+        {
+            PrepareSummaryUi(args[summaryFixture + 1]);
+            return;
+        }
         int fixture = Array.IndexOf(args, "--prepare-ui");
         if (fixture >= 0)
         {
@@ -128,6 +134,7 @@ internal static partial class Program
         var panel = new HistoryWindow(app);
         Check(panel.Title == "Pasteory", "Load the native WPF history panel and resources");
         CheckMacBackup();
+        CheckMacAggregationSummary();
         CheckAiContextBudget();
         CheckAiModel().GetAwaiter().GetResult();
         CheckAiRecovery().GetAwaiter().GetResult();

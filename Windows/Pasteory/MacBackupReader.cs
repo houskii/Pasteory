@@ -47,12 +47,30 @@ internal sealed class MacBackupReader(string root)
             } : collection).ToList();
         var fallback = ReadLines("url-fallback-rules.jsonl").Select(ToFallback).OfType<LinkFallbackRule>().ToArray();
         var clips = new List<Clip>();
+        var summaries = ai.Summaries ?? [];
+        var sourceIds = summaries.Values.SelectMany(summary => summary.Sources.Select(source => source.ClipId)).ToHashSet();
+        var revisions = new Dictionary<Guid, (string Mac, string Windows)>();
         string staging = Directory.CreateTempSubdirectory("Pasteory-MacImport-").FullName;
         try
         {
             foreach (var item in ReadLines("clips.jsonl", required: true))
-                clips.Add(ConvertClip(item, events, staging));
-            clips.AddRange(ReadLines("aggregations.jsonl").Select(ConvertAggregation));
+            {
+                var clip = ConvertClip(item, events, staging);
+                clips.Add(clip);
+                if (clip.TrashedAt is null && sourceIds.Contains(clip.Id))
+                    revisions.TryAdd(clip.Id, (SummaryRevision(item, clip.Id), AggregationSummary.RevisionFor(clip)));
+            }
+            foreach (var item in ReadLines("aggregations.jsonl"))
+            {
+                var aggregation = ConvertAggregation(item);
+                if (summaries.TryGetValue(aggregation.Id, out var summary) && summary.Sources.All(source =>
+                    revisions.TryGetValue(source.ClipId, out var revision) && revision.Mac.Equals(source.Revision, StringComparison.OrdinalIgnoreCase)))
+                {
+                    var sources = summary.Sources.Select(source => source with { Revision = revisions[source.ClipId].Windows }).ToArray();
+                    aggregation = aggregation with { Summary = summary with { Sources = sources } };
+                }
+                clips.Add(aggregation);
+            }
             var existing = collections.Select(group => group.Id).ToHashSet();
             foreach (var missing in clips.SelectMany(clip => clip.CollectionIds).Distinct().Where(id => !existing.Contains(id)))
                 collections.Add(new ClipCollection(missing, "Recovered " + missing.ToString("D")));
@@ -66,6 +84,17 @@ internal sealed class MacBackupReader(string root)
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
         }
+    }
+
+    private static string SummaryRevision(JsonElement item, Guid id)
+    {
+        string note = String(item, "note");
+        string contentHash = String(item, "contentHash");
+        var ocr = Child(item, "localOCR");
+        string recognized = Int(ocr, "version", 0) == 1 && Optional(ocr, "contentHash") == contentHash ?
+            MacSummaryRevision.RecognizedText(note, Optional(ocr, "text"), Optional(ocr, "appendedNote") is not null) : "";
+        return MacSummaryRevision.Compute(id, contentHash, String(item, "title"), String(item, "automaticTitle"), note,
+            String(item, "primaryKind"), String(item, "previewText"), deleted: false, recognized);
     }
 
     private Clip ConvertClip(JsonElement item, Dictionary<Guid, CaptureEvent[]> events, string staging)

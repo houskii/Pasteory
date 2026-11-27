@@ -341,6 +341,152 @@ internal static partial class Program
         finally { Directory.Delete(root, recursive: true); }
     }
 
+    private static void CheckMacAggregationSummary()
+    {
+        string root = Directory.CreateTempSubdirectory("Pasteory-MacSummary-QA-").FullName;
+        try
+        {
+            string backup = Path.Combine(root, "from-mac");
+            var fixture = WriteMacSummaryFixture(backup);
+            var store = new HistoryStore(Path.Combine(root, "history"));
+            Check(new MacBackupReader(backup).Import(store).Count == 4, "Import the originals and their aggregations");
+            var reopened = new HistoryStore(Path.Combine(root, "history"));
+            var aggregation = reopened.Clips.Single(clip => clip.Id == fixture.Aggregation);
+            var summary = aggregation.Summary ?? throw new InvalidOperationException("Missing Mac aggregation summary");
+            Check(summary.Claims.Select(claim => claim.Kind).SequenceEqual([AggregationClaimKind.Fact, AggregationClaimKind.Inference, AggregationClaimKind.Action]) &&
+                summary.Claims[0].Evidence.Single().ClipId == fixture.Archived && summary.IsCurrent(reopened.Clips.ToDictionary(clip => clip.Id)) &&
+                reopened.Clips.Single(clip => clip.Id == fixture.Invalid).Summary is null,
+                "Recover all Mac claim kinds and original evidence and skip an already stale Mac summary");
+            string windowsBackup = Path.Combine(root, "windows.zip");
+            reopened.ExportBackup(windowsBackup);
+            var restored = new HistoryStore(Path.Combine(root, "restored"));
+            Check(restored.ImportBackup(windowsBackup) == 4 && restored.Clips.Single(clip => clip.Id == fixture.Aggregation).Summary is { } restoredSummary &&
+                restoredSummary.GeneratedAt == summary.GeneratedAt && restoredSummary.IsCurrent(restored.Clips.ToDictionary(clip => clip.Id)),
+                "Preserve the validated Mac summary through a Windows ZIP backup");
+
+            var merge = new HistoryStore(Path.Combine(root, "merge"));
+            var duplicate = restored.Clips.Single(clip => clip.Id == fixture.Primary) with { Id = Guid.NewGuid() };
+            merge.ImportClips([duplicate], [], _ => [], restored.ReadRepresentation);
+            Check(new MacBackupReader(backup).Import(merge).Count == 3, "Deduplicate a previously imported source without duplicating it");
+            var merged = merge.Clips.Single(clip => clip.Id == fixture.Aggregation);
+            Check(merged.Summary is { } mergedSummary && mergedSummary.IsCurrent(merge.Clips.ToDictionary(clip => clip.Id)) &&
+                merged.Members.Contains(duplicate.Id) && mergedSummary.Claims[1].Evidence.Single().ClipId == duplicate.Id,
+                "Remap summary versions and evidence together when the original already has a Windows clip ID");
+
+            var previous = new HistoryStore(Path.Combine(root, "previous"));
+            previous.ImportClips(reopened.Clips.Select(clip => clip with { Summary = null }).ToArray(), [], _ => [], reopened.ReadRepresentation);
+            Check(new MacBackupReader(backup).Import(previous).Count == 0 &&
+                previous.Clips.Single(clip => clip.Id == fixture.Aggregation).Summary?.IsCurrent(previous.Clips.ToDictionary(clip => clip.Id)) == true,
+                "Restore summary metadata for aggregations imported by older Windows builds");
+
+            string exported = Path.Combine(root, "to-mac");
+            new MacBackupWriter(restored, new AiTasks(root)).Export(exported);
+            using var output = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(exported, "ai-state.json")));
+            var encoded = output.RootElement.GetProperty("summaries");
+            var versions = encoded[1].GetProperty("sourceRevisions").EnumerateArray().ToArray();
+            var exportedVersions = Enumerable.Range(0, versions.Length / 2).ToDictionary(index => versions[2 * index].GetGuid(),
+                index => versions[2 * index + 1].GetString());
+            Check(encoded.GetArrayLength() == 2 && encoded[0].GetGuid() == fixture.Aggregation &&
+                exportedVersions[fixture.Primary] == fixture.ExportedRevision && encoded[1].GetProperty("claims")[0]
+                    .GetProperty("evidence")[0].GetProperty("clipID").GetGuid() == fixture.Archived,
+                "Emit the Swift dictionary shape and the independently expected revision of the exported original");
+            var returned = new HistoryStore(Path.Combine(root, "returned"));
+            Check(new MacBackupReader(exported).Import(returned).Count == 4 &&
+                returned.Clips.Single(clip => clip.Id == fixture.Aggregation).Summary?.IsCurrent(returned.Clips.ToDictionary(clip => clip.Id)) == true,
+                "Reopen the Mac v5 export without losing original-text links");
+
+            restored.Update(fixture.Primary, clip => clip with { Note = "Edited after the summary" });
+            Check(!restored.Clips.Single(clip => clip.Id == fixture.Aggregation).Summary!.IsCurrent(restored.Clips.ToDictionary(clip => clip.Id)),
+                "A later source edit marks the existing summary stale");
+            string staleZip = Path.Combine(root, "stale-windows.zip");
+            restored.ExportBackup(staleZip);
+            var importedStale = new HistoryStore(Path.Combine(root, "stale-history"));
+            importedStale.ImportBackup(staleZip);
+            Check(importedStale.Clips.Single(clip => clip.Id == fixture.Aggregation).Summary is { } staleSummary &&
+                !staleSummary.IsCurrent(importedStale.Clips.ToDictionary(clip => clip.Id)), "Preserve stale summaries with their warnings in Windows backups");
+            string stale = Path.Combine(root, "stale-mac");
+            new MacBackupWriter(restored, new AiTasks(root)).Export(stale);
+            using var outdated = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(stale, "ai-state.json")));
+            Check(outdated.RootElement.GetProperty("summaries").GetArrayLength() == 0,
+                "Avoid assigning fresh Mac source revisions to a stale summary");
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    private static void PrepareSummaryUi(string directory)
+    {
+        Check(Path.IsPathFullyQualified(directory) && !Directory.Exists(directory), "A new absolute fixture directory");
+        var fixture = WriteMacSummaryFixture(Path.Combine(directory, "fixture"));
+        var store = new HistoryStore(directory);
+        Check(new MacBackupReader(Path.Combine(directory, "fixture")).Import(store).Count == 4, "Load the summary fixture");
+        Check(store.Clips.Single(clip => clip.Id == fixture.Aggregation).Summary is not null, "The prepared aggregate has its Mac summary");
+        new LocalSettings { Language = "简体中文", Appearance = "Light" }.Save(directory);
+        Console.WriteLine("Prepared a Mac summary with three claim kinds and an archived original.");
+    }
+
+    private static (Guid Primary, Guid Archived, Guid Aggregation, Guid Invalid, string ExportedRevision) WriteMacSummaryFixture(string directory)
+    {
+        Directory.CreateDirectory(directory);
+        var first = Guid.Parse("9714ccf2-f128-4bae-8c3d-1d35829f2866");
+        var archived = Guid.Parse("df0eeed4-3c51-44a3-8b36-21769fc9bc8a");
+        Guid aggregation = Guid.NewGuid(), invalid = Guid.NewGuid();
+        const string caption = "已确认 / 发布 📎\n含 \"引用\" \u001f";
+        const string title = "项目 / 发布说明", note = @"来自 C:\项目", quote = "旧版发布说明已通过复核";
+        string firstHash = new('a', 64), archivedHash = new('b', 64);
+        var now = DateTimeOffset.UtcNow;
+        var checksums = new Dictionary<string, string>();
+
+        // Reference bytes follow Foundation's compact JSONEncoder spelling, independent of the exporter.
+        string firstJson = $$"""["9714CCF2-F128-4BAE-8C3D-1D35829F2866","{{firstHash}}","项目 \/ 发布说明","","来自 C:\\项目","text","已确认 \/ 发布 📎\n含 \"引用\" \u001f","present"]""";
+        string archiveJson = $$"""["DF0EEED4-3C51-44A3-8B36-21769FC9BC8A","{{archivedHash}}","已归档的发布说明","","","text","{{quote}}","present"]""";
+        string firstRevision = Digest(Encoding.UTF8.GetBytes(firstJson));
+        string archivedRevision = Digest(Encoding.UTF8.GetBytes(archiveJson));
+        string exportedRevision = Digest(Encoding.UTF8.GetBytes(firstJson.Replace("\\u001f", "\\u001f\\n完整备份正文", StringComparison.Ordinal)));
+        string payload = caption + "\n完整备份正文";
+        object Record(Guid id, string hash, string displayTitle, string preview, string body, bool isArchived = false) => new
+        {
+            id, contentHash = hash, createdAt = now, lastCopiedAt = now, primaryKind = "text", source = new { appName = "Notes" },
+            title = displayTitle, note = isArchived ? "" : note, previewText = preview, isArchived,
+            items = new[] { new { order = 0, representations = new[]
+            {
+                new { uti = "public.utf8-plain-text", storage = new { type = "inline", data = Encoding.UTF8.GetBytes(body) } }
+            } } }
+        };
+        object Aggregate(Guid id, string name) => new
+        {
+            id, title = name, createdAt = now, memberClipIDs = new[] { first, archived }, origin = new { condition = new { summary = "AI" } }
+        };
+        object Summary(Guid id, string revision) => new
+        {
+            targetID = id, generatedAt = now,
+            sourceRevisions = new object[] { first, revision, archived, archivedRevision },
+            claims = new[]
+            {
+                new { kind = "fact", text = "发布内容已经复核。", evidence = new[] { new { clipID = archived, quote } } },
+                new { kind = "inference", text = "可以开始准备打包。", evidence = new[] { new { clipID = first, quote = "已确认 / 发布 📎" } } },
+                new { kind = "action", text = "保留原文以便后续检查。", evidence = new[] { new { clipID = first, quote = "完整备份正文" } } }
+            }
+        };
+        Add("clips.jsonl", Lines(Record(first, firstHash, title, caption, payload),
+            Record(archived, archivedHash, "已归档的发布说明", quote, quote, isArchived: true)));
+        Add("aggregations.jsonl", Lines(Aggregate(aggregation, "旧版 AI 发布归纳"), Aggregate(invalid, "失效的旧归纳")));
+        Add("collections.json", "[]"u8.ToArray());
+        Add("ai-state.json", JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            schemaVersion = 1, summaries = new object[] { aggregation, Summary(aggregation, firstRevision), invalid, Summary(invalid, new string('0', 64)) }
+        }));
+        File.WriteAllBytes(Path.Combine(directory, "manifest.json"), JsonSerializer.SerializeToUtf8Bytes(new { formatVersion = 5, fileChecksums = checksums }));
+        return (first, archived, aggregation, invalid, exportedRevision);
+
+        void Add(string name, byte[] bytes)
+        {
+            File.WriteAllBytes(Path.Combine(directory, name), bytes);
+            checksums[name] = Digest(bytes);
+        }
+        static byte[] Lines(params object[] rows) => Encoding.UTF8.GetBytes(string.Join("\n", rows.Select(row => JsonSerializer.Serialize(row))));
+        static string Digest(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
+    }
+
     private static async Task CheckAiModel()
     {
         string root = Directory.CreateTempSubdirectory("Pasteory-AI-QA-").FullName;

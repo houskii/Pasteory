@@ -77,6 +77,8 @@ public sealed record Clip
     public bool AggregationFromSearch { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public DateTimeOffset? AggregationUpdatedAt { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AggregationSummary? Summary { get; init; }
     public bool ExcludeFromAi { get; init; }
     public bool IsManual { get; init; }
     public ClipUse[] Uses { get; init; } = [];
