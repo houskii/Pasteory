@@ -26,7 +26,7 @@ internal static partial class Program
         int fixture = Array.IndexOf(args, "--prepare-ui");
         if (fixture >= 0)
         {
-            PrepareUi(args[fixture + 1], args.Contains("--link-records"));
+            PrepareUi(args[fixture + 1], args.Contains("--link-records"), args.Contains("--ai-groups"));
             return;
         }
         if (args.Contains("--link-engine"))
@@ -131,6 +131,7 @@ internal static partial class Program
         CheckAiContextBudget();
         CheckAiModel().GetAwaiter().GetResult();
         CheckAiRecovery().GetAwaiter().GetResult();
+        CheckAiRegrouping().GetAwaiter().GetResult();
         CheckUpdateSignature();
         if (args.Contains("--ocr")) CheckOcr();
         if (args.Contains("--system-clipboard"))
@@ -461,7 +462,7 @@ internal static partial class Program
         }
     }
 
-    private static void PrepareUi(string directory, bool linkRecords)
+    private static void PrepareUi(string directory, bool linkRecords, bool aiGroups)
     {
         Check(Path.IsPathFullyQualified(directory) && !Directory.Exists(directory), "A new absolute fixture directory");
         Directory.CreateDirectory(directory);
@@ -553,12 +554,23 @@ internal static partial class Program
                 Text = "https://mp.weixin.qq.com/s/demo", LinkDetails = new("Web verification required", null, now.AddMinutes(-3), "Anonymous", HttpStatus: 200, DurationMilliseconds: 438) });
             store.Capture(new Clip { Kind = ClipKind.Link, Source = "Notepad", CapturedAt = now.AddDays(-2), Text = "http://192.168.1.1/guide" });
         }
+        if (aiGroups)
+        {
+            var samples = store.Clips.Where(clip => clip.Kind != ClipKind.Aggregate && clip.ArchivedAt is null)
+                .OrderByDescending(clip => clip.CapturedAt).Select(clip => clip.Id).Take(6).ToArray();
+            store.ApplyAiTopics([
+                new("产品设计", "界面与配色的参考资料。", samples[..4], Definition: "便于回看界面与视觉设计相关的剪贴内容。"),
+                new("开发记录", "代码片段、链接和项目配置。", samples[2..], Definition: "整理实现笔记、代码示例和用于调试的项目文件。")]);
+            var designTheme = store.Collections.Single(group => group.Name == "产品设计");
+            store.UpdateAiGroup(designTheme, designTheme.Name, designTheme.Definition, retained: true);
+        }
         new LocalSettings
         {
             Language = "简体中文", Appearance = "Light", BrowserPath = File.Exists(chrome) ? chrome : null,
+            Ai = aiGroups ? new() { Enabled = true, Model = "synthetic-model", RecentLimit = 4 } : new(),
             Shortcuts = new Dictionary<string, string> { ["ShowPanel"] = "Ctrl+Alt+Shift+V" }
         }.Save(directory);
-        Console.WriteLine("Prepared nine active clips, an archived TIFF, an aggregation, and four groups.");
+        Console.WriteLine("Prepared synthetic clips, an archived TIFF, an aggregation and test groups.");
     }
 
     private static void Check(bool condition, string description)

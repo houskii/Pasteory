@@ -94,7 +94,9 @@ public partial class LibraryPage : UserControl
             reset = true;
         }
         bool hasThemes = app.Collections.Any(group => group.IsAi);
-        ClipCollection[] ranked = hasThemes ? app.RankedAiGroups().ToArray() : [];
+        AiGroupActivity[] activities = hasThemes ? app.ScoreAiGroups() : [];
+        var ranked = activities.Select(item => item.Group).ToArray();
+        var scores = activities.ToDictionary(item => item.Group.Id);
         var shown = GroupNavigation.Visible(app.Settings, app.Collections, ranked, library: true, groupId);
         if (groupId is { } selectedGroup && !shown.Any(group => group.Id == selectedGroup))
         {
@@ -119,10 +121,12 @@ public partial class LibraryPage : UserControl
             int position = nav.Collection is { } collectionId ? Array.FindIndex(visibleGroups, group => group.Id == collectionId) + 1 :
                 nav.Scope == Scope.All && nav.Kind is null ? 0 : -1;
             string hint = GroupNavigation.Hint(app.Settings, position);
-            bool ai = nav.Collection is not null && position > 0 && visibleGroups[position - 1].IsAi;
-            var row = GroupNavigation.Row(nav.Glyph, nav.Name, hint, active ? "NavSelectionInk" : "Ink", ai);
+            var activity = nav.Collection is { } id ? scores.GetValueOrDefault(id) : null;
+            var row = GroupNavigation.Row(nav.Glyph, nav.Name, hint, active ? "NavSelectionInk" : "Ink", activity is not null,
+                activity is not null ? $"{activity.Score:F0}%" : null);
             nav.Button.Content = row;
-            nav.Button.ToolTip = hint.Length > 0 ? $"{nav.Name} · {hint}" : nav.Name;
+            string title = hint.Length > 0 ? $"{nav.Name} · {hint}" : nav.Name;
+            nav.Button.ToolTip = activity?.Group.Definition is { Length: > 0 } definition ? title + "\n" + definition : title;
         }
         foreach (var button in Navigation.Children.OfType<Button>()) button.MinHeight = GroupNavigation.RowHeight(app.Settings);
         UpdateColumns();
@@ -130,7 +134,7 @@ public partial class LibraryPage : UserControl
         var collection = app.Collections.FirstOrDefault(group => group.Id == groupId);
         var refresh = results.Refresh(Search.Text, reset, scope, kind, collection, select, focusChildren, restored);
         Heading.Text = selected.Name;
-        RefreshThemeOverview(collection);
+        RefreshThemeOverview(collection, groupId is { } themeId ? scores.GetValueOrDefault(themeId) : null);
         Subtitle.Text = Search.Text.Trim().Length > 0 ? Labels.Format("Searching in {0}", selected.Name) :
             Labels.Get(scope switch
             {
@@ -159,17 +163,20 @@ public partial class LibraryPage : UserControl
         return true;
     }
 
-    private ClipCollection? shownTheme;
+    private AiGroupActivity? shownTheme;
 
-    private void RefreshThemeOverview(ClipCollection? collection)
+    private void RefreshThemeOverview(ClipCollection? collection, AiGroupActivity? activity)
     {
         var theme = collection is { IsAi: true } ? collection : null;
-        if (theme is not null && ReferenceEquals(shownTheme, theme)) return;
-        if (shownTheme?.Id != theme?.Id) ThemeOverview.IsExpanded = false;
-        shownTheme = theme;
+        if (theme is not null && activity == shownTheme) return;
+        if (shownTheme?.Group.Id != theme?.Id) ThemeOverview.IsExpanded = false;
+        shownTheme = activity;
         ThemeOverviewBody.Children.Clear();
         ThemeOverview.Visibility = theme is null ? Visibility.Collapsed : Visibility.Visible;
         if (theme is null) return;
+        if (activity is not null)
+            ThemeOverviewBody.Children.Add(Ui.Text(Labels.Format("Group activity {0:F0}% · Top {1}%", activity.Score, activity.Percentile),
+                12, "AccentInk", strong: true));
         if (theme.Definition.Length > 0)
         {
             ThemeOverviewBody.Children.Add(Ui.SectionTitle("Theme definition"));
@@ -193,23 +200,11 @@ public partial class LibraryPage : UserControl
                 ThemeOverviewBody.Children.Add(names);
             }
         }
-        var edit = Ui.Button("Edit theme definition", () => ShowThemeDefinitionEditor(theme));
+        var edit = Ui.Button("Edit theme definition", () => ShowAiGroupEditor(theme));
         edit.HorizontalAlignment = HorizontalAlignment.Left;
         edit.Margin = new Thickness(0, 6, 0, 0);
         ThemeOverviewBody.Children.Add(edit);
     }
-
-    private void ShowThemeDefinitionEditor(ClipCollection group) => LibraryEditors.ShowModal(Owner, "Edit theme definition", close =>
-    {
-        var body = new StackPanel();
-        var value = Ui.Field("Theme definition", group.Definition, 2000);
-        value.AcceptsReturn = true;
-        value.MinHeight = 130;
-        value.TextWrapping = TextWrapping.Wrap;
-        value.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
-        Ui.AddField(body, "Theme definition", value);
-        return LibraryEditors.Wrap("Edit theme definition", body, value, () => app.EditAiGroupDefinition(group, value.Text), close);
-    }, 520, 350);
 
     private void BuildNav()
     {
@@ -252,14 +247,16 @@ public partial class LibraryPage : UserControl
     private void AddGroup(ClipCollection group)
     {
         var button = AddNav(group.Name, group.IsSmart || group.IsAi ? Glyph.Smart : Glyph.Group, collection: group.Id);
-        button.ContextMenu = ClipMenus.ForGroup(group, () => EditGroup(group, group.IsSmart), () =>
+        button.ContextMenu = ClipMenus.ForGroup(group, () => { if (group.IsAi) ShowAiGroupEditor(group); else EditGroup(group, group.IsSmart); }, () =>
         {
             if (ClipMenus.Confirm(Owner, "Delete this group? Its clips will stay in the library.")) app.DeleteCollection(group);
         });
         if (group.IsAi)
         {
-            ClipMenus.Add(button.ContextMenu, "Edit theme definition", () => ShowThemeDefinitionEditor(group));
+            ClipMenus.Add(button.ContextMenu, "Manage this AI group", () => ShowAiGroupManager(AiRegroupScope.Selected, group.Id));
             ClipMenus.Add(button.ContextMenu, "Review existing theme", async () => await app.ReviewThemeAsync(group));
+            ClipMenus.Add(button.ContextMenu, "Compress older content in this group", async () =>
+                await app.CompressEligibleContentAsync(manual: true, groupId: group.Id));
             ClipMenus.Add(button.ContextMenu, group.Locked ? "Unlock AI group" : "Lock AI group", () => app.ToggleAiGroupLock(group));
             ClipMenus.Add(button.ContextMenu, group.PackPayloads ? "Unpack saved content" : "Compress saved content", () => app.ToggleAiCompression(group));
         }

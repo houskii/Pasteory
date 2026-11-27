@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
@@ -15,6 +16,55 @@ internal sealed record EditorView(FrameworkElement Content, IInputElement Initia
 
 internal static class LibraryEditors
 {
+    internal static EditorView AiGroup(App app, ClipCollection group, Action close, Action? changed = null)
+    {
+        var body = new StackPanel();
+        var name = Ui.Field("Group name", group.Name, 40);
+        var definition = Ui.Field("Theme definition", group.Definition, 2000);
+        definition.AcceptsReturn = true;
+        definition.MinHeight = 110;
+        definition.TextWrapping = TextWrapping.Wrap;
+        definition.VerticalContentAlignment = VerticalAlignment.Top;
+        definition.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+        Ui.AddField(body, "Group name", name);
+        Ui.AddField(body, "Theme definition", definition);
+        body.Children.Add(Ui.Text(Labels.Get("Describe what belongs in this group and what should be excluded."), 11, "Muted"));
+        var retained = new CheckBox { IsChecked = group.Retained };
+        retained.SetResourceReference(FrameworkElement.StyleProperty, "SettingsSwitch");
+        AutomationProperties.SetName(retained, Labels.Get("Retain this group"));
+        var retention = new DockPanel { Margin = new Thickness(0, 10, 0, 7) };
+        DockPanel.SetDock(retained, Dock.Right);
+        retention.Children.Add(retained);
+        retention.Children.Add(Ui.Text(Labels.Get("Retain this group"), 12));
+        body.Children.Add(retention);
+        if (!string.IsNullOrEmpty(group.Overview))
+        {
+            body.Children.Add(Ui.SectionTitle("AI group overview"));
+            body.Children.Add(Ui.Text(group.Overview, 12, "Muted"));
+        }
+        var error = Ui.Text("", 12, "Danger");
+        body.Children.Add(error);
+        bool Save()
+        {
+            if (!app.EditAiGroup(group, name.Text, definition.Text, retained.IsChecked == true,
+                message => error.Text = Labels.Get(message))) return false;
+            changed?.Invoke();
+            return true;
+        }
+        var recheck = Ui.Button("Save and recheck members", async () =>
+        {
+            if (!Save()) return;
+            close();
+            if (app.Collections.FirstOrDefault(item => item.Id == group.Id) is { } updated)
+                await app.ReviewThemeAsync(updated);
+        });
+        recheck.HorizontalAlignment = HorizontalAlignment.Right;
+        recheck.Margin = new Thickness(0, 9, 0, 0);
+        recheck.IsEnabled = app.CanManageAiGroups && app.Settings.Ai.Enabled && app.Ai.CanConnect(app.Settings.Ai);
+        body.Children.Add(recheck);
+        return Wrap("Edit AI group", body, name, Save, close) with { Submit = null };
+    }
+
     internal static EditorView ClipInfo(App app, Clip clip, bool focusGroups, Action close)
     {
         var form = new StackPanel();

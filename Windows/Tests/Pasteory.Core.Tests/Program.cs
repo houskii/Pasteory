@@ -72,6 +72,7 @@ try
         "Persist settings and honor exclusions");
     CheckSourcePreferences(root);
     CheckLibrary(root);
+    CheckAiRegrouping(root);
     CheckSearchRepair(root);
     CheckOcrNotes(root);
     CheckLifecycleCompression(root);
@@ -87,6 +88,85 @@ finally
 static void Check(bool condition, string description)
 {
     if (!condition) throw new InvalidOperationException(description);
+}
+
+static void CheckAiRegrouping(string root)
+{
+    string folder = Path.Combine(root, "regrouping");
+    var store = new HistoryStore(folder);
+    var manual = store.SaveCollection(null, "Manual folder", null);
+    Guid[] ids = Enumerable.Range(0, 6).Select(number =>
+    {
+        var clip = new Clip { Text = $"Regrouping sample {number}", Note = "Original note", CollectionIds = [manual.Id] };
+        Check(store.Capture(clip), "Capture an original clip for regrouping");
+        return clip.Id;
+    }).ToArray();
+    store.ApplyAiTopics([
+        new("Release", "First overview", [ids[0], ids[1], ids[2], ids[3]], Definition: "Release notes"),
+        new("Development", "Second overview", [ids[0], ids[2], ids[4]], Definition: "Development notes"),
+        new("Reference", "Third overview", [ids[0], ids[4], ids[5]], Definition: "Reference notes")]);
+    var (release, development, reference) = (store.Collections[1], store.Collections[2], store.Collections[3]);
+    var selected = new HashSet<Guid> { release.Id, development.Id };
+    var stale = AiGroupSnapshot.Capture(store.Collections, store.Clips, selected);
+    Check(stale.SelectMany(item => item.Members).Distinct().Count() == 5, "Deduplicate overlap across selected AI groups");
+    store.UpdateAiGroup(release, "Release checklist", "Manually revised release notes", retained: true);
+    release = store.Collections.Single(group => group.Id == release.Id);
+    Check(release is { NameIsManual: true, DefinitionIsManual: true, Retained: true, DefinitionVersion: 2 },
+        "Track user edits and retention independently of membership locks");
+    Reject([], stale, "Reject replacement after a theme edit");
+
+    stale = AiGroupSnapshot.Capture(store.Collections, store.Clips, selected);
+    store.RemoveFromAiTopic(development.Id, ids[0]);
+    Reject([], stale, "Reject replacement after a membership edit");
+
+    var replacing = AiGroupSnapshot.Capture(store.Collections, store.Clips, selected);
+    var next = new AiTopicProposal(release.Name, "Replacement overview", [ids[0], ids[1], ids[2]],
+        Definition: "New release notes", CreateOnly: true, OverviewSources: [ids[1]]);
+    Reject([next with { Members = [ids[0], ids[1]] }], replacing, "Reject an incomplete replacement without removing existing groups");
+    Guid task = Guid.NewGuid();
+    var reuse = new AiTopicProposal(reference.Name, "", [ids[1]], reference.Id, ExpectedDefinition: reference.Definition);
+    Check(store.ApplyAiTopics([next, reuse], task, replacing) == 3, "Apply new topics and reuse a theme outside the selection atomically");
+    var reopened = new HistoryStore(folder);
+    Check(reopened.UndoableAiTask == task && reopened.ApplyAiTopics([next, reuse], task, replacing) == 0,
+        "A restarted apply can acknowledge the same committed task without replacing again");
+    var created = reopened.Collections.Single(group => group.Name == release.Name);
+    Check(created.Id != release.Id && created.OverviewClips!.SequenceEqual([ids[1]]) &&
+        !reopened.Collections.Any(group => selected.Contains(group.Id)) &&
+        reopened.Clips.Single(clip => clip.Id == ids[3]).CollectionIds.SequenceEqual([manual.Id]) &&
+        reopened.Clips.Single(clip => clip.Id == ids[4]).CollectionIds.ToHashSet().SetEquals([manual.Id, reference.Id]),
+        "Allow a new theme with a replaced name and remove only the selected memberships outside the analysis scope");
+
+    var later = reopened.SaveCollection(null, "Added later", null);
+    reopened.Update(ids[0], clip => clip with { Note = "Later note", CollectionIds = [.. clip.CollectionIds, later.Id] });
+    reopened.UndoAiTopics();
+    var undone = new HistoryStore(folder);
+    Check(!undone.CanUndoAi && AiGroupSnapshot.IsCurrent(undone.Collections, undone.Clips, replacing) &&
+        undone.Clips.Single(clip => clip.Id == ids[0]) is { Note: "Later note" } kept &&
+        kept.CollectionIds.ToHashSet().SetEquals([manual.Id, release.Id, reference.Id, later.Id]) &&
+        !undone.Clips.Single(clip => clip.Id == ids[1]).CollectionIds.Contains(reference.Id),
+        "Undo after restart restores old themes and preserves later notes and unrelated memberships");
+
+    var cleanup = AiGroupSnapshot.Capture(undone.Collections, undone.Clips, new HashSet<Guid> { development.Id });
+    undone.ApplyAiTopics([], replacing: cleanup);
+    var cleaned = new HistoryStore(folder);
+    Check(cleaned.CanUndoAi && cleaned.Clips.Count == ids.Length && !cleaned.Collections.Any(group => group.Id == development.Id) &&
+        cleaned.Clips.All(clip => clip.CollectionIds.Contains(manual.Id) && !clip.CollectionIds.Contains(development.Id)),
+        "Clear selected groups without making AI proposals or deleting clips");
+    cleaned.UndoAiTopics();
+    Check(AiGroupSnapshot.IsCurrent(cleaned.Collections, cleaned.Clips, cleanup), "Restore a cleaned group including its exclusions");
+
+    void Reject(AiTopicProposal[] proposals, AiGroupSnapshot[] scope, string description)
+    {
+        var groupsBefore = store.Collections;
+        var clipsBefore = store.Clips;
+        try { store.ApplyAiTopics(proposals, replacing: scope); }
+        catch (ArgumentException)
+        {
+            Check(ReferenceEquals(store.Collections, groupsBefore) && ReferenceEquals(store.Clips, clipsBefore), description);
+            return;
+        }
+        throw new InvalidOperationException(description);
+    }
 }
 
 static void CheckOcrNotes(string root)

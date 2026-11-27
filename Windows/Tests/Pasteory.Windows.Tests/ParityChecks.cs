@@ -253,10 +253,18 @@ internal static partial class Program
             {
                 new { id = group, name = "Mac group", kind = "normal", sortOrder = 0 }
             }));
+            Add("ai-state.json", JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                groups = new object[] { group, new { id = group, definition = "Edited on macOS", overview = "Mac overview",
+                    retained = true, definitionVersion = 4, definitionIsManual = true, nameIsManual = true, excludedClipIDs = new[] { pictureId } } }
+            }));
             File.WriteAllBytes(Path.Combine(backup, "manifest.json"),
                 JsonSerializer.SerializeToUtf8Bytes(new { formatVersion = 5, fileChecksums = manifest }));
             var store = new HistoryStore(Path.Combine(root, "history"));
             Check(new MacBackupReader(backup).Import(store).Count == entries.Length, "Import Mac v5 archived and inline items");
+            Check(store.Collections.Single() is { IsAi: true, Retained: true, Locked: false, NameIsManual: true, DefinitionIsManual: true,
+                DefinitionVersion: 4, Definition: "Edited on macOS" } theme && theme.ExcludedClips!.SequenceEqual([pictureId]),
+                "Import Mac theme editing and retention without setting a Windows membership lock");
             var archived = store.Clips.Single(item => item.Id == id);
             Check(archived.Text == text + Environment.NewLine + Encoding.UTF8.GetString(alternate) &&
                 archived.ArchivedAt is not null && archived.CollectionIds.SequenceEqual([group]) && archived.ExcludeFromAi &&
@@ -292,6 +300,9 @@ internal static partial class Program
                 [new(recapId, DateTimeOffset.UtcNow, "test model", "story", 100, 50, 5, 10, false)]));
             var native = new Clip { Text = "Windows 备份", Html = ClipboardFormats.WindowsHtml("<b>Windows 备份</b>"), Source = "Notepad" };
             Check(restored.Capture(native), "Add Windows clipboard content to the cross-platform backup");
+            restored.ApplyAiTopics([new("Locked on Windows", "", [pictureId, referenceId, native.Id], Definition: "Local fixture")]);
+            Guid locked = restored.Collections.Single(collection => collection.Name == "Locked on Windows").Id;
+            restored.SetAiGroupLocked(locked, true);
             var route = new LinkFallbackRule("*.example.com/issues/{id}", "Ticket {{path.id}} · {{query.view}}",
                 new(Guid.NewGuid(), "Ticket", "*.example.com", "/issues/{id}", ["view"]));
             new MacBackupWriter(restored, ai, [route]).Export(exported);
@@ -302,6 +313,10 @@ internal static partial class Program
                 returned.Clips.Single(item => item.Id == native.Id).Html == native.Html,
                 "Reimport the Mac v5 export with Windows rich text, saved Story and usage");
             var returnedClip = returned.Clips.Single(item => item.Id == id);
+            Check(returned.Collections.Single(collection => collection.Id == group) is
+                { Retained: true, Locked: false, DefinitionVersion: 4, DefinitionIsManual: true, NameIsManual: true } &&
+                returned.Collections.Single(collection => collection.Id == locked) is { Retained: false, Locked: true },
+                "A Mac-format round trip preserves both retention and Windows lock state independently");
             Check(returnedClip.ExcludeFromAi && returned.ReadRepresentation(returnedClip.OriginalItems![1].Representations[1]).SequenceEqual(opaque),
                 "Cross-platform backup round trips preserve per-clip AI privacy and exact clipboard bytes");
             var returnedImage = returned.Clips.Single(item => item.Id == pictureId);
@@ -449,6 +464,61 @@ internal static partial class Program
             await reopened.AnalyzeAsync(settings with { MaxInputTokens = 1_000 }, changed, [], true, "story", false, CancellationToken.None);
             Check(reopened.Job(true) is { Status: "Paused", Error: { } error } && error.Contains("exceeds the input budget") &&
                 reopened.Usage.Count == 2, "Refuse to send a request when the task instructions and tools exceed the configured input budget");
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    private static async Task CheckAiRegrouping()
+    {
+        string root = Directory.CreateTempSubdirectory("Pasteory-Regroup-QA-").FullName;
+        try
+        {
+            var old = new ClipCollection(Guid.NewGuid(), "Theme to replace", IsAi: true, Definition: "Old theme", Retained: true);
+            var kept = new ClipCollection(Guid.NewGuid(), "Theme to keep", IsAi: true, Definition: "Unselected theme");
+            var unrelated = new ClipCollection(Guid.NewGuid(), "Manual folder");
+            var catalog = new[] { old, kept, unrelated };
+            var now = DateTimeOffset.Now;
+            var alpha = new Clip { Text = "alpha task", CapturedAt = now, CollectionIds = [old.Id] };
+            var beta = new Clip { Text = "beta task", CapturedAt = now.AddMinutes(-1), CollectionIds = [unrelated.Id] };
+            var gamma = new Clip { Text = "gamma task", CapturedAt = now.AddMinutes(-2), CollectionIds = [old.Id, kept.Id] };
+            var privateClip = new Clip { Text = "Private draft", CapturedAt = now.AddMinutes(1), CollectionIds = [old.Id], ExcludeFromAi = true };
+            var archived = new Clip { Text = "Archived clip", CapturedAt = now.AddDays(-30), CollectionIds = [old.Id], ArchivedAt = now };
+            var offline = new Clip { Text = "Outside recent range", CapturedAt = now.AddDays(-20) };
+            Clip[] clips = [alpha, beta, gamma, privateClip, archived, offline];
+            var selection = AiGroupSnapshot.Capture(catalog, clips, new HashSet<Guid> { old.Id });
+            var members = selection.Single().Members.ToHashSet();
+            var settings = new AiPreferences { Enabled = true, Model = "synthetic-model", TaskRounds = 1, RecentLimit = 3 };
+            var recent = AiTasks.RegroupInput(clips, settings, AiRegroupScope.Recent, members);
+            var selected = AiTasks.RegroupInput(clips, settings, AiRegroupScope.Selected, members);
+            var library = AiTasks.RegroupInput(clips, settings, AiRegroupScope.Library, members);
+            Check(recent.EligibleIds.SetEquals([alpha.Id, beta.Id, gamma.Id]) && recent.ExcludedCount == 1 &&
+                selected.EligibleIds.SetEquals([alpha.Id, gamma.Id, archived.Id]) && selected.ExcludedCount == 1 &&
+                library.EligibleIds.SetEquals([alpha.Id, beta.Id, gamma.Id, archived.Id, offline.Id]) && library.ExcludedCount == 1,
+                "Use the same eligible recent, selected and whole-library ranges in the preview and task");
+
+            using var transport = new HttpClient(new MockAiResponses([alpha, beta, gamma]));
+            var tasks = new AiTasks(root, new AiModelClient(transport));
+            tasks.Credentials.Set(settings.Endpoint, "only-a-test-value");
+            await tasks.AnalyzeAsync(settings, clips, catalog, false, "manual-regroup-recent", false, CancellationToken.None,
+                recent.EligibleIds, selection);
+            var paused = tasks.Job(false) ?? throw new InvalidOperationException("Missing regrouping checkpoint");
+            var workspace = new AiTaskWorkspace(tasks.DirectoryFor(paused.Id));
+            var sent = AiFile.Load<AiInput[]>(workspace.FilePath("items.json"))!;
+            Check(paused.Status == "Paused" && sent.Select(item => item.Id).SequenceEqual([alpha.Id, beta.Id, gamma.Id]) &&
+                AiFile.Load<ClipCollection[]>(workspace.FilePath("existing/groups.json"))!.Single().Id == kept.Id &&
+                File.ReadAllText(workspace.FilePath("PROMPT.md")).Contains("chosen for replacement"),
+                "Send only in-scope content and themes that will remain to the model workspace");
+
+            var resumed = new AiTasks(root, new AiModelClient(transport));
+            Check(AiGroupSnapshot.IsCurrent(catalog, clips, resumed.Job(false)!.Replacing!), "Reload the exact replacement snapshot from the checkpoint");
+            await resumed.ResumeAsync(settings, [alpha with { CollectionIds = [] }, .. clips.Skip(1)], catalog, false, false, CancellationToken.None);
+            Check(resumed.Review is null && resumed.Job(false) is { Status: "Paused", PausedByUser: true } && resumed.Usage.Count == 1,
+                "Reject a changed replacement scope before sending a resumed request");
+            await resumed.ResumeAsync(settings, clips, catalog, false, false, CancellationToken.None);
+            var review = new AiTasks(root).Review;
+            Check(review?.Id == paused.Id && review.Replacing is { } savedSelection && AiGroupSnapshot.IsCurrent(catalog, clips, savedSelection) &&
+                review.Versions.Keys.ToHashSet().SetEquals(recent.EligibleIds) && review.Proposal.Groups.Single().Members.Length == 3,
+                "Resume grouping and recover the complete reviewed plan after another restart");
         }
         finally { Directory.Delete(root, recursive: true); }
     }

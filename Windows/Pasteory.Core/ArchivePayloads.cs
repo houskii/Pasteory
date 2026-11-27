@@ -18,7 +18,7 @@ public sealed partial class HistoryStore
             ? group with { PackPayloads = enabled } : group).ToList());
     }
 
-    public CompressionResult CompressEligibleContent(ActivityPreferences policy, DateTimeOffset now, int batchSize = int.MaxValue)
+    public CompressionResult CompressEligibleContent(ActivityPreferences policy, DateTimeOffset now, int batchSize = int.MaxValue, Guid? groupId = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(batchSize);
         var cutoff = now.AddDays(-Math.Clamp(policy.CompressDays, 1, 3650));
@@ -27,7 +27,8 @@ public sealed partial class HistoryStore
         var next = new List<Clip>(Clips.Count);
         foreach (var clip in Clips)
         {
-            bool eligible = CanCompress(clip) && ClipActivity.LastUsed(clip) <= cutoff;
+            bool eligible = CanCompress(clip) && ClipActivity.LastUsed(clip) <= cutoff &&
+                (groupId is null || clip.CollectionIds.Contains(groupId.Value));
             if (clip.HasImage && eligible) candidates[ImagePath(clip)] = true;
             foreach (var representation in clip.OriginalRepresentations)
             {

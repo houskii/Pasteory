@@ -11,7 +11,8 @@ internal sealed record MacBackupAiArchive(Dictionary<Guid, MacBackupAiGroup> Gro
 {
     internal static MacBackupAiArchive Empty { get; } = new([], [], []);
 }
-internal sealed record MacBackupAiGroup(Guid Id, string Definition, string Overview, bool Retained, Guid[] ExcludedClipIds);
+internal sealed record MacBackupAiGroup(Guid Id, string Definition, string Overview, bool Retained, Guid[] ExcludedClipIds,
+    int DefinitionVersion = 1, bool DefinitionIsManual = false, bool NameIsManual = false, bool WindowsLocked = false);
 
 internal static class MacBackupAiState
 {
@@ -54,8 +55,9 @@ internal static class MacBackupAiState
             groups.Add(group.Id);
             groups.Add(new
             {
-                group.Id, group.Name, group.Definition, group.Overview, definitionVersion = 1, definitionIsManual = false,
-                nameIsManual = false, retained = group.Locked, excludedClipIDs = group.ExcludedClips ?? [],
+                group.Id, group.Name, group.Definition, group.Overview, group.DefinitionVersion, group.DefinitionIsManual,
+                group.NameIsManual, group.Retained, windowsLocked = group.Locked,
+                excludedClipIDs = group.ExcludedClips ?? [],
                 memberIDs = members, aiMemberIDs = members, overviewMemberFingerprint = "", revision = 1
             });
         }

@@ -27,10 +27,12 @@ internal sealed record SavedStory(Guid Id, DateTimeOffset GeneratedAt, DateOnly 
     int SourceCount = 0, string? Sharing = null, Dictionary<Guid, string>? Versions = null);
 internal sealed record AiUnassigned(Guid Id, string Reason);
 internal sealed record AiProposal(AiTopicProposal[] Groups, AiUnassigned[] Unassigned);
-internal sealed record AiReviewedPlan(Guid Id, AiProposal Proposal, Dictionary<Guid, string> Versions);
+internal sealed record AiReviewedPlan(Guid Id, AiProposal Proposal, Dictionary<Guid, string> Versions, AiGroupSnapshot[]? Replacing = null);
 internal sealed record AiJob(Guid Id, string Kind, string Trigger, string Configuration, DateTimeOffset Started,
     DateOnly From, DateOnly Through, int Total, int Cursor = 0, string Status = "Paused", string? Error = null,
-    bool PausedByUser = false, int Format = 0, DateTimeOffset? UpdatedAt = null);
+    bool PausedByUser = false, int Format = 0, DateTimeOffset? UpdatedAt = null, AiGroupSnapshot[]? Replacing = null);
+internal enum AiRegroupScope { Recent, Selected, Library }
+internal sealed record AiRegroupInput(HashSet<Guid> EligibleIds, int ExcludedCount);
 
 internal sealed partial class AiTasks
 {
@@ -150,16 +152,19 @@ internal sealed partial class AiTasks
     }
 
     internal async Task AnalyzeAsync(AiPreferences prefs, IReadOnlyList<Clip> clips, IReadOnlyList<ClipCollection> collections,
-        bool story, string trigger, bool chinese, CancellationToken appToken, IReadOnlySet<Guid>? queued = null)
+        bool story, string trigger, bool chinese, CancellationToken appToken, IReadOnlySet<Guid>? queued = null,
+        AiGroupSnapshot[]? replacing = null)
     {
         if (!CanStart(prefs, story) || !story && (Review is not null || organizationJob?.Status == "Paused")) return;
+        if (replacing is not null && (story || queued is null || !AiGroupSnapshot.IsCurrent(collections, clips, replacing)))
+            throw new ArgumentException("The selected AI groups changed. Refresh the selection and try again.");
         var now = DateTimeOffset.Now;
         var start = now.AddDays(-7);
         var selected = clips.Where(clip =>
                 (!story || ParticipatesInStory(clip, start, now)) && (queued is null || queued.Contains(clip.Id)) &&
                 (trigger is not ("recent" or "idle") || clip.ArchivedAt is null) &&
                 (trigger != "idle" || clip.CollectionIds.Length == 0))
-            .OrderByDescending(clip => clip.CapturedAt).Select(clip => Project(clip, prefs)).OfType<AiInput>();
+            .OrderByDescending(clip => clip.CapturedAt).ThenBy(clip => clip.Id).Select(clip => Project(clip, prefs)).OfType<AiInput>();
         if (trigger is "incremental" or "idle")
             selected = selected.Where(item => !analyzed.TryGetValue(item.Id, out var version) || version != item.Version);
         if (trigger == "recent" || trigger == "manual-review" && queued is null)
@@ -168,7 +173,7 @@ internal sealed partial class AiTasks
         AiInput[] items = selected.ToArray();
         if (items.Length == 0)
         {
-            if (trigger is "recent" or "full" or "story" or "manual-review")
+            if (replacing is not null || trigger is "recent" or "full" or "story" or "manual-review")
             {
                 SetJob(new(Guid.NewGuid(), story ? "story" : "organization", trigger, SharingFingerprint(prefs), now,
                     DateOnly.FromDateTime(start.Date), DateOnly.FromDateTime(now.Date), 0, Status: "No eligible clips"), persist: false);
@@ -179,7 +184,7 @@ internal sealed partial class AiTasks
         if (storyJob is { Status: "Paused" } && story) Abandon(story);
         var next = new AiJob(Guid.NewGuid(), story ? "story" : "organization", trigger, SharingFingerprint(prefs), now,
             DateOnly.FromDateTime(story ? start.Date : items.Min(item => item.CopiedAt).LocalDateTime),
-            DateOnly.FromDateTime(now.Date), items.Length, Format: CurrentFormat);
+            DateOnly.FromDateTime(now.Date), items.Length, Format: CurrentFormat, Replacing: replacing);
         var workspace = new AiTaskWorkspace(DirectoryFor(next.Id));
         items = Prepare(workspace, next, prefs, items, clips, collections, chinese);
         SetJob(next);
@@ -190,6 +195,12 @@ internal sealed partial class AiTasks
         bool story, bool chinese, CancellationToken appToken, bool automatic = false)
     {
         if (!CanStart(prefs, story) || Job(story) is not { Status: "Paused" } previous || !story && Review is not null) return;
+        if (previous.Replacing is { } replacing && !AiGroupSnapshot.IsCurrent(collections, clips, replacing))
+        {
+            SetJob(previous with { Error = "The selected AI groups changed. Generate a new regrouping plan.", PausedByUser = true });
+            Changed?.Invoke();
+            return;
+        }
         var workspace = new AiTaskWorkspace(DirectoryFor(previous.Id));
         var items = Load<AiInput[]>(workspace.FilePath("items.json"));
         string expected = previous.Format == 0 ? LegacyFingerprint(prefs) : SharingFingerprint(prefs);
@@ -233,19 +244,25 @@ internal sealed partial class AiTasks
         var resources = prefs.ShareResources ? AiTaskResources.Build(dataRoot, clips.Where(clip => eligible.Contains(clip.Id))) : [];
         items = items.Select(item => resources.TryGetValue(item.Id, out var files) ?
             item with { LocalResources = files.Select(file => file.Name).ToArray() } : item).ToArray();
-        var existing = collections.Where(group => group.IsAi).ToArray();
+        var replaced = (task.Replacing ?? []).Select(item => item.Group.Id).ToHashSet();
+        var existing = collections.Where(group => group.IsAi && !replaced.Contains(group.Id)).ToArray();
         string[] reserved = collections.Where(group => !group.IsAi).Select(group => group.Name).ToArray();
         bool story = task.Kind == "story";
-        string prompt = (story ? StoryPrompt : OrganizationPrompt) + "\n" +
-            (chinese ? "Respond in Simplified Chinese." : "Respond in English.");
-        if (!story)
-        {
-            prompt += $"\nAim for {Math.Clamp(prefs.TargetGroupCount, 6, 8)} themes when there is enough evidence.";
-            if (prefs.Prompt.Length > 0) prompt += "\nOrganization preferences:\n" + prefs.Prompt;
-        }
+        string language = chinese ? "Respond in Simplified Chinese." : "Respond in English.";
+        string prompt = story ? StoryPrompt + "\n" + language : BuildOrganizationPrompt(prefs, chinese, task.Replacing is not null);
         var encouragements = story ? PreviousEncouragements(prefs, clips) : [];
         workspace.Prepare(task, prefs, prompt, items, existing, reserved, resources, encouragements);
         return items;
+    }
+
+    internal static string BuildOrganizationPrompt(AiPreferences prefs, bool chinese, bool regroup)
+    {
+        string prompt = OrganizationPrompt + "\n" + (chinese ? "Respond in Simplified Chinese." : "Respond in English.") +
+            $"\nAim for {Math.Clamp(prefs.TargetGroupCount, 6, 8)} themes when there is enough evidence.";
+        if (regroup) prompt += "\nThe catalog lists groups that will stay. Classify the supplied items into those groups or new themes. " +
+            "Earlier groups chosen for replacement are absent from the catalog and will be replaced after user review.";
+        if (prefs.Prompt.Length > 0) prompt += "\nOrganization preferences:\n" + prefs.Prompt;
+        return prompt;
     }
 
     private string[] PreviousEncouragements(AiPreferences prefs, IReadOnlyList<Clip> clips)
@@ -465,7 +482,7 @@ internal sealed partial class AiTasks
 
     private void SaveProposal(AiJob task, AiTaskWorkspace workspace, AiInput[] items, AiProposal proposal)
     {
-        var review = new AiReviewedPlan(task.Id, proposal, items.ToDictionary(item => item.Id, item => item.Version));
+        var review = new AiReviewedPlan(task.Id, proposal, items.ToDictionary(item => item.Id, item => item.Version), task.Replacing);
         AiFile.Save(workspace.FilePath("output/validated-changes.json"), review);
         foreach (var item in items) analyzed[item.Id] = item.Version;
         AiFile.Save(Path.Combine(dataRoot, "ai-analyzed.json"), analyzed);
@@ -626,7 +643,39 @@ internal sealed partial class AiTasks
         (clip.CopyCount > 0 && clip.CapturedAt >= start && clip.CapturedAt <= now) ||
         (clip.LastPastedAt is { } pasted && pasted >= start && pasted <= now);
 
+    internal static AiRegroupInput RegroupInput(IReadOnlyList<Clip> library, AiPreferences prefs, AiRegroupScope scope,
+        IReadOnlySet<Guid> members)
+    {
+        var candidates = library.Where(clip => clip.TrashedAt is null && clip.Kind != ClipKind.Aggregate);
+        if (scope == AiRegroupScope.Selected) candidates = candidates.Where(clip => members.Contains(clip.Id));
+        if (scope == AiRegroupScope.Recent) candidates = candidates.Where(clip => clip.ArchivedAt is null)
+            .OrderByDescending(clip => clip.CapturedAt).ThenBy(clip => clip.Id);
+        int limit = scope == AiRegroupScope.Recent ? Math.Clamp(prefs.RecentLimit, 1, 1000) : int.MaxValue;
+        int excluded = 0;
+        var ids = new HashSet<Guid>();
+        foreach (var clip in candidates)
+        {
+            if (AnalysisText(clip, prefs) is null) excluded++;
+            else if (ids.Add(clip.Id) && ids.Count == limit) break;
+        }
+        return new(ids, excluded);
+    }
+
     internal static AiInput? Project(Clip clip, AiPreferences prefs)
+    {
+        if (AnalysisText(clip, prefs) is not { } input) return null;
+        string title = clip.DisplayTitle;
+        string source = prefs.ShareSource ? clip.Source : "";
+        string content = input.Text.TrimEnd();
+        string version = Hash(JsonSerializer.Serialize(new
+        {
+            clip.Kind, title, note = input.Note, source, content, clip.ImageHash, clip.Files, clip.Html, clip.Rtf,
+            originals = clip.OriginalRepresentations.Select(rep => rep.Hash)
+        }));
+        return new AiInput(clip.Id, version, clip.Kind.ToString(), title, content, input.Note, source, clip.CapturedAt, clip.LastPastedAt);
+    }
+
+    private static (string Text, string Note)? AnalysisText(Clip clip, AiPreferences prefs)
     {
         string note = prefs.ShareNotes ? clip.NoteWithoutImageOcr : "";
         if (clip.TrashedAt is not null || clip.ExcludeFromAi || clip.Kind == ClipKind.Aggregate ||
@@ -641,16 +690,7 @@ internal sealed partial class AiTasks
             _ => clip.Text ?? ""
         };
         if (clip.Kind == ClipKind.Mixed && recognized is { Length: > 0 }) text += "\n\n[Local image OCR]\n" + recognized;
-        if (MightBeSecret(text)) return null;
-        string title = clip.DisplayTitle;
-        string source = prefs.ShareSource ? clip.Source : "";
-        string content = text.TrimEnd();
-        string version = Hash(JsonSerializer.Serialize(new
-        {
-            clip.Kind, title, note, source, content, clip.ImageHash, clip.Files, clip.Html, clip.Rtf,
-            originals = clip.OriginalRepresentations.Select(rep => rep.Hash)
-        }));
-        return new AiInput(clip.Id, version, clip.Kind.ToString(), title, content, note, source, clip.CapturedAt, clip.LastPastedAt);
+        return MightBeSecret(text) ? null : (text, note);
     }
 
     internal static bool MatchesVersion(Clip clip, AiPreferences prefs, string expected, bool legacy)

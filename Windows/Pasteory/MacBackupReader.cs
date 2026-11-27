@@ -40,7 +40,9 @@ internal sealed class MacBackupReader(string root)
         var collections = ReadCollections().Select(collection => ai.Groups.TryGetValue(collection.Id, out var theme) ?
             collection with
             {
-                IsAi = true, Definition = theme.Definition, Overview = theme.Overview, Locked = theme.Retained,
+                IsAi = true, Definition = theme.Definition, Overview = theme.Overview, Retained = theme.Retained,
+                Locked = theme.WindowsLocked, DefinitionVersion = Math.Max(1, theme.DefinitionVersion),
+                DefinitionIsManual = theme.DefinitionIsManual, NameIsManual = theme.NameIsManual,
                 ExcludedClips = theme.ExcludedClipIds
             } : collection).ToList();
         var fallback = ReadLines("url-fallback-rules.jsonl").Select(ToFallback).OfType<LinkFallbackRule>().ToArray();

@@ -462,7 +462,7 @@ public partial class App : Application
     }
 
     internal byte[] ReadImage(Clip clip) => history.ReadImage(clip);
-    private bool ChangeHistory(Action change)
+    private bool ChangeHistory(Action change, Action<string>? showError = null)
     {
         try
         {
@@ -480,7 +480,7 @@ public partial class App : Application
         }
         catch (Exception error) when (IsLocalError(error) || error is ArgumentException)
         {
-            Notify(error.Message);
+            (showError ?? Notify)(error.Message);
             return false;
         }
     }

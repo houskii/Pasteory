@@ -45,6 +45,12 @@
                                     <TextBlock Text="⌄" Margin="6,0,0,0"/>
                                 </StackPanel>
                             </Button>
+                            <Button x:Name="AiActions" Click="ShowAiActions" Content="{local:Label 'AI group actions'}"
+                                    AutomationProperties.Name="{local:Label 'AI group actions'}" Padding="7,3" MinHeight="24"
+                                    FontSize="11" Margin="0,0,5,0"/>
+                            <Button x:Name="ManageAiGroups" Click="OpenAiGroupManager" Content="{local:Label 'Manage AI groups'}"
+                                    AutomationProperties.Name="{local:Label 'Manage AI groups'}" Padding="7,3" MinHeight="24"
+                                    FontSize="11" Margin="0,0,5,0"/>
                             <Border CornerRadius="11" Padding="7,5" Background="{DynamicResource SoftSurface}" VerticalAlignment="Center">
                                 <TextBlock x:Name="Count" FontSize="10.5" Foreground="{DynamicResource Muted}"/>
                             </Border>

@@ -752,7 +752,8 @@ public partial class HistoryWindow : Window
 
     private void EditInfo(Clip clip, bool groups) => OpenEditor(LibraryEditors.ClipInfo(app, clip, groups, CloseEditorFromForm));
     private void EditGroup(ClipCollection? group, bool smart) =>
-        OpenEditor(LibraryEditors.Group(app, group, smart, CloseEditorFromForm, id =>
+        OpenEditor(group is { IsAi: true } ? LibraryEditors.AiGroup(app, group, CloseEditorFromForm) :
+            LibraryEditors.Group(app, group, smart, CloseEditorFromForm, id =>
         {
             if (app.Settings.GroupDisplay is "Minimal" or "AI groups" && group?.IsAi != true)
                 app.SetGroupProfile("Common groups");

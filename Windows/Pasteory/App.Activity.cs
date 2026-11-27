@@ -7,6 +7,8 @@ using Pasteory.Core;
 
 namespace Pasteory.Windows;
 
+internal sealed record AiGroupActivity(ClipCollection Group, double Score, int Percentile, int Members);
+
 public partial class App
 {
     private IReadOnlyList<Clip>? activitySource;
@@ -18,7 +20,7 @@ public partial class App
     internal (double Score, int Percentile)? ClipRank(Clip clip) =>
         ComputeActivity().TryGetValue(clip.Id, out var value) ? value : null;
 
-    internal async Task CompressEligibleContentAsync(bool manual)
+    internal async Task CompressEligibleContentAsync(bool manual, Guid? groupId = null)
     {
         if (compressingContent || Ai.Running)
         {
@@ -36,7 +38,7 @@ public partial class App
                 (manual || Settings.Ai is { LifecycleEnabled: true, AutomaticCompression: true }))
             {
                 CompressionResult? batch = null;
-                if (!ChangeHistory(() => batch = history.CompressEligibleContent(prefs, now, batchSize: 16)) || batch is null) return;
+                if (!ChangeHistory(() => batch = history.CompressEligibleContent(prefs, now, batchSize: 16, groupId: groupId)) || batch is null) return;
                 text += batch.TextClips;
                 attachments += batch.Attachments;
                 if (!batch.HasMore) break;
@@ -47,7 +49,9 @@ public partial class App
         finally { compressingContent = false; }
     }
 
-    internal IEnumerable<ClipCollection> RankedAiGroups()
+    internal IEnumerable<ClipCollection> RankedAiGroups() => ScoreAiGroups().Select(item => item.Group);
+
+    internal AiGroupActivity[] ScoreAiGroups()
     {
         var rank = ComputeActivity();
         var options = Settings.Ai.Activity;
@@ -61,8 +65,11 @@ public partial class App
                 members.Add(item.Score);
             }
         }
-        return Collections.Where(group => group.IsAi).OrderByDescending(group => group.Locked)
-            .ThenByDescending(group => lists.TryGetValue(group.Id, out var members) ? Score(members) : 0);
+        var groups = Collections.Where(group => group.IsAi).Select(group => lists.TryGetValue(group.Id, out var members)
+            ? (Group: group, Score: Math.Round(Score(members), 2), Count: members.Count) : (Group: group, Score: 0d, Count: 0)).ToArray();
+        return groups.OrderByDescending(item => item.Group.Retained || item.Group.Locked).ThenByDescending(item => item.Score)
+            .Select(item => new AiGroupActivity(item.Group, item.Score,
+                (int)Math.Ceiling(100d * groups.Count(other => other.Score >= item.Score) / groups.Length), item.Count)).ToArray();
 
         double Score(List<double> members) => options.TopWeight * members.OrderDescending().Take(Math.Max(1, options.TopMembers)).Average() +
             (1 - options.TopWeight) * members.Average();

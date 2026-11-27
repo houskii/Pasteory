@@ -491,20 +491,30 @@ internal sealed partial class SettingsWindow
         Refresh();
     }
 
-    private void ShowReview()
+    internal void ShowReview()
     {
         if (app.Ai.Review is not { } review) return;
         LibraryEditors.ShowModal(this, "Review suggestions", close =>
         {
             var body = new StackPanel();
             var clips = app.Clips.ToDictionary(clip => clip.Id);
+            bool regroup = review.Replacing is not null;
+            if (review.Replacing is { Length: > 0 } replacing)
+            {
+                var summary = SettingsCard(body, "AI groups to replace");
+                foreach (var item in replacing) summary.Children.Add(Ui.Text(item.Group.Name, 12));
+                int outside = replacing.SelectMany(item => item.Members).Distinct().Count(id => !review.Versions.ContainsKey(id));
+                if (outside > 0) summary.Children.Add(Ui.Text(Labels.Format("{0} clips outside the analysis scope will leave the replaced groups.", outside),
+                    11, "Muted"));
+            }
             body.Children.Add(Ui.Text(Labels.Format("{0} topics · {1} clips · {2} unassigned", review.Proposal.Groups.Length,
                 review.Proposal.Groups.SelectMany(group => group.Members).Distinct().Count(), review.Proposal.Unassigned.Length), 12, "Muted"));
             var checks = new List<CheckBox>();
             foreach (var topic in review.Proposal.Groups)
             {
                 var card = SettingsCard(body, topic.Name);
-                var check = new CheckBox { Content = Labels.Format("Organize {0} clips", topic.Members.Length), IsChecked = true, Tag = topic.Name };
+                var check = new CheckBox { Content = Labels.Format("Organize {0} clips", topic.Members.Length), IsChecked = true, Tag = topic.Name,
+                    IsEnabled = !regroup };
                 checks.Add(check);
                 card.Children.Add(check);
                 if (topic.Definition.Length > 0) card.Children.Add(Ui.Text(topic.Definition, 12));
@@ -535,19 +545,24 @@ internal sealed partial class SettingsWindow
             }
             var discard = Ui.Button("Discard proposal", () =>
             {
-                if (!ClipMenus.Confirm(this, "Discard these AI suggestions?")) return;
+                if (!ClipMenus.Confirm(Window.GetWindow(body) ?? this, "Discard these AI suggestions?")) return;
                 try { app.Ai.ClearReview(); close(); }
                 catch (Exception error) when (AiTasks.Expected(error)) { SetStatus(Labels.Get(error.Message)); }
             });
             discard.HorizontalAlignment = HorizontalAlignment.Left;
             discard.Margin = new Thickness(0, 5, 0, 0);
             body.Children.Add(discard);
-            return LibraryEditors.Wrap("Review suggestions", body, (System.Windows.IInputElement?)checks.FirstOrDefault() ?? body,
+            var errorMessage = Ui.Text("", 12, "Danger");
+            body.Children.Add(errorMessage);
+            IInputElement focus = regroup ? discard : (IInputElement?)checks.FirstOrDefault() ?? body;
+            var editor = LibraryEditors.Wrap("Review suggestions", body, focus,
                 () =>
                 {
-                    app.ApplyAiPlan(review, checks.Where(check => check.IsChecked == true).Select(check => (string)check.Tag));
+                    app.ApplyAiPlan(review, checks.Where(check => check.IsChecked == true).Select(check => (string)check.Tag),
+                        error => errorMessage.Text = Labels.Get(error));
                     return app.Ai.Review is null;
-                }, close, "Apply selected groups");
+                }, close, regroup ? "Apply regrouping" : "Apply selected groups");
+            return regroup ? editor with { Submit = null } : editor;
 
             string ClipLabel(Guid id) => clips.TryGetValue(id, out var clip) ?
                 ClipCard.Short(clip.DisplayTitle.Length > 0 ? clip.DisplayTitle : clip.PlainText ?? Labels.Get(clip.Kind.ToString()), 95, 1) :

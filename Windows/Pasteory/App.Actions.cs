@@ -131,7 +131,11 @@ public partial class App
         return group;
     }
 
-    internal void DeleteCollection(ClipCollection group) => ChangeHistory(() => history.DeleteCollection(group.Id));
+    internal void DeleteCollection(ClipCollection group)
+    {
+        if (group.IsAi) ClearAiGroups(AiGroupSnapshot.Capture(Collections, Clips, new HashSet<Guid> { group.Id }));
+        else ChangeHistory(() => history.DeleteCollection(group.Id));
+    }
     internal void MoveCollection(Guid id, Guid? before) => ChangeHistory(() => history.MoveCollection(id, before));
     internal void MoveCollectionWithinType(Guid id, Guid before) => ChangeHistory(() => history.MoveCollectionWithinType(id, before));
 

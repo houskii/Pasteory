@@ -88,7 +88,7 @@ internal static class ClipMenus
     internal static ContextMenu ForGroup(ClipCollection group, Action edit, Action delete)
     {
         var menu = new ContextMenu();
-        Add(menu, group.IsSmart ? "Edit smart group" : "Rename group", edit);
+        Add(menu, group.IsAi ? "Edit AI group" : group.IsSmart ? "Edit smart group" : "Rename group", edit);
         Add(menu, "Delete group", delete);
         return menu;
     }

@@ -12,6 +12,8 @@ public partial class App
     internal AiTasks Ai { get; private set; } = null!;
     internal CancellationToken AppToken => lifetime.Token;
     internal bool CanUndoAi => history.CanUndoAi;
+    internal bool CanManageAiGroups => !Exiting && !compressingContent && !Ai.Running &&
+        Ai.Review is null && Ai.Job(false)?.Status != "Paused";
     private DateTimeOffset lastAutoOrganization;
     private DateOnly? lastIdleDay;
     private DateOnly? idleLimitReached;
@@ -19,7 +21,7 @@ public partial class App
     private bool systemSuspended;
 
     internal async Task RunAiAsync(bool story, string trigger, bool resume = false, IReadOnlySet<Guid>? queued = null,
-        bool automatic = false)
+        bool automatic = false, AiGroupSnapshot[]? replacing = null)
     {
         try
         {
@@ -27,7 +29,7 @@ public partial class App
                 idleRunStarted = DateTimeOffset.Now;
             bool chinese = Labels.Get("Settings") != "Settings";
             if (resume) await Ai.ResumeAsync(Settings.Ai, Clips, Collections, story, chinese, lifetime.Token, automatic);
-            else await Ai.AnalyzeAsync(Settings.Ai, Clips, Collections, story, trigger, chinese, lifetime.Token, queued);
+            else await Ai.AnalyzeAsync(Settings.Ai, Clips, Collections, story, trigger, chinese, lifetime.Token, queued, replacing);
             if (!story && automatic && Settings.Ai.AppendExistingAiGroups && Ai.Review is { } plan &&
                 Ai.Job(false) is { Trigger: "incremental" or "idle" } task && task.Id == plan.Id)
                 AppendToExistingThemes(plan);
@@ -37,21 +39,48 @@ public partial class App
         catch (Exception error) when (AiTasks.Expected(error)) { Notify(error.Message); }
     }
 
-    internal void ApplyAiPlan(AiReviewedPlan review, IEnumerable<string> names)
+    internal void ApplyAiPlan(AiReviewedPlan review, IEnumerable<string> names, Action<string> showError)
     {
         if (Ai.Review?.Id != review.Id) return;
-        var selected = names.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var (approved, stale) = ValidateAiClips(review, review.Proposal.Groups.Where(group => selected.Contains(group.Name)));
-        int count = 0;
-        if (!ChangeHistory(() => count = history.ApplyAiTopics(approved, review.Id))) return;
-        try
+        if (Ai.Running || compressingContent)
         {
-            Ai.Requeue(stale);
-            Ai.ClearReview(applied: true);
+            showError("Wait for the current task to finish.");
+            return;
         }
-        catch (Exception error) when (AiTasks.Expected(error)) { Notify(error.Message); return; }
-        Notify(Labels.Format("Organized {0} clips.", count));
+        bool regroup = review.Replacing is not null;
+        if (regroup && history.UndoableAiTask == review.Id)
+        {
+            FinishReview();
+            return;
+        }
+        var selected = names.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (regroup && !review.Proposal.Groups.All(group => selected.Contains(group.Name)))
+        {
+            showError("Regrouping plans are applied together.");
+            return;
+        }
+        var (approved, stale) = ValidateAiClips(review, review.Proposal.Groups.Where(group => selected.Contains(group.Name)));
+        if (regroup && stale.Count > 0)
+        {
+            showError("The content in this plan changed. Generate a new regrouping plan.");
+            return;
+        }
+        int count = 0;
+        if (!ChangeHistory(() => count = history.ApplyAiTopics(approved, review.Id, review.Replacing), showError) || !FinishReview(stale)) return;
+        Notify(review.Replacing is { Length: > 0 } replaced ? Labels.Format("Replaced {0} AI groups and organized {1} clips.", replaced.Length, count) :
+            Labels.Format("Organized {0} clips.", count));
         if (stale.Count > 0) Notify(Labels.Format("Skipped {0} clips that changed.", stale.Count));
+
+        bool FinishReview(HashSet<Guid>? requeue = null)
+        {
+            try
+            {
+                if (requeue is not null) Ai.Requeue(requeue);
+                Ai.ClearReview(applied: true);
+                return true;
+            }
+            catch (Exception error) when (AiTasks.Expected(error)) { showError(error.Message); return false; }
+        }
     }
 
     private void AppendToExistingThemes(AiReviewedPlan review)
@@ -81,6 +110,11 @@ public partial class App
             if (!valid) stale.Add(id);
             return valid;
         }
+        if (review.Replacing is not null)
+        {
+            foreach (Guid id in review.Versions.Keys) Eligible(id);
+            return (groups.ToArray(), stale);
+        }
         var approved = groups.Select(group =>
         {
             Guid[] members = group.Members.Where(Eligible).ToArray();
@@ -93,33 +127,74 @@ public partial class App
 
     internal void UndoAi()
     {
+        if (Ai.Running || compressingContent || !CanUndoAi) return;
         var task = history.UndoableAiTask;
-        if (!ChangeHistory(history.UndoAiTopics) || task is not { } id) return;
-        try { Ai.RecordUndo(id); }
+        if (!ChangeHistory(history.UndoAiTopics)) return;
+        try { if (task is { } id) Ai.RecordUndo(id); }
         catch (Exception error) when (AiTasks.Expected(error)) { Notify(error.Message); }
+        Notify("AI organization undone.");
     }
     internal void ToggleAiGroupLock(ClipCollection group) => ChangeHistory(() => history.SetAiGroupLocked(group.Id, !group.Locked));
-    internal bool EditAiGroupDefinition(ClipCollection group, string definition) =>
-        ChangeHistory(() => history.SetAiGroupDefinition(group.Id, definition));
+    internal bool EditAiGroup(ClipCollection group, string name, string definition, bool retained, Action<string> showError) =>
+        ChangeHistory(() => history.UpdateAiGroup(group, name, definition, retained), showError);
     internal void ExcludeFromAiGroup(ClipCollection group, Clip clip) => ChangeHistory(() => history.RemoveFromAiTopic(group.Id, clip.Id));
     internal void ToggleAiCompression(ClipCollection group) =>
         ChangeHistory(() => history.SetAiGroupCompression(group.Id, !group.PackPayloads));
+
+    internal bool ClearAiGroups(AiGroupSnapshot[] selection, Action<string>? showError = null)
+    {
+        if (selection.Length == 0) return false;
+        if (!CanManageAiGroups)
+        {
+            (showError ?? Notify)("Review or continue the current AI task first.");
+            return false;
+        }
+        if (!ChangeHistory(() => history.ApplyAiTopics([], replacing: selection), showError)) return false;
+        Notify(Labels.Format("Cleared {0} AI groups. You can undo this change.", selection.Length));
+        return true;
+    }
+
+    internal async Task RegroupAiAsync(AiRegroupScope scope, AiGroupSnapshot[] replacing, IReadOnlySet<Guid> inputIds)
+    {
+        if (!ReadyForGroupAnalysis() || inputIds.Count == 0) return;
+        if (!AiGroupSnapshot.IsCurrent(Collections, Clips, replacing))
+        {
+            Notify("The selected AI groups changed. Refresh the selection and try again.");
+            return;
+        }
+        if (!OpenAiTaskPage()) return;
+        string trigger = scope switch { AiRegroupScope.Recent => "manual-regroup-recent", AiRegroupScope.Library => "manual-regroup-all", _ => "manual-regroup" };
+        await RunAiAsync(false, trigger, queued: inputIds, replacing: replacing);
+        if (settingsWindow?.IsActive == true && Ai.Review?.Replacing is not null) settingsWindow.ShowReview();
+    }
+
     internal async Task ReviewThemeAsync(ClipCollection group)
     {
-        if (Ai.Running || Ai.Review is not null || Ai.Job(false)?.Status == "Paused")
+        if (!ReadyForGroupAnalysis() || !OpenAiTaskPage()) return;
+        await RunAiAsync(false, "manual-review",
+            queued: Clips.Where(clip => clip.CollectionIds.Contains(group.Id)).Select(clip => clip.Id).ToHashSet());
+    }
+
+    internal bool OpenAiTaskPage()
+    {
+        if (!SaveSettings(Settings with { LastAiTab = 3 })) return false;
+        OpenSettings(SettingsPage.Ai);
+        return true;
+    }
+
+    private bool ReadyForGroupAnalysis()
+    {
+        if (!CanManageAiGroups)
         {
             Notify("Review or continue the current AI task first.");
-            return;
+            return false;
         }
         if (!Settings.Ai.Enabled || !Ai.CanConnect(Settings.Ai))
         {
             Notify("Configure and enable AI analysis to begin.");
-            return;
+            return false;
         }
-        if (!SaveSettings(Settings with { LastAiTab = 3 })) return;
-        OpenSettings(SettingsPage.Ai);
-        await RunAiAsync(false, "manual-review",
-            queued: Clips.Where(clip => clip.CollectionIds.Contains(group.Id)).Select(clip => clip.Id).ToHashSet());
+        return true;
     }
 
     private void AiTick()

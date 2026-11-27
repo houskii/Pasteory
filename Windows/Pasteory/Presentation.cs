@@ -107,11 +107,11 @@ internal static class Ui
         return label;
     }
 
-    internal static Button Button(string text, Action select, string? style = null)
+    internal static Button Button(string text, Action? select = null, string? style = null)
     {
         var button = new Button { Content = Labels.Get(text) };
         if (style is not null) button.SetResourceReference(FrameworkElement.StyleProperty, style);
-        button.Click += (_, _) => select();
+        if (select is not null) button.Click += (_, _) => select();
         return button;
     }
 
