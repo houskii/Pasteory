@@ -67,6 +67,7 @@ public partial class App
         }
         int count = 0;
         if (!ChangeHistory(() => count = history.ApplyAiTopics(approved, review.Id, review.Replacing), showError) || !FinishReview(stale)) return;
+        ShowOrganizationResults();
         Notify(review.Replacing is { Length: > 0 } replaced ? Labels.Format("Replaced {0} AI groups and organized {1} clips.", replaced.Length, count) :
             Labels.Format("Organized {0} clips.", count));
         if (stale.Count > 0) Notify(Labels.Format("Skipped {0} clips that changed.", stale.Count));
@@ -111,7 +112,7 @@ public partial class App
         if (existing.Length == 0) return;
         var remaining = review.Proposal.Groups.Where(group => !CanAppend(group) || group.Overview.Length > 0).ToArray();
         var (approved, stale) = ValidateAiClips(review, existing.Select(group => group with { Overview = "", OverviewSources = [] }));
-        if (!ChangeHistory(() => history.ApplyAiTopics(approved, remaining.Length == 0 ? review.Id : null))) return;
+        if (!ChangeHistory(() => history.ApplyAiTopics(approved, remaining.Length == 0 ? review.Id : null), automaticOrganization: true)) return;
         Ai.Requeue(stale);
         if (remaining.Length == 0) Ai.ClearReview(applied: true);
         else Ai.TrimReview(review, remaining);
@@ -149,6 +150,7 @@ public partial class App
         if (Ai.Running || compressingContent || !CanUndoAi) return;
         var task = history.UndoableAiTask;
         if (!ChangeHistory(history.UndoAiTopics)) return;
+        ShowOrganizationResults();
         try { if (task is { } id) Ai.RecordUndo(id); }
         catch (Exception error) when (AiTasks.Expected(error)) { Notify(error.Message); }
         Notify("AI organization undone.");
@@ -169,6 +171,7 @@ public partial class App
             return false;
         }
         if (!ChangeHistory(() => history.ApplyAiTopics([], replacing: selection), showError)) return false;
+        ShowOrganizationResults();
         Notify(Labels.Format("Cleared {0} AI groups. You can undo this change.", selection.Length));
         return true;
     }
@@ -306,7 +309,9 @@ public partial class App
         var active = Clips.Where(clip => clip.TrashedAt is null && ClipActivity.LastUsed(clip) >= now.AddDays(-7))
             .SelectMany(clip => clip.CollectionIds).ToHashSet();
         active.UnionWith(RankedAiGroups().Take(GroupNavigation.RecommendationCount(Settings)).Select(group => group.Id));
-        var eligible = Collections.Where(group => group.IsAi && !group.Locked && !active.Contains(group.Id))
+        var cutoff = now.AddDays(-7);
+        var eligible = Collections.Where(group => group.IsAi && !group.Locked && !group.Retained && !active.Contains(group.Id) &&
+            aiGroupReading?.OpenedSince(group.Id, cutoff) != true)
             .Select(group => group.Id).ToHashSet();
         return Clips.Where(clip => clip.CollectionIds.Any(eligible.Contains)).Select(clip => clip.Id).ToHashSet();
     }

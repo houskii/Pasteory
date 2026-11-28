@@ -23,7 +23,6 @@ public partial class HistoryWindow : Window
     private readonly DispatcherTimer statusTimer;
     private bool refreshing;
     private bool composing;
-    private bool originallyPositioned;
     private bool transientMenu;
     private bool accessibilityFocus;
     private int modalDepth;
@@ -87,6 +86,7 @@ public partial class HistoryWindow : Window
         bool newPresentation = !IsVisible;
         if (newPresentation)
         {
+            app.LeaveUngrouped(quick: true);
             refreshing = true;
             Query.Clear();
             composing = false;
@@ -101,9 +101,10 @@ public partial class HistoryWindow : Window
             undoAggregationId = null;
         }
         Refresh(reset: newPresentation);
-        if (newPresentation) PositionNearPointer();
+        if (newPresentation) PositionPanel();
         Show();
         Activate();
+        if (newPresentation && !ungrouped) app.OpenAiGroup(currentGroupId);
         FocusManager.SetFocusedElement(this, FocusArea);
         Keyboard.Focus(FocusArea);
         if (newPresentation)
@@ -141,7 +142,7 @@ public partial class HistoryWindow : Window
         var byId = app.Collections.Where(group => group.IsAi).ToDictionary(group => group.Id);
         var ai = rankedAi.Where(byId.ContainsKey).Select(id => byId[id]).Concat(byId.Values).DistinctBy(group => group.Id).ToArray();
         var groups = GroupNavigation.Visible(app.Settings, app.Collections, ai, library: false, currentGroupId);
-        var nextTabs = groups.Select((group, index) => new GroupTab(group, GroupNavigation.Hint(app.Settings, index + 1)))
+        var nextTabs = groups.Select((group, index) => new GroupTab(group, GroupNavigation.Hint(app.Settings, index + 1), app.UnreadAiGroup(group.Id)))
             .Prepend(new GroupTab(null, GroupNavigation.Hint(app.Settings, 0))).ToArray();
         if (viewChanged || !tabs.SequenceEqual(nextTabs) || tabs.Length == 0) UpdateGroups(nextTabs);
         PanelPin.SetResourceReference(ForegroundProperty, app.Settings.KeepPanelOpen ? "AccentInk" : "Muted");
@@ -180,7 +181,7 @@ public partial class HistoryWindow : Window
         {
             sidebarExtent = extent;
             Width = panelContentWidth + extent;
-            if (IsVisible) PositionNearPointer(preservePosition: true);
+            if (IsVisible) PositionPanel(preservePosition: true);
         }
         ApplySidebarWidth();
     }
@@ -202,15 +203,28 @@ public partial class HistoryWindow : Window
         {
             var button = Ui.Button(tab.Name, () => ChangeGroup(tab), "NavButton");
             button.DataContext = tab;
-            button.Content = GroupNavigation.Row(tab.Glyph, tab.Name, tab.Hint, "Ink", tab.IsAi);
+            button.Content = GroupNavigation.Row(tab.Glyph, tab.Name, tab.Hint, "Ink", tab.IsAi, unread: tab.Unread);
             button.ToolTip = tab.HintText;
-            AutomationProperties.SetName(button, tab.Name);
+            AutomationProperties.SetName(button, tab.AccessibleName);
             if (tab.Collection is { } group)
                 button.ContextMenu = ClipMenus.ForGroup(group, () => EditGroup(group, group.IsSmart), () => DeleteGroup(group));
             SidebarGroups.Children.Add(button);
         }
         refreshing = false;
     }
+
+    internal bool ReadingUngrouped => IsVisible && ungrouped;
+
+    internal void RefreshAiGroupBadges()
+    {
+        var next = tabs.Select(tab => tab with { Unread = app.UnreadAiGroup(tab.Id) }).ToArray();
+        if (tabs.SequenceEqual(next)) return;
+        UpdateGroups(next);
+        UpdateScope();
+        if (Groups.SelectedItem is { } selected) Groups.ScrollIntoView(selected);
+    }
+
+    private void ShowOrganizationResults(object sender, RoutedEventArgs e) => app.ShowOrganizationResults();
 
     private StackPanel GroupCount()
     {
@@ -239,9 +253,13 @@ public partial class HistoryWindow : Window
 
     private async void RefreshResults(bool reset, Guid? select = null, Guid? focusChildren = null, ClipViewPosition? position = null)
     {
+        if (!ungrouped) app.LeaveUngrouped(quick: true);
+        var deferred = app.DeferredOrganization(quick: true);
+        ShowOrganization.Visibility = deferred.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         RefreshSearchHint();
         var refresh = results.Refresh(Query.Text, reset, scope: ungrouped ? Scope.Ungrouped : Scope.All,
-            collection: ungrouped ? null : (Groups.SelectedItem as GroupTab)?.Collection, select: select, focusChildren: focusChildren, position: position);
+            collection: ungrouped ? null : (Groups.SelectedItem as GroupTab)?.Collection, select: select, focusChildren: focusChildren,
+            position: position, deferredOrganization: deferred);
         if (!refresh.IsCompleted)
         {
             EmptyMessage.Text = "";
@@ -342,10 +360,11 @@ public partial class HistoryWindow : Window
         if (refreshing || !IsLoaded || Groups.SelectedItem is not GroupTab tab) return;
         ungrouped = false;
         currentGroupId = tab.Id;
+        app.OpenAiGroup(tab.Id);
         results.EndMarking(restore: false);
         CloseEditor(focus: false);
         UpdateScope();
-        Groups.ScrollIntoView(tab);
+        if (Groups.SelectedItem is { } selected) Groups.ScrollIntoView(selected);
         RefreshResults(reset: true);
     }
 
@@ -358,6 +377,7 @@ public partial class HistoryWindow : Window
         {
             if (tab.Collection is { } group && !app.SetGroupProfile(GroupNavigation.ProfileForGroup(app.Settings, group))) return;
             currentGroupId = tab.Id;
+            app.OpenAiGroup(tab.Id);
             Refresh(reset: true);
         }
         else if (returnToAll)
@@ -365,6 +385,7 @@ public partial class HistoryWindow : Window
             UpdateScope();
             RefreshResults(reset: true);
         }
+        else if (ReferenceEquals(Groups.SelectedItem, shown)) app.OpenAiGroup(shown.Id);
         else Groups.SelectedItem = shown;
         if (focusPanel) Keyboard.Focus(FocusArea);
     }
@@ -860,6 +881,7 @@ public partial class HistoryWindow : Window
         refreshing = true;
         Query.Clear();
         refreshing = false;
+        app.LeaveUngrouped(quick: true);
         Hide();
         if (restoreTarget) app.RestoreFocus();
     }
@@ -903,9 +925,19 @@ public partial class HistoryWindow : Window
     }
     private void DragHeader(object sender, MouseButtonEventArgs e)
     {
-        if (e.LeftButton != MouseButtonState.Pressed || e.OriginalSource is not Grid) return;
+        if (e.LeftButton != MouseButtonState.Pressed || e.OriginalSource != sender) return;
+        var handle = new WindowInteropHelper(this).Handle;
+        if (NativeMethods.GetWindowRect(handle, out var before) == 0) return;
+        e.Handled = true;
         DragMove();
-        originallyPositioned = true;
+        if (NativeMethods.GetWindowRect(handle, out var after) == 0 ||
+            (before.Left == after.Left && before.Top == after.Top)) return;
+
+        PositionPanel(preservePosition: true);
+        if (NativeMethods.GetWindowRect(handle, out var placed) == 0) return;
+        var position = new PanelPosition(placed.Left, placed.Top);
+        if (position != app.Settings.QuickPanelPosition)
+            app.SaveSettings(app.Settings with { QuickPanelPosition = position });
     }
 
     private void ResizePanel(object sender, DragDeltaEventArgs e)
@@ -922,7 +954,7 @@ public partial class HistoryWindow : Window
             panelContentWidth = contentWidth;
         Width = panelContentWidth + sidebarExtent;
         Height = Math.Clamp(app.Settings.PanelHeight, MinHeight, 760);
-        PositionNearPointer(preservePosition: true);
+        PositionPanel(preservePosition: true);
     }
 
     private void ResizeSidebar(object sender, DragDeltaEventArgs e)
@@ -941,26 +973,34 @@ public partial class HistoryWindow : Window
         UpdateGroupLayout();
     }
 
-    private void PositionNearPointer(bool preservePosition = false)
+    private void PositionPanel(bool preservePosition = false)
     {
         var handle = new WindowInteropHelper(this).EnsureHandle();
         var mouse = Forms.Cursor.Position;
-        bool hasPrevious = NativeMethods.GetWindowRect(handle, out var previous) != 0;
-        if (preservePosition && hasPrevious) mouse = new((previous.Left + previous.Right) / 2, (previous.Top + previous.Bottom) / 2);
-        var work = Forms.Screen.FromPoint(mouse).WorkingArea;
-        var monitor = NativeMethods.MonitorFromPoint(new NativeMethods.ScreenPoint(mouse.X, mouse.Y), 2);
+        var screen = Forms.Screen.FromPoint(mouse);
+        var position = app.Settings.QuickPanelPosition;
+        if (preservePosition && NativeMethods.GetWindowRect(handle, out var previous) != 0)
+        {
+            position = new(previous.Left, previous.Top);
+            screen = Forms.Screen.FromHandle(handle);
+        }
+        else if (position is { } saved)
+        {
+            var point = new System.Drawing.Point(saved.X, saved.Y);
+            var savedScreen = Forms.Screen.FromPoint(point);
+            if (savedScreen.Bounds.Contains(point)) screen = savedScreen;
+            else position = null;
+        }
+        var work = screen.WorkingArea;
+        var monitor = NativeMethods.MonitorFromPoint(new(work.Left + work.Width / 2, work.Top + work.Height / 2), 2);
         double scale = NativeMethods.GetDpiForMonitor(monitor, 0, out uint monitorDpi, out _) == 0 ? monitorDpi / 96d : 1;
         Height = Math.Min(Height, Math.Max(MinHeight, work.Height / scale));
         Width = Math.Min(Width, Math.Max(MinWidth, work.Width / scale));
         ApplySidebarWidth();
         int width = (int)Math.Ceiling(Width * scale);
         int height = (int)Math.Ceiling(Height * scale);
-        int left = mouse.X - width / 2, top = mouse.Y + (int)(12 * scale);
-        if ((originallyPositioned || preservePosition) && hasPrevious)
-        {
-            left = previous.Left;
-            top = previous.Top;
-        }
+        int left = position?.X ?? mouse.X - width / 2;
+        int top = position?.Y ?? mouse.Y + (int)(12 * scale);
         left = Math.Clamp(left, work.Left, Math.Max(work.Left, work.Right - width));
         top = Math.Clamp(top, work.Top, Math.Max(work.Top, work.Bottom - height));
         // Use physical coordinates for placement, including secondary screens with a different DPI.
@@ -970,11 +1010,13 @@ public partial class HistoryWindow : Window
     private Point DeviceToDip(Point point) => PresentationSource.FromVisual(this)?.CompositionTarget is { } composition
         ? composition.TransformFromDevice.Transform(point) : point;
 
-    private sealed record GroupTab(ClipCollection? Collection, string Hint = "")
+    private sealed record GroupTab(ClipCollection? Collection, string Hint = "", int Unread = 0)
     {
         public Guid? Id => Collection?.Id;
         public string Name => Collection?.Name ?? Labels.Get("All");
-        public string HintText => Hint.Length == 0 ? Name : $"{Name} · {Hint}";
+        public string Badge => Unread > 0 ? Labels.Get("New content") : "";
+        public string AccessibleName => Unread > 0 ? Name + " · " + Labels.Format("{0} new clips", Unread) : Name;
+        public string HintText => Hint.Length == 0 ? AccessibleName : $"{AccessibleName} · {Hint}";
         public bool IsAi => Collection?.IsAi == true;
         public bool CanReorder => Collection is not null;
         public string Glyph => Collection is null ? Windows.Glyph.Recent :

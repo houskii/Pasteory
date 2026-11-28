@@ -21,6 +21,7 @@ public partial class LibraryPage : UserControl
     private readonly List<(Button Button, Scope Scope, ClipKind? Kind, Guid? Collection, string Glyph, string Name)> navButtons = [];
     private readonly Dictionary<string, (Scope Scope, ClipKind? Kind, Guid? Group, string Query, ClipViewPosition Position)> profilePositions = [];
     private ClipCollection[] visibleGroups = [];
+    private Guid[] rankedAi = [];
     private string currentProfile = "";
     private int aiGroupCount;
     private bool showUngrouped;
@@ -42,6 +43,19 @@ public partial class LibraryPage : UserControl
         results.MarkingChanged += UpdateActions;
         searchDelay.Tick += (_, _) => { searchDelay.Stop(); Refresh(reset: true); };
         SizeChanged += (_, _) => UpdateColumns();
+        IsVisibleChanged += (_, _) =>
+        {
+            if (IsVisible)
+            {
+                app.OpenAiGroup(groupId);
+                Refresh();
+            }
+            else
+            {
+                rankedAi = [];
+                app.LeaveUngrouped(quick: false);
+            }
+        };
         TextCompositionManager.AddPreviewTextInputStartHandler(Search, (_, _) => composing = true);
         TextCompositionManager.AddPreviewTextInputHandler(Search, (_, _) => composing = false);
         Search.LostKeyboardFocus += (_, _) => composing = false;
@@ -49,6 +63,7 @@ public partial class LibraryPage : UserControl
     }
 
     private Window Owner => Window.GetWindow(this);
+    internal bool ReadingUngrouped => IsVisible && scope == Scope.Ungrouped;
 
     internal void FocusResults()
     {
@@ -95,8 +110,10 @@ public partial class LibraryPage : UserControl
         }
         bool hasThemes = app.Collections.Any(group => group.IsAi);
         AiGroupActivity[] activities = hasThemes ? app.ScoreAiGroups() : [];
-        var ranked = activities.Select(item => item.Group).ToArray();
         var scores = activities.ToDictionary(item => item.Group.Id);
+        var order = rankedAi.Where(scores.ContainsKey).Concat(activities.Select(item => item.Group.Id)).Distinct().ToArray();
+        if (IsVisible) rankedAi = order;
+        var ranked = order.Select(id => scores[id].Group).ToArray();
         var shown = GroupNavigation.Visible(app.Settings, app.Collections, ranked, library: true, groupId);
         if (groupId is { } selectedGroup && !shown.Any(group => group.Id == selectedGroup))
         {
@@ -114,25 +131,14 @@ public partial class LibraryPage : UserControl
             BuildNav();
         }
         var selected = navButtons.First(item => item.Scope == scope && item.Kind == kind && item.Collection == groupId);
-        foreach (var nav in navButtons)
-        {
-            bool active = nav.Button == selected.Button;
-            nav.Button.SetResourceReference(BackgroundProperty, active ? "AccentGradient" : "TransparentBrush");
-            int position = nav.Collection is { } collectionId ? Array.FindIndex(visibleGroups, group => group.Id == collectionId) + 1 :
-                nav.Scope == Scope.All && nav.Kind is null ? 0 : -1;
-            string hint = GroupNavigation.Hint(app.Settings, position);
-            var activity = nav.Collection is { } id ? scores.GetValueOrDefault(id) : null;
-            var row = GroupNavigation.Row(nav.Glyph, nav.Name, hint, active ? "NavSelectionInk" : "Ink", activity is not null,
-                activity is not null ? $"{activity.Score:F0}%" : null);
-            nav.Button.Content = row;
-            string title = hint.Length > 0 ? $"{nav.Name} · {hint}" : nav.Name;
-            nav.Button.ToolTip = activity?.Group.Definition is { Length: > 0 } definition ? title + "\n" + definition : title;
-        }
-        foreach (var button in Navigation.Children.OfType<Button>()) button.MinHeight = GroupNavigation.RowHeight(app.Settings);
+        UpdateGroupRows(scores);
         UpdateColumns();
         FindGroup.Content = Ui.WithIcon(Glyph.Search, Labels.Get(scope == Scope.Ungrouped ? "Ungrouped" : "Search groups"), "Muted");
         var collection = app.Collections.FirstOrDefault(group => group.Id == groupId);
-        var refresh = results.Refresh(Search.Text, reset, scope, kind, collection, select, focusChildren, restored);
+        if (scope != Scope.Ungrouped) app.LeaveUngrouped(quick: false);
+        var deferred = app.DeferredOrganization(quick: false);
+        ShowOrganization.Visibility = deferred.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        var refresh = results.Refresh(Search.Text, reset, scope, kind, collection, select, focusChildren, restored, deferred);
         Heading.Text = selected.Name;
         RefreshThemeOverview(collection, groupId is { } themeId ? scores.GetValueOrDefault(themeId) : null);
         Subtitle.Text = Search.Text.Trim().Length > 0 ? Labels.Format("Searching in {0}", selected.Name) :
@@ -162,6 +168,31 @@ public partial class LibraryPage : UserControl
         UpdateActions();
         return true;
     }
+
+    internal void RefreshAiGroupBadges() => UpdateGroupRows(app.ScoreAiGroups().ToDictionary(item => item.Group.Id));
+
+    private void UpdateGroupRows(IReadOnlyDictionary<Guid, AiGroupActivity> scores)
+    {
+        foreach (var nav in navButtons)
+        {
+            bool active = nav.Scope == scope && nav.Kind == kind && nav.Collection == groupId;
+            nav.Button.SetResourceReference(BackgroundProperty, active ? "AccentGradient" : "TransparentBrush");
+            int position = nav.Collection is { } collectionId ? Array.FindIndex(visibleGroups, group => group.Id == collectionId) + 1 :
+                nav.Scope == Scope.All && nav.Kind is null ? 0 : -1;
+            string hint = GroupNavigation.Hint(app.Settings, position);
+            var activity = nav.Collection is { } id ? scores.GetValueOrDefault(id) : null;
+            int unread = activity is null ? 0 : app.UnreadAiGroup(nav.Collection);
+            nav.Button.Content = GroupNavigation.Row(nav.Glyph, nav.Name, hint, active ? "NavSelectionInk" : "Ink", activity is not null,
+                activity is not null ? $"{activity.Score:F0}%" : null, unread);
+            string caption = unread > 0 ? nav.Name + " · " + Labels.Format("{0} new clips", unread) : nav.Name;
+            AutomationProperties.SetName(nav.Button, caption);
+            string title = hint.Length > 0 ? $"{caption} · {hint}" : caption;
+            nav.Button.ToolTip = activity?.Group.Definition is { Length: > 0 } definition ? title + "\n" + definition : title;
+        }
+        foreach (var button in Navigation.Children.OfType<Button>()) button.MinHeight = GroupNavigation.RowHeight(app.Settings);
+    }
+
+    private void ShowOrganizationResults(object sender, RoutedEventArgs e) => app.ShowOrganizationResults();
 
     private AiGroupActivity? shownTheme;
 
@@ -303,6 +334,7 @@ public partial class LibraryPage : UserControl
             scope = range;
             kind = filter;
             groupId = collection;
+            app.OpenAiGroup(collection);
             Refresh(reset: true);
         }, "NavButton");
         AutomationProperties.SetName(button, caption);
@@ -530,6 +562,7 @@ public partial class LibraryPage : UserControl
         scope = next;
         kind = null;
         groupId = collection;
+        app.OpenAiGroup(collection);
         Refresh(reset: true);
     }
 

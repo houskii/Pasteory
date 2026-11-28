@@ -39,7 +39,7 @@
                     <RowDefinition Height="*"/>
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
-                <Grid Margin="8,10,7,8" MouseLeftButtonDown="DragHeader">
+                <Grid Margin="8,12,7,8" Background="Transparent" MouseLeftButtonDown="DragHeader">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
@@ -75,6 +75,11 @@
                     <Button Grid.Column="4" Content="&#xE713;" Style="{StaticResource IconButton}" Click="OpenSettings"
                             ToolTip="{local:Label Settings}" AutomationProperties.Name="{local:Label Settings}"/>
                 </Grid>
+                <Border x:Name="PanelDragArea" Height="12" VerticalAlignment="Top" Background="Transparent"
+                        Cursor="SizeAll" MouseLeftButtonDown="DragHeader" ToolTip="{local:Label 'Drag to move the quick panel'}">
+                    <Border Width="32" Height="3" CornerRadius="1.5" VerticalAlignment="Center" HorizontalAlignment="Center"
+                            Background="{DynamicResource Quiet}" Opacity=".55" IsHitTestVisible="False"/>
+                </Border>
                 <Grid x:Name="GroupStrip" Grid.Row="1" Margin="9,4,7,0">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <ListBox x:Name="Groups" Style="{StaticResource TabList}" SelectionChanged="GroupChanged"
@@ -101,6 +106,16 @@
                                         </TextBlock.Style>
                                     </TextBlock>
                                     <TextBlock Text="{Binding Name}" FontSize="12" MaxWidth="68" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                                    <TextBlock Text="{Binding Badge}" FontSize="9" FontWeight="SemiBold" Foreground="{DynamicResource AccentInk}"
+                                               Margin="4,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                                <Style.Triggers><DataTrigger Binding="{Binding Unread}" Value="0">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                </DataTrigger></Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
                                 </StackPanel>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
@@ -115,6 +130,9 @@
                     </DockPanel>
                 </Border>
                 <DockPanel Grid.Row="3">
+                  <Button x:Name="ShowOrganization" DockPanel.Dock="Top" Visibility="Collapsed" HorizontalAlignment="Right"
+                          Content="{local:Label 'Show new organization results'}" Click="ShowOrganizationResults"
+                          Margin="9,5,10,2" Padding="7,2" MinHeight="21" FontSize="10.5"/>
                   <Border x:Name="ResultBar" DockPanel.Dock="Top" Visibility="Collapsed" Background="{DynamicResource AccentTint}"
                           BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1" Padding="9,4,10,4">
                     <DockPanel>

@@ -15,7 +15,8 @@ internal sealed record ClipListing(ClipListRow[] Rows, Guid[] SearchMembers, int
 {
     internal static ClipListing Build(IReadOnlyList<Clip> source, string query, IEnumerable<Guid>? resultIds,
         Scope scope, ClipKind? kind, ClipCollection? collection, HashSet<Guid> expanded, HashSet<Guid> collapsed,
-        Guid? reveal, CancellationToken cancellation = default, IReadOnlySet<Guid>? aiGroups = null)
+        Guid? reveal, CancellationToken cancellation = default, IReadOnlySet<Guid>? aiGroups = null,
+        IReadOnlySet<Guid>? deferredOrganization = null)
     {
         bool searching = !string.IsNullOrWhiteSpace(query);
         var candidateIds = resultIds?.ToHashSet();
@@ -27,8 +28,7 @@ internal sealed record ClipListing(ClipListRow[] Rows, Guid[] SearchMembers, int
             Scope.Favorite => clip.Favorite,
             Scope.Recent => clip.LastPastedAt.HasValue,
             Scope.Trash => true,
-            Scope.Ungrouped => !clip.ArchivedAt.HasValue && clip.Kind != ClipKind.Aggregate &&
-                (aiGroups is null || !clip.CollectionIds.Any(aiGroups.Contains)),
+            Scope.Ungrouped => IsUngrouped(clip, aiGroups, deferredOrganization),
             _ => !clip.ArchivedAt.HasValue
         }) && (kind is null || kind == clip.Kind) && (collection is null || (collection.Rules is { } rules
             ? clip.Kind != ClipKind.Aggregate && rules.Matches(clip, now) : clip.CollectionIds.Contains(collection.Id)));
@@ -85,6 +85,10 @@ internal sealed record ClipListing(ClipListRow[] Rows, Guid[] SearchMembers, int
         }
         return new(rows.ToArray(), parents.Length > 0 ? searchMembers.Distinct().ToArray() : searchMembers.ToArray(), ordered.Length);
     }
+
+    internal static bool IsUngrouped(Clip clip, IReadOnlySet<Guid>? aiGroups, IReadOnlySet<Guid>? deferredOrganization = null) =>
+        clip.TrashedAt is null && clip.ArchivedAt is null && clip.Kind != ClipKind.Aggregate &&
+        (deferredOrganization?.Contains(clip.Id) == true || aiGroups is null || !clip.CollectionIds.Any(aiGroups.Contains));
 
     private static int Score(Clip clip, string query, string[] words)
     {

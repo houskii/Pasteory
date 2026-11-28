@@ -152,6 +152,13 @@ internal sealed partial class SettingsWindow : Window
         if (current == SettingsPage.Library) library.Refresh();
     }
 
+    internal bool ReadingUngrouped => current == SettingsPage.Library && library.ReadingUngrouped;
+
+    internal void RefreshAiGroupBadges()
+    {
+        if (current == SettingsPage.Library && library.IsVisible) library.RefreshAiGroupBadges();
+    }
+
     private Border BuildNav()
     {
         var stack = new DockPanel();

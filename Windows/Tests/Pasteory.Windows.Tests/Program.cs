@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Interop;
@@ -93,6 +94,7 @@ internal static partial class Program
             FileTypes.ForName("build.ps1").Icon == "shell", "Match full names and composite suffixes");
         CheckAggregationSearch();
         CheckGroupNavigation();
+        CheckAiReading();
         CheckMarkdownPreview();
         CheckLinkTitles();
         CheckLinkHistory();
@@ -133,6 +135,8 @@ internal static partial class Program
         app.InitializeComponent();
         var panel = new HistoryWindow(app);
         Check(panel.Title == "Pasteory", "Load the native WPF history panel and resources");
+        CheckPanelDragArea(panel);
+        CheckMenuTheme(app);
         CheckMacBackup();
         CheckMacAggregationSummary();
         CheckAiContextBudget();
@@ -301,6 +305,79 @@ internal static partial class Program
             GroupNavigation.SidebarWidth(common with { GroupSidebarWidth = 450 }) == 320 &&
             GroupNavigation.RowHeight(common with { CompactGroupRows = true }) == 28,
             "Share sidebar preferences while retaining the content width of a previously resized panel");
+    }
+
+    private static void CheckPanelDragArea(HistoryWindow panel)
+    {
+        var root = (FrameworkElement)panel.Content;
+        root.Measure(new Size(panel.Width, panel.Height));
+        root.Arrange(new Rect(0, 0, panel.Width, panel.Height));
+        var grip = (Border)panel.FindName("PanelDragArea");
+        var query = (TextBox)panel.FindName("Query");
+        var gripPoint = new Point(grip.ActualWidth / 4, grip.ActualHeight / 2);
+        var queryPoint = new Point(query.ActualWidth / 2, query.ActualHeight / 2);
+        var gripHit = VisualTreeHelper.HitTest(root, grip.TranslatePoint(gripPoint, root))?.VisualHit;
+        var queryHit = VisualTreeHelper.HitTest(root, query.TranslatePoint(queryPoint, root))?.VisualHit;
+        Check(gripHit == grip && queryHit is not null && queryHit != grip, "The panel grip owns the drag area without covering search");
+    }
+
+    private static void CheckMenuTheme(App app)
+    {
+        foreach (string appearance in new[] { "Dark", "Light" })
+        {
+            Theme.Apply(app.Resources, new LocalSettings { Appearance = appearance });
+            var parent = new MenuItem { Header = "Quick actions" };
+            parent.Items.Add(new MenuItem { Header = "Base64 encode" });
+            var menu = new ContextMenu();
+            menu.Items.Add(parent);
+            menu.ApplyTemplate();
+            parent.ApplyTemplate();
+            var main = (Border)menu.Template.FindName("Surface", menu);
+            var popup = (Popup)parent.Template.FindName("PART_Popup", parent);
+            var submenu = (Border)popup.Child;
+            var surface = ((SolidColorBrush)Ui.Brush("Surface")).Color;
+            var ink = ((SolidColorBrush)Ui.Brush("Ink")).Color;
+            var mainColor = (main.Background as SolidColorBrush)?.Color;
+            var submenuColor = (submenu.Background as SolidColorBrush)?.Color;
+            var textColor = (parent.Foreground as SolidColorBrush)?.Color;
+            Check(mainColor == surface && submenuColor == surface && textColor == ink,
+                $"Use the {appearance} palette for menu and submenu ({mainColor}, {submenuColor}, {textColor}; expected {surface}, {ink})");
+        }
+    }
+
+    private static void CheckAiReading()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "Pasteory-ai-reading-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var first = new ClipCollection(Guid.NewGuid(), "First theme", IsAi: true);
+            var second = new ClipCollection(Guid.NewGuid(), "Second theme", IsAi: true);
+            ClipCollection[] groups = [first, second];
+            var original = new Clip { Kind = ClipKind.Text, Text = "Original", CollectionIds = [first.Id] };
+            var newClip = new Clip { Kind = ClipKind.Text, Text = "New item", CollectionIds = [first.Id, second.Id] };
+            var reading = new AiGroupReading(root, [original], groups);
+            Check(reading.Unread(first.Id) == 0 && reading.Unread(second.Id) == 0, "Baseline existing AI group members on upgrade");
+            reading = new AiGroupReading(root, [original, newClip], groups);
+            Check(reading.Unread(first.Id) == 1 && reading.Unread(second.Id) == 1, "Keep unread AI members across restarts");
+            var now = DateTimeOffset.UtcNow;
+            Check(reading.Open(first.Id, now) && reading.Unread(first.Id) == 0 && reading.Unread(second.Id) == 1,
+                "Clear unread state only for the opened AI group");
+            reading = new AiGroupReading(root, [newClip], [first with { Name = "Renamed" }, second]);
+            Check(reading.OpenedSince(first.Id, now.AddSeconds(-1)) && reading.Unread(first.Id) == 0 &&
+                reading.Unread(second.Id) == 1, "Preserve the last visit and ignore renames and removed members");
+
+            var aiGroups = new HashSet<Guid> { first.Id, second.Id };
+            var deferred = new HashSet<Guid> { newClip.Id };
+            var pending = ClipListing.Build([newClip], "New", [newClip.Id], Scope.Ungrouped, null, null, [], [], null,
+                aiGroups: aiGroups, deferredOrganization: deferred);
+            Check(pending.Rows.Single().Clip.Id == newClip.Id &&
+                !ClipListing.IsUngrouped(newClip, aiGroups) &&
+                !ClipListing.IsUngrouped(newClip with { ArchivedAt = now }, aiGroups, deferred) &&
+                !ClipListing.IsUngrouped(newClip with { TrashedAt = now }, aiGroups, deferred),
+                "Keep pending organization in ungrouped search until accepted, archived, or trashed");
+        }
+        finally { Directory.Delete(root, recursive: true); }
     }
 
     private static void CheckLinkTitles()

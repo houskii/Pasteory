@@ -15,6 +15,7 @@ public sealed record LinkFallbackRoute(Guid Id, string Name, string Host, string
 
 public enum SourceCaptureApplication { Chrome, WeChat, Feishu }
 public sealed record IgnoredAppIdentity(string Name, string Path);
+public sealed record PanelPosition(int X, int Y);
 
 public sealed record AiPreferences
 {
@@ -89,6 +90,7 @@ public sealed record LocalSettings
     public double PanelWidth { get; init; } = 380;
     public double? PanelContentWidth { get; init; }
     public double PanelHeight { get; init; } = 660;
+    public PanelPosition? QuickPanelPosition { get; init; }
     public string LastSettingsPage { get; init; } = "General";
     public int LastAiTab { get; init; }
     public AiPreferences Ai { get; init; } = new();

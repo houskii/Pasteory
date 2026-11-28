@@ -64,9 +64,14 @@ try
     Check(File.ReadAllText(corruptPath) == "{", "Preserve unreadable history");
 
     File.WriteAllText(Path.Combine(root, "settings.json"), "{\"Paused\":true}");
-    Check(LocalSettings.Load(root).CompletedOnboarding, "Skip onboarding for existing settings");
-    (fresh with { CompletedOnboarding = true, Paused = true, UseAlternateShortcut = true, IgnoredApps = ["Example"] }).Save(root);
+    var legacySettings = LocalSettings.Load(root);
+    Check(legacySettings.CompletedOnboarding, "Skip onboarding for existing settings");
+    Check(legacySettings.QuickPanelPosition is null, "Place the quick panel by the pointer until a position is saved");
+    var panelPosition = new PanelPosition(-620, 80);
+    (fresh with { CompletedOnboarding = true, Paused = true, UseAlternateShortcut = true, IgnoredApps = ["Example"],
+        QuickPanelPosition = panelPosition }).Save(root);
     var settings = LocalSettings.Load(root);
+    Check(settings.QuickPanelPosition == panelPosition, "Restore a quick panel moved to a secondary screen");
     Check(settings.CompletedOnboarding && settings.Paused && settings.UseAlternateShortcut && settings.ShouldIgnore("example") &&
         settings.ShouldIgnore("KEEPASSXC") && settings.ShouldIgnore("") && !settings.ShouldIgnore("Notepad"),
         "Persist settings and honor exclusions");

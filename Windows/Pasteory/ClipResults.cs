@@ -60,7 +60,8 @@ internal sealed class ClipResults
         page.Count, scroll?.VerticalOffset);
 
     internal async Task<bool> Refresh(string input, bool reset, Scope scope = Scope.All, ClipKind? kind = null,
-        ClipCollection? collection = null, Guid? select = null, Guid? focusChildren = null, ClipViewPosition? position = null)
+        ClipCollection? collection = null, Guid? select = null, Guid? focusChildren = null, ClipViewPosition? position = null,
+        IReadOnlySet<Guid>? deferredOrganization = null)
     {
         string query = input.Trim();
         if (previousQuery != query)
@@ -85,7 +86,7 @@ internal sealed class ClipResults
         var aiGroups = scope == Scope.Ungrouped ? collections.Where(group => group.IsAi).Select(group => group.Id).ToHashSet() : null;
 
         ClipListing Load() => ClipListing.Build(source, query, query.Length == 0 ? null : app.SearchClipIds(query, request.Token),
-            scope, kind, collection, open, closed, reveal, request.Token, aiGroups);
+            scope, kind, collection, open, closed, reveal, request.Token, aiGroups, deferredOrganization);
 
         ClipListing next;
         try

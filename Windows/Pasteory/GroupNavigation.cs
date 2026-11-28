@@ -87,7 +87,7 @@ internal static class GroupNavigation
         return new Border { Child = strip, Padding = new Thickness(3), CornerRadius = new CornerRadius(8) }.WithBackground("SoftSurface");
     }
 
-    internal static FrameworkElement Row(string glyph, string name, string hint, string color, bool ai, string? activity = null)
+    internal static FrameworkElement Row(string glyph, string name, string hint, string color, bool ai, string? activity = null, int unread = 0)
     {
         var row = new DockPanel();
         var icon = ai ? Ui.Text("AI", 10, color, strong: true) : Ui.Icon(glyph, 13, color);
@@ -103,6 +103,17 @@ internal static class GroupNavigation
             shortcut.Margin = new Thickness(5, 0, 0, 0);
             DockPanel.SetDock(shortcut, Dock.Right);
             row.Children.Add(shortcut);
+        }
+        if (unread > 0)
+        {
+            var badge = new Border
+            {
+                Child = Ui.Text(Labels.Get("New content"), 9, "AccentInk", strong: true), CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(4, 1, 4, 1), Margin = new Thickness(4, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center,
+                ToolTip = Labels.Format("{0} new clips", unread)
+            }.WithBackground("AccentTint");
+            DockPanel.SetDock(badge, Dock.Right);
+            row.Children.Add(badge);
         }
         if (activity is not null)
         {

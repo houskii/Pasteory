@@ -58,6 +58,8 @@
                         <TextBlock x:Name="Heading" FontSize="23" FontWeight="Bold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
                     </DockPanel>
                     <TextBlock x:Name="Subtitle" FontSize="11" Foreground="{DynamicResource Muted}" TextTrimming="CharacterEllipsis" Margin="0,0,0,12"/>
+                    <Button x:Name="ShowOrganization" Content="{local:Label 'Show new organization results'}" Click="ShowOrganizationResults"
+                            Visibility="Collapsed" HorizontalAlignment="Right" Margin="0,0,0,9" Padding="7,2" MinHeight="23"/>
                     <Expander x:Name="ThemeOverview" Header="{local:Label 'AI group overview'}" Visibility="Collapsed" Margin="0,0,0,10">
                         <StackPanel x:Name="ThemeOverviewBody" Margin="14,4,4,4"/>
                     </Expander>

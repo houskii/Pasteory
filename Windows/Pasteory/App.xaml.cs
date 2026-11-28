@@ -123,6 +123,7 @@ public partial class App : Application
             history.RunMaintenance(DateTimeOffset.Now, Settings.ArchiveAfterDays);
             history.UpdateLinkDetails(LinkFallback);
             Ai = new AiTasks(dataDirectory);
+            aiGroupReading = new AiGroupReading(dataDirectory, history.Clips, history.Collections);
         }
         catch (Exception error) when (IsLocalError(error) || error is JsonException or InvalidDataException)
         {
@@ -138,7 +139,7 @@ public partial class App : Application
         SystemEvents.UserPreferenceChanged += OnSystemPreferenceChanged;
         SystemEvents.PowerModeChanged += OnPowerModeChanged;
         SystemEvents.SessionSwitch += OnSessionSwitch;
-        CreateTray();
+        if (!AutomationWindow) CreateTray();
         messages = new HwndSource(new HwndSourceParameters("Pasteory clipboard messages") { ParentWindow = new nint(-3) });
         messages.AddHook(ReceiveMessage);
         observedSequence = NativeMethods.GetClipboardSequenceNumber();
@@ -462,12 +463,13 @@ public partial class App : Application
     }
 
     internal byte[] ReadImage(Clip clip) => history.ReadImage(clip);
-    private bool ChangeHistory(Action change, Action<string>? showError = null)
+    private bool ChangeHistory(Action change, Action<string>? showError = null, bool automaticOrganization = false)
     {
         try
         {
             var previous = history.Clips;
             change();
+            if (automaticOrganization) DeferOrganization(previous);
             try { Ai?.ObserveClips(Settings.Ai, previous, history.Clips); }
             catch (Exception error) when (AiTasks.Expected(error)) { Notify(error.Message); }
             if (window.IsVisible) window.Refresh();
