@@ -136,7 +136,7 @@ internal static partial class Program
         var panel = new HistoryWindow(app);
         Check(panel.Title == "Pasteory", "Load the native WPF history panel and resources");
         CheckPanelDragArea(panel);
-        CheckMenuTheme(app);
+        CheckPopupTheme(app);
         CheckMacBackup();
         CheckMacAggregationSummary();
         CheckAiContextBudget();
@@ -321,7 +321,7 @@ internal static partial class Program
         Check(gripHit == grip && queryHit is not null && queryHit != grip, "The panel grip owns the drag area without covering search");
     }
 
-    private static void CheckMenuTheme(App app)
+    private static void CheckPopupTheme(App app)
     {
         foreach (string appearance in new[] { "Dark", "Light" })
         {
@@ -332,9 +332,12 @@ internal static partial class Program
             menu.Items.Add(parent);
             menu.ApplyTemplate();
             parent.ApplyTemplate();
+            var tip = new ToolTip { Content = "Quick actions" };
+            tip.ApplyTemplate();
             var main = (Border)menu.Template.FindName("Surface", menu);
             var popup = (Popup)parent.Template.FindName("PART_Popup", parent);
             var submenu = (Border)popup.Child;
+            var tipSurface = (Border)tip.Template.FindName("Surface", tip);
             var surface = ((SolidColorBrush)Ui.Brush("Surface")).Color;
             var ink = ((SolidColorBrush)Ui.Brush("Ink")).Color;
             var mainColor = (main.Background as SolidColorBrush)?.Color;
@@ -342,6 +345,8 @@ internal static partial class Program
             var textColor = (parent.Foreground as SolidColorBrush)?.Color;
             Check(mainColor == surface && submenuColor == surface && textColor == ink,
                 $"Use the {appearance} palette for menu and submenu ({mainColor}, {submenuColor}, {textColor}; expected {surface}, {ink})");
+            Check((tipSurface.Background as SolidColorBrush)?.Color == surface && (tip.Foreground as SolidColorBrush)?.Color == ink,
+                $"Use the {appearance} palette for tooltips");
         }
     }
 

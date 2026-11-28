@@ -200,6 +200,24 @@
         <Setter Property="Padding" Value="4"/>
         <Setter Property="Grid.IsSharedSizeScope" Value="True"/>
     </Style>
+    <Style TargetType="ToolTip">
+        <Setter Property="Background" Value="{DynamicResource Surface}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Ink}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="7,4"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToolTip">
+                    <Border x:Name="Surface" Background="{TemplateBinding Background}" CornerRadius="5"
+                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter/>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
     <Style TargetType="ContextMenu">
         <Setter Property="SnapsToDevicePixels" Value="True"/>
         <Setter Property="Template">
